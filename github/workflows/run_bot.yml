@@ -1,0 +1,43 @@
+name: Crypto Trading Bot Execution
+
+# ۱. تعیین برنامه زمانی برای اجرای خودکار (Cron Job)
+# این دستور تنظیم شده تا هر ۴ ساعت یک‌بار (دقیقاً سر ساعت‌های بسته شدن کندل) اجرا شود
+on:
+  schedule:
+    - cron: '0 */4 * * *'
+  workflow_dispatch: # این خط به شما اجازه می‌دهد هر زمان خواستید، دستی هم دکمه اجرا را بزنید
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest # استفاده از سیستم‌عامل رایگان لینوکس ابونتو در گیت‌هاب
+
+    steps:
+    # ۲. دانلود کدهای مخزن شما روی سیستم مجازی گیت‌هاب
+    - name: Checkout Repository Code
+      uses: actions/checkout@v4
+
+    # ۳. نصب و راه‌اندازی زبان پایتون نسخه ۳.۱۰
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    # ۴. نصب کتابخانه‌های مورد نیاز از روی فایل requirements.txt
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    # ۵. اجرای فایل اصلی ربات برای مانیتورینگ و صدور سیگنال
+    - name: Run Trading Bot Engine
+      run: python main.py
+
+    # ۶. ذخیره کردن خودکار تغییرات دیتابیس (trading_bot.db) در گیت‌هاب شما
+    # از آنجا که دیتابیس ما محلی است، بعد از ثبت سیگنال باید فایل جدید را روی گیت‌هاب Push کنیم
+    - name: Commit and Push Database Changes
+      run: |
+        git config --local user.email "actions@github.com"
+        git config --local user.name "GitHub Actions"
+        git add data/trading_bot.db
+        git commit -m "Auto-update database with latest signals [skip ci]" || exit 0
+        git push
