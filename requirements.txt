@@ -1,6 +1,5 @@
 ccxt==4.2.100
 pandas==2.2.1
-https://github.com/twopirllc/pandas-ta/archive/refs/heads/development.zip
 requests==2.31.0
 
 
