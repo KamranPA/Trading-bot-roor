@@ -1,32 +1,50 @@
 # src/indicators.py
-# ماژول محاسبات اندیکاتورهای تکنیکال
+# ماژول محاسبات اندیکاتورهای تکنیکال (نسخه بهینه و مستقل)
 
 import pandas as pd
-import pandas_ta as ta
-import config  # وارد کردن تنظیمات مرکزی که در قدم قبل ساختیم
+import config
 
 def calculate_indicators(df):
     """
-    این تابع جدول قیمت‌ها (df) را می‌گیرد و ستون‌های 
-    ATR، ADX و میانگین حجم را به آن اضافه می‌کند.
+    محاسبه کاملاً مستقل اندیکاتورهای ATR، ADX و میانگین حجم بدون نیاز به کتابخانه‌های سنگین خارجی
     """
-    # در صورتی که دیتایی وجود نداشته باشد، عملیات متوقف می‌شود
-    if df is None or df.empty:
+    if df is None or df.empty or len(df) < 20:
         return None
     
-    # ۱. محاسبه اندیکاتور ATR (برای حد ضرر داینامیک)
-    # خروجی این ابزار، میزان نوسان ارز بر حسب دلار را به ما می‌دهد
-    df['ATR'] = ta.atr(high=df['High'], low=df['Low'], close=df['Close'], length=config.ATR_PERIOD)
+    # --- ۱. محاسبه اندیکاتور ATR ---
+    high_low = df['High'] - df['Low']
+    high_close_prev = (df['High'] - df['Close'].shift(1)).abs()
+    low_close_prev = (df['Low'] - df['Close'].shift(1)).abs()
     
-    # ۲. محاسبه اندیکاتور ADX (برای تشخیص وجود روند)
-    # این کتابخانه چند ستون خروجی می‌دهد، ما فقط به ستون اصلی ADX نیاز داریم
-    adx_df = ta.adx(high=df['High'], low=df['Low'], close=df['Close'], length=config.ADX_PERIOD)
-    if adx_df is not None:
-        # نام ستون اصلی در این کتابخانه معمولاً 'ADX_14' است
-        df['ADX'] = adx_df[f'ADX_{config.ADX_PERIOD}']
+    # پیدا کردن محدوده واقعی (True Range)
+    tr = pd.concat([high_low, high_close_prev, low_close_prev], axis=1).max(axis=1)
+    # میانگین متحرک ساده برای ATR
+    df['ATR'] = tr.rolling(window=config.ATR_PERIOD).mean()
     
-    # ۳. محاسبه میانگین متحرک حجم (برای تایید قدرت شکست)
-    # حجم معاملات کندل فعلی را با میانگین ۲۰ کندل قبل مقایسه خواهیم کرد
-    df['Volume_MA'] = ta.sma(df['Volume'], length=config.VOLUME_MA_PERIOD)
+    # --- ۲. محاسبه اندیکاتور ADX ---
+    up_move = df['High'] - df['High'].shift(1)
+    down_move = df['Low'].shift(1) - df['Low']
+    
+    plus_dm = (up_move > down_move) & (up_move > 0)
+    plus_dm = up_move * plus_dm
+    
+    minus_dm = (down_move > up_move) & (down_move > 0)
+    minus_dm = down_move * minus_dm
+    
+    # صاف کردن داده‌ها با میانگین متحرک
+    tr_smoothed = tr.rolling(window=config.ADX_PERIOD).sum()
+    plus_di = 100 * (plus_dm.rolling(window=config.ADX_PERIOD).sum() / tr_smoothed)
+    minus_di = 100 * (minus_dm.rolling(window=config.ADX_PERIOD).sum() / tr_smoothed)
+    
+    # فرمول نهایی شاخص حرکت جهت‌دار (DX)
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
+    # محاسبه نهایی ADX
+    df['ADX'] = dx.rolling(window=config.ADX_PERIOD).mean()
+    
+    # --- ۳. محاسبه میانگین متحرک حجم ---
+    df['Volume_MA'] = df['Volume'].rolling(window=config.VOLUME_MA_PERIOD).mean()
+    
+    # پر کردن فضاهای خالی اولیه با مقادیر صفر یا میانگین برای جلوگیری از ارور
+    df.fillna(0, inplace=True)
     
     return df
