@@ -2,7 +2,7 @@ name: Crypto Trading Bot Execution
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # بیدار شدن خودکار سرور هر ۳۰ دقیقه یک‌بار برای مانیتورینگ دقیق بازار
+    - cron: '*/30 * * * *' # بیدار شدن خودکار سرور هر ۳۰ دقیقه یک‌بار
   workflow_dispatch: # فعال بودن دکمه اجرای دستی
 
 jobs:
@@ -29,14 +29,14 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # ۵. جرقه زدن و اجرای موتور اصلی ربات تریدر
+    # ۵. جرقه زدن و اجرای موتور اصلی ربات تریدر در ریشه پروژه
     - name: Run Trading Bot Engine
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: python src/main.py
+      run: python main.py
 
-    # ۶. ذخیره خودکار تغییرات دیتابیس روی گیت‌هاب (در صورت تغییر)
+    # ۶. ذخیره خودکار تغییرات دیتابیس روی گیت‌هاب
     - name: Commit and Push Database Changes
       run: |
         git config --local user.email "actions@github.com"
