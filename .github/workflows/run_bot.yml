@@ -5,6 +5,10 @@ on:
     - cron: '*/30 * * * *' # بیدار شدن خودکار سرور هر ۳۰ دقیقه یک‌بار
   workflow_dispatch: # فعال بودن دکمه اجرای دستی
 
+# 🔑 باز کردن قفل دسترسی توکن گیت‌هاب برای عملیات Push
+permissions:
+  contents: write
+
 jobs:
   trading_job:
     runs-on: ubuntu-latest
