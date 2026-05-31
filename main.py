@@ -1,12 +1,22 @@
 import os
+import sys
 import requests
+
+# ۱. حل مشکل آدرس‌دهی: اضافه کردن پوشه src به مسیرهای پایتون
+# با این کار پایتون می‌فهمد که برای پیدا کردن فایل database باید داخل پوشه src را بگردد
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+SRC_DIR = os.path.join(CURRENT_DIR, "src")
+if SRC_DIR not in sys.path:
+    sys.path.append(SRC_DIR)
+
+# حالا بدون هیچ اروری فایل database وارد (Import) می‌شود
 import database
 
 # ارزهای تحت نظر سیستم طبق استراتژی ما
 SYMBOLS = ["BTC", "ETH", "SOL"]
 
 def get_daily_trend(symbol):
-    """دریافت دیتای بسیار سبک روزانه (فقط 5 کندل آخر) از صرافی کوین‌اکس"""
+    """دریافت دیتای بسیار سبک روزانه (فقط 5 کندل آخر) از صرافی کوین‌اکس به عنوان لایه امنیتی اول"""
     market = f"{symbol}USDT"
     url = f"https://api.coinex.com/v1/market/kline?market={market}&type=1day&limit=5"
     
@@ -14,7 +24,8 @@ def get_daily_trend(symbol):
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             klines = response.json().get('data', [])
-            if len(klines) < 2: return "NEUTRAL"
+            if len(klines) < 2: 
+                return "NEUTRAL"
             
             # کندل روز قبل (آخرین کندل بسته شده)
             last_candle = klines[-2]
@@ -38,7 +49,8 @@ def get_4hour_signal(symbol):
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             klines = response.json().get('data', [])
-            if len(klines) < 2: return "NONE"
+            if len(klines) < 2: 
+                return "NONE"
             
             current_close = float(klines[-1][2])
             prev_close = float(klines[-2][2])
@@ -52,16 +64,16 @@ def get_4hour_signal(symbol):
     return "NONE"
 
 def send_telegram_signal(symbol, direction):
-    """ارسال مستقیم سیگنال تایید شده به تلگرام شما با استفاده از توکن گیت‌هاب"""
+    """ارسال مستقیم سیگنال تایید شده به تلگرام شما با استفاده از سکرت‌های گیت‌هاب"""
     token = os.getenv('TELEGRAM_BOT_TOKEN')
     chat_id = os.getenv('TELEGRAM_CHAT_ID')
     
     if not token or not chat_id:
-        print("خطا: توکن تلگرام یا چت‌آیدی یافت نشد!")
+        print("خطا: توکن تلگرام یا چت‌آیدی در سکرت‌های گیت‌هاب یافت نشد!")
         return
 
     url = f"https://api.telegram.com/bot{token}/sendMessage"
-    msg = f"🚀 **سیگنال جدید صادر شد**\n\n🔹 ارز: {symbol}\n🔸 جهت: {direction}\n✓ تاییدیه تایم‌فریم روزانه و ۴ ساعته دریافت شد."
+    msg = f"🚀 **سیگنال جدید صادر شد**\n\n🔹 ارز: {symbol}\n🔸 جهت: {direction}\n✓ تاییدیه همزمان تایم‌فریم روزانه و ۴ ساعته دریافت شد."
     
     payload = {"chat_id": str(chat_id).strip(), "text": msg, "parse_mode": "Markdown"}
     try:
@@ -70,27 +82,34 @@ def send_telegram_signal(symbol, direction):
         print(f"خطا در ارسال پیام تلگرام: {e}")
 
 def run_bot():
-    print("🤖 شروع اسکن بازار به دستور کرون‌جاب...")
+    print("🤖 شروع اسکن بازار به دستور کرون‌جاب بیرونی...")
+    
+    # مقداردهی اولیه دیتابیس (اگر جدول‌ها وجود نداشته باشند ساخته می‌شوند)
     database.init_db()
     
-    # بررسی بن‌بست فیلترها
+    # بررسی بن‌بست فیلترها (اگر ۱ ماه متوالی سیگنالی نباشد لاگ هشدار می‌دهد)
     database.check_filters_lock()
     
     for symbol in SYMBOLS:
         daily_trend = get_daily_trend(symbol)
         four_hour_signal = get_4hour_signal(symbol)
         
-        # تلاقی هوشمند برای فیلتر نهایی (حداقل ریسک به ریوارد 2)
+        print(f"ارز {symbol} -> روند روزانه: {daily_trend} | سیگنال ۴ساعته: {four_hour_signal}")
+        
+        # تلاقی هوشمند برای فیلتر نهایی (جهت معامله ۴ ساعته باید هم‌راستای روند روزانه باشد)
         if four_hour_signal == "BUY" and daily_trend == "BULLISH":
             send_telegram_signal(symbol, "BUY")
             database.log_scan(symbol, "Signal BUY")
+            
         elif four_hour_signal == "SELL" and daily_trend == "BEARISH":
-            send_telegram_signal(symbol, "Signal SELL")
+            send_telegram_signal(symbol, "SELL")
             database.log_scan(symbol, "Signal SELL")
+            
         else:
+            # اگر فیلترها سفت بودند و تاییدیه روزانه صادر نشد، به عنوان اسکن بدون سیگنال لاگ می‌شود
             database.log_scan(symbol, "No Signal")
             
-    print("🏁 اسکن با موفقیت پایان یافت.")
+    print("🏁 اسکن بازار با موفقیت پایان یافت و دیتابیس آپدیت شد.")
 
 if __name__ == "__main__":
     run_bot()
