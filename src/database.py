@@ -1,85 +1,64 @@
-# src/database.py
-# ماژول مدیریت دیتابیس (ذخیره، بازخوانی و به‌روزرسانی سیگنال‌ها)
-
-import sqlite3
 import os
+import sqlite3
+from datetime import datetime
 
-# تعیین مسیر فایل دیتابیس در پوشه data
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "trading_bot.db")
-
-def get_connection():
-    """ایجاد اتصال به فایل دیتابیس و اطمینان از فعال بودن کلیدهای خارجی"""
-    conn = sqlite3.connect(DB_PATH)
-    return conn
+DB_NAME = "trading_bot.db"
 
 def init_db():
-    """ساخت فایل دیتابیس و جدول سیگنال‌ها در صورتی که از قبل وجود نداشته باشند"""
-    # ایجاد پوشه data در صورتی که وجود نداشته باشد
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    
-    conn = get_connection()
+    """ایجاد دیتابیس و جدول‌های مورد نیاز در صورت عدم وجود"""
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    cursor.execute("""
+    # جدول ثبت سیگنال‌ها
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pair TEXT NOT NULL,
-            direction TEXT NOT NULL,
-            entry_price REAL NOT NULL,
-            stop_loss REAL NOT NULL,
-            tp1 REAL NOT NULL,
-            tp2 REAL NOT NULL,
-            atr_value REAL NOT NULL,
-            adx_value REAL NOT NULL,
-            status TEXT DEFAULT 'OPEN',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            timestamp TEXT,
+            symbol TEXT,
+            direction TEXT,
+            entry_price REAL,
+            status TEXT
         )
-    """)
+    ''')
+    
+    # جدول ثبت تمام اسکن‌های ربات (برای بررسی قفل شدن فیلترها)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS scan_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            symbol TEXT,
+            result TEXT
+        )
+    ''')
+    
     conn.commit()
     conn.close()
 
-def save_signal(signal_data):
-    """ذخیره یک سیگنال جدید در دیتابیس"""
-    if signal_data is None:
-        return False
-        
-    conn = get_connection()
+def log_scan(symbol, result):
+    """ثبت وضعیت هر اسکن در دیتابیس"""
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    
-    try:
-        cursor.execute("""
-            INSERT INTO signals (pair, direction, entry_price, stop_loss, tp1, tp2, atr_value, adx_value)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            signal_data['pair'],
-            signal_data['direction'],
-            signal_data['entry_price'],
-            signal_data['stop_loss'],
-            signal_data['tp1'],
-            signal_data['tp2'],
-            signal_data['atr_value'],
-            signal_data['adx_value']
-        ))
-        conn.commit()
-        return True
-    except Exception as e:
-        print(f"خطا در ذخیره سیگنال در دیتابیس: {e}")
-        return False
-    finally:
-        conn.close()
-
-def get_open_signals():
-    """دریافت تمام سیگنال‌هایی که هنوز وضعیت آن‌ها باز (OPEN یا TP1_HIT) است"""
-    conn = get_connection()
-    # تغییر فرمت خروجی به دیکشنری برای خوانایی بهتر در کدهای دیگر
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
-    # پوزیشن‌هایی که وضعیتشان OPEN یا TP1_HIT است نیاز به مانیتورینگ دارند
-    cursor.execute("SELECT * FROM signals WHERE status IN ('OPEN', 'TP1_HIT')")
-    rows = cursor.fetchall()
-    
-    # تبدیل خروجی دیتابیس به فرمت لیست و دیکشنری پایتون
-    open_signals = [dict(row) for row in rows]
+    cursor.execute(
+        "INSERT INTO scan_logs (timestamp, symbol, result) VALUES (?, ?, ?)",
+        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), symbol, result)
+    )
+    conn.commit()
     conn.close()
-    return open_signals
+
+def check_filters_lock():
+    """
+    بررسی هوشمند دیتابیس: اگر بیش از 180 اسکن متوالی (حدود یک ماه) هیچ سیگنالی نبود،
+    سیستم متوجه بن‌بست فیلترها می‌شود.
+    """
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    # خواندن 180 اسکن آخر
+    cursor.execute("SELECT result FROM scan_logs ORDER BY id DESC LIMIT 180")
+    logs = cursor.fetchall()
+    conn.close()
+    
+    if len(logs) >= 180 and all(log[0] == "No Signal" for log in logs):
+        print("⚠️ سیستم متوجه قفل شدن فیلترها شد! نیاز به ارتقا و بهینه‌سازی میکروسکوپی.")
+        return True
+    return False
