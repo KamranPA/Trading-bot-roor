@@ -30,7 +30,9 @@ jobs:
         url = f'https://api.telegram.com/bot{token}/sendMessage'
         data = urllib.parse.urlencode({'chat_id': chat_id, 'text': msg, 'parse_mode': 'Markdown'}).encode('utf-8')
         
-        req = urllib.request.Request(url, data=data)
+        # 🧠 اضافه کردن هدر برای دور زدن فیلتر امنیتی تلگرام
+        req = urllib.request.Request(url, data=data, headers={'User-Agent': 'Mozilla/5.0'})
+        
         with urllib.request.urlopen(req) as response:
             print(response.read().decode())
         "
