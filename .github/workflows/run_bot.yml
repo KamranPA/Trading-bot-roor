@@ -1,8 +1,6 @@
 name: Crypto Trading Bot Execution
 
 on:
-  schedule:
-    - cron: '*/30 * * * *' # بیدار شدن خودکار سرور هر ۳۰ دقیقه یک‌بار
   workflow_dispatch: # فعال بودن دکمه اجرای دستی
 
 # 🔑 باز کردن قفل دسترسی توکن گیت‌هاب برای عملیات Push
