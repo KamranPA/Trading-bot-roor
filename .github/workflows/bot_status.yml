@@ -9,6 +9,9 @@ jobs:
   ping_telegram:
     runs-on: ubuntu-latest
     steps:
+    - name: Checkout Repository Code
+      uses: actions/checkout@v4
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -17,35 +20,8 @@ jobs:
     - name: Install Requests
       run: pip install requests
 
-    - name: Send Heartbeat Via Python Requests
+    - name: Run Status Script
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: |
-        python -c "
-        import os
-        import requests
-
-        token = os.getenv('TELEGRAM_BOT_TOKEN')
-        chat_id = os.getenv('TELEGRAM_CHAT_ID')
-
-        msg = '🟢 *گزارش سلامت سیستم*\n\n🤖 ربات با موفقیت در حال اجراست.\n⏰ وضعیت: فعال و در حال اسکن بازار\n🔍 ارزها: BTC, ETH, SOL\n\nهمه‌چیز مرتب است.'
-        
-        url = f'https://api.telegram.com/bot{token}/sendMessage'
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-        payload = {
-            'chat_id': chat_id,
-            'text': msg,
-            'parse_mode': 'Markdown'
-        }
-        
-        response = requests.post(url, headers=headers, json=payload)
-        
-        if response.status_code == 200:
-            print('Message sent successfully!')
-        else:
-            print(f'Error {response.status_code}: {response.text}')
-            exit(1)
-        "
+      run: python status_check.py
