@@ -2,8 +2,8 @@ name: Daily Bot Status Check
 
 on:
   schedule:
-    - cron: '0 8 * * *' # ⏱️ هر روز ساعت ۸:۰۰ صبح به وقت گرینویچ (ساعت ۱۱:۳۰ صبح به وقت ایران)
-  workflow_dispatch: # فعال بودن دکمه اجرای دستی برای تست
+    - cron: '0 8 * * *' # هر روز ساعت ۱۱:۳۰ صبح به وقت ایران
+  workflow_dispatch:
 
 jobs:
   ping_telegram:
@@ -13,8 +13,9 @@ jobs:
       env:
         TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        MESSAGE: "🟢 *گزارش سلامت سیستم*\n\n🤖 ربات با موفقیت در حال اجراست.\n⏰ وضعیت: فعال و در حال اسکن بازار\n🔍 ارزها: BTC, ETH, SOL\n\n همه‌چیز مرتب است."
       run: |
         curl -s -X POST "https://api.telegram.com/bot$TOKEN/sendMessage" \
-        -d chat_id="$CHAT_ID" \
-        -d text="🟢 **گزارش سلامت سیستم**%0A━━━━━━━━━━━━━━━%0A🤖 ربات تریدر کامران با موفقیت در حال اجراست.%0A⏰ وضعیت: فعال و در حال اسکن بازار (تایم‌فریم 4H)%0A🔍 ارزهای تحت نظر: BTC, ETH, SOL%0A%0A✓ همه‌چیز مرتب است؛ در صورت رویت موقعیت، سیگنال صادر خواهد شد." \
-        -d parse_mode="Markdown"
+          -d "chat_id=$CHAT_ID" \
+          --data-urlencode "text=$MESSAGE" \
+          -d "parse_mode=Markdown"
