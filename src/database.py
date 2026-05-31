@@ -1,4 +1,3 @@
-import os
 import sqlite3
 from datetime import datetime
 
@@ -21,7 +20,7 @@ def init_db():
         )
     ''')
     
-    # جدول ثبت تمام اسکن‌های ربات (برای بررسی قفل شدن فیلترها)
+    # جدول ثبت وضعیت اسکن‌ها برای خود‌ارتقایی
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS scan_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,18 +46,16 @@ def log_scan(symbol, result):
 
 def check_filters_lock():
     """
-    بررسی هوشمند دیتابیس: اگر بیش از 180 اسکن متوالی (حدود یک ماه) هیچ سیگنالی نبود،
-    سیستم متوجه بن‌بست فیلترها می‌شود.
+    بررسی هوشمند دیتابیس: اگر اسکن‌های متوالی طولانی هیچ سیگنالی تولید نکنند،
+    سیستم متوجه قفل شدن فیلترها می‌شود.
     """
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    
-    # خواندن 180 اسکن آخر
     cursor.execute("SELECT result FROM scan_logs ORDER BY id DESC LIMIT 180")
     logs = cursor.fetchall()
     conn.close()
     
     if len(logs) >= 180 and all(log[0] == "No Signal" for log in logs):
-        print("⚠️ سیستم متوجه قفل شدن فیلترها شد! نیاز به ارتقا و بهینه‌سازی میکروسکوپی.")
+        print("⚠️ سیستم متوجه قفل شدن فیلترها شد! نیاز به بهینه‌سازی میکروسکوپی.")
         return True
     return False
