@@ -1,0 +1,27 @@
+name: Daily Bot Status Check
+
+on:
+  schedule:
+    - cron: '0 8 * * *' # هر روز ساعت ۱۱:۳۰ صبح به وقت ایران
+  workflow_dispatch:
+
+jobs:
+  ping_telegram:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Repository Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Requests
+      run: pip install requests
+
+    - name: Run Status Script
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: python status_check.py
