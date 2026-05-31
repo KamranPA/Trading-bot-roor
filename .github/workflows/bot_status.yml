@@ -9,13 +9,28 @@ jobs:
   ping_telegram:
     runs-on: ubuntu-latest
     steps:
-    - name: Send Heartbeat Message to Telegram
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Send Heartbeat Via Python
       env:
-        TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        MESSAGE: "🟢 *گزارش سلامت سیستم*\n\n🤖 ربات با موفقیت در حال اجراست.\n⏰ وضعیت: فعال و در حال اسکن بازار\n🔍 ارزها: BTC, ETH, SOL\n\n همه‌چیز مرتب است."
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
-        curl -s -X POST "https://api.telegram.com/bot$TOKEN/sendMessage" \
-          -d "chat_id=$CHAT_ID" \
-          --data-urlencode "text=$MESSAGE" \
-          -d "parse_mode=Markdown"
+        python -c "
+        import os, urllib.request, urllib.parse
+
+        token = os.getenv('TELEGRAM_BOT_TOKEN')
+        chat_id = os.getenv('TELEGRAM_CHAT_ID')
+
+        msg = '🟢 *گزارش سلامت سیستم*\n\n🤖 ربات با موفقیت در حال اجراست.\n⏰ وضعیت: فعال و در حال اسکن بازار\n🔍 ارزها: BTC, ETH, SOL\n\nهمه‌چیز مرتب است.'
+        
+        url = f'https://api.telegram.com/bot{token}/sendMessage'
+        data = urllib.parse.urlencode({'chat_id': chat_id, 'text': msg, 'parse_mode': 'Markdown'}).encode('utf-8')
+        
+        req = urllib.request.Request(url, data=data)
+        with urllib.request.urlopen(req) as response:
+            print(response.read().decode())
+        "
