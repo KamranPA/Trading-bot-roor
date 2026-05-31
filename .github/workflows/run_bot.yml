@@ -1,7 +1,7 @@
 name: Automated Crypto Trading Bot
 
 on:
-  workflow_dispatch: # بیدار شدن سیستم فقط به دستور دستی یا کرون‌جاب بیرونی
+  workflow_dispatch: # بیدار شدن سیستم فقط با دستور دستی یا کرون‌جاب بیرونی (بدون زمان‌بندی داخلی)
 
 jobs:
   trade_scanner:
@@ -16,7 +16,9 @@ jobs:
         python-version: '3.11'
 
     - name: Install Dependencies
-      run: pip install requests
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests
 
     - name: Execute Trading Engine
       env:
@@ -24,10 +26,10 @@ jobs:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python main.py
 
-    # ذخیره تغییرات دیتابیس در گیت‌هاب بعد از پایان اسکن کرون‌جاب
+    # ذخیره خودکار تغییرات دیتابیس در پوشه data پس از پایان اسکن
     - name: Commit and Push Database Changes
       run: |
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
-        git add trading_bot.db
-        git diff --quiet && git diff --staged --quiet || (git commit -m "📊 ربات: دیتابیس و لاگ اسکن‌ها بروزرسانی شد" && git push)
+        git add data/trading_bot.db
+        git diff --quiet && git diff --staged --quiet || (git commit -m "📊 ربات: دیتابیس و لاگ اسکن‌ها در پوشه data بروزرسانی شد" && git push)
