@@ -3,25 +3,23 @@ name: Daily Bot Status Check
 on:
   schedule:
     - cron: '0 8 * * *' # هر روز ساعت ۱۱:۳۰ صبح به وقت ایران
-  workflow_dispatch:
+  workflow_dispatch: # دکمه اجرای دستی
 
 jobs:
   ping_telegram:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout Repository Code
-      uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - name: Send Status Message to Telegram
+      uses: appleboy/telegram-action@master
       with:
-        python-version: '3.11'
+        to: ${{ secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        format: markdown
+        message: |
+          🟢 *گزارش سلامت سیستم*
+          ━━━━━━━━━━━━━━━
+          🤖 ربات با موفقیت در حال اجراست.
+          ⏰ وضعیت: فعال و در حال اسکن بازار
+          🔍 ارزهای تحت نظر: BTC, ETH, SOL
 
-    - name: Install Requests
-      run: pip install requests
-
-    - name: Run Status Script
-      env:
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: python status_check.py
+          ✓ همه‌چیز مرتب است.
