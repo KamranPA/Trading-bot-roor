@@ -1,47 +1,33 @@
-name: Crypto Trading Bot Execution
+name: Automated Crypto Trading Bot
 
 on:
-  workflow_dispatch: # فعال بودن دکمه اجرای دستی
-
-# 🔑 باز کردن قفل دسترسی توکن گیت‌هاب برای عملیات Push
-permissions:
-  contents: write
+  workflow_dispatch: # بیدار شدن سیستم فقط به دستور دستی یا کرون‌جاب بیرونی
 
 jobs:
-  trading_job:
+  trade_scanner:
     runs-on: ubuntu-latest
     steps:
-    # ۱. واکشی آخرین نسخه کدهای پروژه از گیت‌هاب
-    - name: Checkout Repository Code
+    - name: Checkout Code
       uses: actions/checkout@v4
 
-    # ۲. ایجاد پوشه دیتابیس در صورتی که وجود نداشته باشد
-    - name: Create Data Directory
-      run: mkdir -p data
-
-    # ۳. نصب و راه‌اندازی زبان پایتون نسخه ۳.۱۱
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
-    # ۴. نصب کتابخانه‌های مورد نیاز از فایل requirements
     - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+      run: pip install requests
 
-    # ۵. جرقه زدن و اجرای موتور اصلی ربات تریدر در ریشه پروژه
-    - name: Run Trading Bot Engine
+    - name: Execute Trading Engine
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python main.py
 
-    # ۶. ذخیره خودکار تغییرات دیتابیس روی گیت‌هاب
+    # ذخیره تغییرات دیتابیس در گیت‌هاب بعد از پایان اسکن کرون‌جاب
     - name: Commit and Push Database Changes
       run: |
         git config --local user.email "actions@github.com"
-        git config --local user.name "github-actions[bot]"
-        git add data/trading_bot.db
-        git diff --quiet && git diff --staged --quiet || (git commit -m "🤖 خلبان خودکار: به‌روزرسانی بانک اطلاعاتی معاملات [skip ci]" && git push)
+        git config --local user.name "GitHub Actions"
+        git add trading_bot.db
+        git diff --quiet && git diff --staged --quiet || (git commit -m "📊 ربات: دیتابیس و لاگ اسکن‌ها بروزرسانی شد" && git push)
