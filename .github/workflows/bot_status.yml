@@ -1,27 +1,53 @@
-name: Daily Bot Status Check
+import os
+import requests
 
-on:
-  schedule:
-    - cron: '0 8 * * *' # هر روز ساعت ۱۱:۳۰ صبح به وقت ایران
-  workflow_dispatch:
+def send_heartbeat():
+    token = os.getenv('TELEGRAM_BOT_TOKEN')
+    chat_id = os.getenv('TELEGRAM_CHAT_ID')
+    
+    print(f"وضعیت توکن در محیط سرور: {'موجود است' if token else 'خالی است❌'}")
+    print(f"وضعیت چت‌آیدی در محیط سرور: {'موجود است' if chat_id else 'خالی است❌'}")
 
-jobs:
-  ping_telegram:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout Repository Code
-      uses: actions/checkout@v4
+    if not token or not chat_id:
+        print("خطا: مقادیر سکرت در گیت‌هاب یافت نشد!")
+        exit(1)
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+    # 🔗 آدرس دقیق و بدون خطای API تلگرام
+    url = f"https://api.telegram.com/bot{token}/sendMessage"
+    
+    msg = (
+        "🟢 *گزارش سلامت سیستم*\n"
+        "━━━━━━━━━━━━━━━\n"
+        "🤖 ربات با موفقیت در حال اجراست.\n"
+        "⏰ وضعیت: فعال و در حال اسکن بازار\n"
+        "🔍 ارزهای تحت نظر: BTC, ETH, SOL\n\n"
+        "✓ همه‌چیز مرتب است؛ در صورت رویت موقعیت، سیگنال صادر خواهد شد."
+    )
+    
+    payload = {
+        "chat_id": str(chat_id).strip(),
+        "text": msg,
+        "parse_mode": "Markdown"
+    }
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    
+    print("در حال ارسال درخواست به تلگرام...")
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        print(f"کد وضعیت پاسخ تلگرام: {response.status_code}")
+        
+        if response.status_code == 200:
+            print("پیام پالس سلامت با موفقیت به تلگرام ارسال شد! ✅")
+        else:
+            print(f"تلگرام درخواست را رد کرد: {response.text} ❌")
+            exit(1)
+            
+    except Exception as e:
+        print(f"خطای شبکه: {e}")
+        exit(1)
 
-    - name: Install Requests
-      run: pip install requests
-
-    - name: Run Status Script
-      env:
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: python status_check.py
+if __name__ == "__main__":
+    send_heartbeat()
