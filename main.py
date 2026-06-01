@@ -56,15 +56,17 @@ def fetch_market_dataframe(symbol):
             if not raw_klines:
                 return None
             
+            # ساخت DataFrame با ستون‌های استاندارد منطبق بر کدهای شما
             df = pd.DataFrame(raw_klines, columns=['Timestamp', 'Open', 'Close', 'High', 'Low', 'Volume', 'Amount'])
             
+            # تبدیل به داده‌های عددی (float) جهت جلوگیری از ارورهای محاسباتی پانداس
             df['Open'] = df['Open'].astype(float)
             df['Close'] = df['Close'].astype(float)
             df['High'] = df['High'].astype(float)
             df['Low'] = df['Low'].astype(float)
             df['Volume'] = df['Volume'].astype(float)
             
-            # اتصال به تابع اختصاصی شما از فایل src/indicators.py
+            # 🛠️ اتصال طلایی: فراخوانی مستقیم تابع اختصاصی شما از فایل src/indicators.py
             df = indicators.calculate_indicators(df)
             
             return df
@@ -147,7 +149,7 @@ def send_telegram_signal(sig):
                 print(f"🚀 موفقیت‌آمیز: پیام با تایید سرور {domain_name} به تلگرام شما شلیک شد!")
                 return
             else:
-                print(f"⚠️ سرور {domain_name} درخواست را رد کرد. کد خطا: {response.status_code}")
+                print(f"⚠️ سرور {domain_name} درخواست را رد کرد. کد خطا: {response.status_code} | پاسخ: {response.text}")
         except Exception as e:
             print(f"❌ ارتباط با سرور {domain_name} با خطا مواجه شد: {e}")
             
@@ -165,7 +167,7 @@ def run_bot():
         if df is None:
             continue
             
-        # ارسال دیتای لایو ۳۰ دقیقه‌ای به بدنه استراتژی آپدیت شده
+        # ارسال دیتای پردازش شده با اندیکاتورهای واقعی شما به بدنه استراتژی
         signal_result = strategy.generate_signal(df, f"{symbol}USDT")
         
         if signal_result and isinstance(signal_result, dict):
@@ -176,7 +178,7 @@ def run_bot():
                 print(f"⏭️ سیگنال {direction} برای {symbol} قبلاً در این کندل ۴ ساعته ارسال شده است. رد شد.")
                 continue
             
-            # ۲. شرط تلاقی همزمان ساختار روزانه و شکست سوئینگ
+            # ۲. شرط تلاقی همزمان ساختار روزانه و شکست سوئینگ ۴ ساعته
             if direction == "LONG" and daily_trend == "BULLISH":
                 print(f"✅ سیگنال خرید برای {symbol} تایید و به تلگرام پرتاب شد.")
                 send_telegram_signal(signal_result)
