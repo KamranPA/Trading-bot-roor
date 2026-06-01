@@ -66,7 +66,6 @@ def fetch_market_dataframe(symbol):
             df['Volume'] = df['Volume'].astype(float)
             
             # 🛠️ اتصال طلایی: فراخوانی مستقیم تابع اختصاصی شما از فایل src/indicators.py
-            # این تابع به طور خودکار ستون‌های واقعی ATR, ADX و Volume_MA را به جدول اضافه می‌کند
             df = indicators.calculate_indicators(df)
             
             return df
@@ -75,13 +74,25 @@ def fetch_market_dataframe(symbol):
     return None
 
 def send_telegram_signal(sig):
-    """ارسال پیام سیگنال تایید شده به تلگرام با جزئیات کامل محاسباتی استراتژی شما"""
+    """ارسال سیگنال به تلگرام با مکانیزم ضد فیلتر و دور زدن تحریم آی‌پي گیت‌هاب"""
     token = os.getenv('TELEGRAM_BOT_TOKEN')
     chat_id = os.getenv('TELEGRAM_CHAT_ID')
+    
     if not token or not chat_id:
+        print("❌ خطا: متغیرهای TELEGRAM_BOT_TOKEN یا TELEGRAM_CHAT_ID در سکرت‌های گیت‌هاب یافت نشدند.")
         return
 
-    url = f"https://api.telegram.com/bot{token}/sendMessage"
+    # تمیزکاری توکن و چت‌آیدی از فضاها یا خطوط اضافی احتمالی
+    token = str(token).strip()
+    chat_id = str(chat_id).strip()
+
+    # لیست تانل‌ها و پراکسی‌های معکوس معتبر برای خنثی کردن بلاک آی‌پی دیتاسنترها توسط تلگرام
+    urls = [
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        f"https://teleapi.ir/bot{token}/sendMessage",
+        f"https://api.telegram-proxy.org/bot{token}/sendMessage"
+    ]
+    
     direction_style = "🟢 LONG (خرید)" if sig['direction'] == 'LONG' else "🔴 SHORT (فروش)"
     
     msg = (
@@ -97,11 +108,24 @@ def send_telegram_signal(sig):
         f"✓ تاییدیه همزمان ساختار روزانه و فیلترهای قدرت روند دریافت شد."
     )
     
-    payload = {"chat_id": str(chat_id).strip(), "text": msg, "parse_mode": "Markdown"}
-    try:
-        requests.post(url, json=payload, timeout=10)
-    except Exception as e:
-        print(f"❌ خطا در ارسال پیام تلگرام: {e}")
+    payload = {"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"}
+    
+    # چرخیدن روی سرورها؛ اگر اولی بلاک بود بلافاصله دومی و سومی را تست می‌کند
+    for url in urls:
+        try:
+            domain_name = url.split('/')[2]
+            print(f"📡 در حال تلاش برای پرتاب سیگنال از طریق سرور واسط: {domain_name}")
+            response = requests.post(url, json=payload, timeout=15)
+            
+            if response.status_code == 200:
+                print(f"🚀 موفقیت‌آمیز: پیام با تایید سرور {domain_name} به تلگرام شما شلیک شد!")
+                return
+            else:
+                print(f"⚠️ سرور {domain_name} درخواست را رد کرد. کد خطا: {response.status_code} | پاسخ: {response.text}")
+        except Exception as e:
+            print(f"❌ ارتباط با سرور {domain_name} با خطا مواجه شد: {e}")
+            
+    print("❌ خطای نهایی: فرستادن پیام از طریق هیچ‌کدام از تانل‌های کمکی موفقیت‌آمیز نبود.")
 
 def run_bot():
     print("🤖 اسکنر هوشمند متصل به ماژول‌های اختصاصی روشن شد...")
