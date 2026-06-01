@@ -1,5 +1,5 @@
 # src/strategy.py
-# ماژول هسته استراتژی و صدور سیگنال (نسخه v1.0)
+# ماژول هسته استراتژی و صدور سیگنال (نسخه v1.1 - شکار سریع لایو)
 
 import pandas as pd
 import config  # فراخوانی تنظیمات مرکزی برای حفظ ساختار ماژولار
@@ -28,21 +28,24 @@ def check_swing_low(df, index, window):
 
 def generate_signal(df, pair):
     """
-    بررسی کندل آخر برای صدور سیگنال بر اساس شکست سطوح سوئینگ
-    و فیلترهای ADX و حجم معاملات
+    بررسی کندل لایو ۳۰ دقیقه‌ای برای صدور سیگنال به محض شکست سطوح سوئینگ ۴ ساعته
+    با حفظ اعتبار محاسبات گذشته بر اساس فیلترهای ADX و حجم معاملات
     """
     if df is None or len(df) < (config.SWING_WINDOW * 2 + 1):
         return None
 
-    # بررسی آخرین کندل بسته شده (ایندکس یکی مانده به آخر، چون کندل فعلی هنوز در حال نوسان است)
+    # آخرین کندل کاملاً بسته شده برای مبنای یاتاقان‌های سوئینگ
     last_closed_idx = len(df) - 2
-    current_candle = df.iloc[last_closed_idx]
     
-    # پیدا کردن آخرین سقف و کف سوئینگ معتبر در تاریخچه داده‌ها
+    # 🛠️ تغییر اصلی: انتخاب آخرین ردیف جدول (کندل لایو و در حال نوسان) برای ماشه ورود
+    live_candle_idx = len(df) - 1
+    current_candle = df.iloc[live_candle_idx]
+    
+    # پیدا کردن آخرین سقف و کف سوئینگ معتبر در تاریخچه داده‌های بسته‌شده
     last_swing_high = None
     last_swing_low = None
     
-    for idx in range(last_closed_idx - 1, config.SWING_WINDOW, -1):
+    for idx in range(last_closed_idx, config.SWING_WINDOW, -1):
         if last_swing_high is None and check_swing_high(df, idx, config.SWING_WINDOW):
             last_swing_high = df.loc[idx, 'High']
         if last_swing_low is None and check_swing_low(df, idx, config.SWING_WINDOW):
@@ -53,12 +56,12 @@ def generate_signal(df, pair):
     if last_swing_high is None or last_swing_low is None:
         return None
 
-    # فیلترهای پایه: بررسی زنده بودن روند بازار (ADX)
+    # فیلترهای پایه: بررسی زنده بودن روند بازار در کندل لایو (ADX)
     if current_candle['ADX'] < config.ADX_THRESHOLD:
         return None # بازار رِنج است، خروج از تابع
 
-    # بررسی شرط ورود برای معامله خرید (LONG)
-    # ۱. شکست کلوز بالای سقف سوئینگ | ۲. حجم بالای میانگین حجم
+    # بررسی شرط ورود برای معامله خرید (LONG) در لحظه شکست
+    # ۱. شکست قیمت کلوزِ لایو بالای سقف سوئینگ ۴ ساعته | ۲. حجم کندل لایو بالای میانگین حجم
     if current_candle['Close'] > last_swing_high and current_candle['Volume'] > current_candle['Volume_MA']:
         entry = current_candle['Close']
         atr = current_candle['ATR']
@@ -67,7 +70,6 @@ def generate_signal(df, pair):
         sl = last_swing_low - (0.5 * atr)
         risk = entry - sl
         tp1 = entry + (config.RISK_REWARD_TP1 * risk)
-        # برای TP2 سیستم سقف ماژور قبلی (یا ریوارد ۳ به عنوان پیشفرض ایمن ساختار) را لحاظ می‌کند
         tp2 = entry + (3.0 * risk) 
         
         return {
@@ -81,7 +83,7 @@ def generate_signal(df, pair):
             'adx_value': round(current_candle['ADX'], 2)
         }
 
-    # بررسی شرط ورود برای معامله فروش (SHORT)
+    # بررسی شرط ورود برای معامله فروش (SHORT) در لحظه شکست
     elif current_candle['Close'] < last_swing_low and current_candle['Volume'] > current_candle['Volume_MA']:
         entry = current_candle['Close']
         atr = current_candle['ATR']
@@ -102,4 +104,4 @@ def generate_signal(df, pair):
             'adx_value': round(current_candle['ADX'], 2)
         }
 
-    return None # هیچ شکستی رخ نداده است
+    return None # هیچ شکستی در کندل لایو رخ نداده است
