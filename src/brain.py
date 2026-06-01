@@ -10,7 +10,8 @@ if BASE_DIR not in sys.path:
 
 # حالا پایتون به راحتی فایل config و بقیه ماژول‌های ریشه را پیدا می‌کند
 import config
-import database
+from src import database
+
 
 def run_self_correction():
     print("🧠 در حال اجرای موتور هوش مصنوعی و خود‌ارتقایی ماهانه سیستم...")
