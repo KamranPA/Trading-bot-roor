@@ -2,6 +2,8 @@ import os
 import sys
 import requests
 import pandas as pd
+import sqlite3
+from datetime import datetime, timedelta
 
 # ۱. تنظیم دقیق مسیرهای دسترسی پکیج‌ها برای برطرف شدن ارورهای ایمپورت
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -45,7 +47,6 @@ def get_daily_trend(symbol):
 def fetch_market_dataframe(symbol):
     """دریافت دیتای زنده و تزریق مستقیم به تابع محاسباتی اختصاصی شما"""
     market = f"{symbol}USDT"
-    # دریافت ۱۰۰ کندل برای اینکه میانگین‌های متحرک و محاسبات هموارسازی ADX دیتای سابقه کافی داشته باشند
     url = f"https://api.coinex.com/v1/market/kline?market={market}&type=4hour&limit=100"
     
     try:
@@ -55,23 +56,51 @@ def fetch_market_dataframe(symbol):
             if not raw_klines:
                 return None
             
-            # ساخت DataFrame با ستون‌های استاندارد منطبق بر کدهای شما
             df = pd.DataFrame(raw_klines, columns=['Timestamp', 'Open', 'Close', 'High', 'Low', 'Volume', 'Amount'])
             
-            # تبدیل به داده‌های عددی (float) جهت جلوگیری از ارورهای محاسباتی پانداس
             df['Open'] = df['Open'].astype(float)
             df['Close'] = df['Close'].astype(float)
             df['High'] = df['High'].astype(float)
             df['Low'] = df['Low'].astype(float)
             df['Volume'] = df['Volume'].astype(float)
             
-            # 🛠️ اتصال طلایی: فراخوانی مستقیم تابع اختصاصی شما از فایل src/indicators.py
+            # اتصال به تابع اختصاصی شما از فایل src/indicators.py
             df = indicators.calculate_indicators(df)
             
             return df
     except Exception as e:
         print(f"⚠️ خطا در دریافت یا پردازش دیتای {symbol}: {e}")
     return None
+
+def is_signal_duplicate(symbol, direction):
+    """
+    🛠️ فیلتر ضد تکرار: بررسی دیتابیس برای جلوگیری از ارسال مجدد یک سیگنال در طول بازه ۴ ساعته جاری
+    """
+    db_path = os.path.join(CURRENT_DIR, "data", "trading_bot.db")
+    if not os.path.exists(db_path):
+        return False
+        
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # پیدا کردن سیگنال‌های ثبت شده برای این ارز در ۴ ساعت گذشته
+        four_hours_ago = (datetime.now() - timedelta(hours=4)).strftime('%Y-%m-%d %H:%M:%S')
+        
+        # کوئری برای چک کردن اینکه آیا کلمه کلیدی سیگنال قبلاً در این ۴ ساعت ثبت شده یا خیر
+        query = """
+            SELECT message FROM scan_logs 
+            WHERE symbol = ? AND timestamp >= ? AND message LIKE ?
+        """
+        search_keyword = f"%Signal {direction}%"
+        cursor.execute(query, (symbol, four_hours_ago, search_keyword))
+        result = cursor.fetchone()
+        
+        conn.close()
+        return result is not None  # اگر ردیفی پیدا شد، یعنی سیگنال تکراری است
+    except Exception as e:
+        print(f"⚠️ خطا در بررسی تکراری بودن سیگنال از دیتابیس: {e}")
+        return False
 
 def send_telegram_signal(sig):
     """ارسال سیگنال به تلگرام با مکانیزم ضد فیلتر و دور زدن تحریم آی‌پي گیت‌هاب"""
@@ -82,11 +111,9 @@ def send_telegram_signal(sig):
         print("❌ خطا: متغیرهای TELEGRAM_BOT_TOKEN یا TELEGRAM_CHAT_ID در سکرت‌های گیت‌هاب یافت نشدند.")
         return
 
-    # تمیزکاری توکن و چت‌آیدی از فضاها یا خطوط اضافی احتمالی
     token = str(token).strip()
     chat_id = str(chat_id).strip()
 
-    # لیست تانل‌ها و پراکسی‌های معکوس معتبر برای خنثی کردن بلاک آی‌پی دیتاسنترها توسط تلگرام
     urls = [
         f"https://api.telegram.org/bot{token}/sendMessage",
         f"https://teleapi.ir/bot{token}/sendMessage",
@@ -96,21 +123,20 @@ def send_telegram_signal(sig):
     direction_style = "🟢 LONG (خرید)" if sig['direction'] == 'LONG' else "🔴 SHORT (فروش)"
     
     msg = (
-        f"🎯 **سیگنال تایید شده از استراتژی شکست سوئینگ**\n\n"
+        f"🎯 **سیگنال جدید و زنده (ورود سریع)**\n\n"
         f"🔹 **جفت ارز:** {sig['pair']}\n"
         f"🔸 **موقعیت:** {direction_style}\n\n"
-        f"💵 **نقطه ورود:** {sig['entry_price']}\n"
+        f"💵 **نقطه ورود لایو:** {sig['entry_price']}\n"
         f"🛑 **حد ضرر (Stop Loss):** {sig['stop_loss']}\n"
         f"✅ **تارگت اول (TP1):** {sig['tp1']}\n"
         f"💎 **تارگت دوم (TP2):** {sig['tp2']}\n\n"
         f"📊 شاخص نوسان (ATR): {sig['atr_value']}\n"
         f"📈 قدرت روند واقعی (ADX): {sig['adx_value']}\n\n"
-        f"✓ تاییدیه همزمان ساختار روزانه و فیلترهای قدرت روند دریافت شد."
+        f"✓ این موقعیت به محض شکست لایو سطح ۴ ساعته شکار شده است."
     )
     
     payload = {"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"}
     
-    # چرخیدن روی سرورها؛ اگر اولی بلاک بود بلافاصله دومی و سومی را تست می‌کند
     for url in urls:
         try:
             domain_name = url.split('/')[2]
@@ -121,7 +147,7 @@ def send_telegram_signal(sig):
                 print(f"🚀 موفقیت‌آمیز: پیام با تایید سرور {domain_name} به تلگرام شما شلیک شد!")
                 return
             else:
-                print(f"⚠️ سرور {domain_name} درخواست را رد کرد. کد خطا: {response.status_code} | پاسخ: {response.text}")
+                print(f"⚠️ سرور {domain_name} درخواست را رد کرد. کد خطا: {response.status_code}")
         except Exception as e:
             print(f"❌ ارتباط با سرور {domain_name} با خطا مواجه شد: {e}")
             
@@ -139,13 +165,18 @@ def run_bot():
         if df is None:
             continue
             
-        # ارسال دیتای پردازش شده با اندیکاتورهای واقعی شما به بدنه استراتژی
+        # ارسال دیتای لایو ۳۰ دقیقه‌ای به بدنه استراتژی آپدیت شده
         signal_result = strategy.generate_signal(df, f"{symbol}USDT")
         
         if signal_result and isinstance(signal_result, dict):
             direction = signal_result['direction']
             
-            # شرط تلاقی همزمان ساختار روزانه و شکست سوئینگ ۴ ساعته
+            # ۱. بررسی تکراری نبودن سیگنال در ۴ ساعت گذشته
+            if is_signal_duplicate(symbol, direction):
+                print(f"⏭️ سیگنال {direction} برای {symbol} قبلاً در این کندل ۴ ساعته ارسال شده است. رد شد.")
+                continue
+            
+            # ۲. شرط تلاقی همزمان ساختار روزانه و شکست سوئینگ
             if direction == "LONG" and daily_trend == "BULLISH":
                 print(f"✅ سیگنال خرید برای {symbol} تایید و به تلگرام پرتاب شد.")
                 send_telegram_signal(signal_result)
