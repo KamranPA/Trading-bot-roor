@@ -1,5 +1,5 @@
 # main.py
-# نسخه v1.5 - مجهز به فیلتر داینامیک محدودیت زمانی ۸ ساعته (۲ کندل ۴ ساعته)
+# فایل اصلی و مرکزی اجرای سیستم (نسخه v1.5 - مجهز به فیلتر داینامیک کندل‌ها و هماهنگ با Brain)
 
 import os
 import sys
@@ -17,7 +17,7 @@ SRC_DIR = os.path.join(CURRENT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.append(SRC_DIR)
 
-# ۲. وارد کردن ماژول‌های اختصاصی شما
+# ۲. وارد کردن ماژول‌های اختصاصی
 import config
 import database
 from src import indicators
@@ -59,15 +59,17 @@ def fetch_market_dataframe(symbol):
             if not raw_klines:
                 return None
             
+            # ساخت DataFrame با ستون‌های استاندارد
             df = pd.DataFrame(raw_klines, columns=['Timestamp', 'Open', 'Close', 'High', 'Low', 'Volume', 'Amount'])
             
+            # تبدیل به داده‌های عددی (float) جهت جلوگیری از ارورهای محاسباتی پانداس
             df['Open'] = df['Open'].astype(float)
             df['Close'] = df['Close'].astype(float)
             df['High'] = df['High'].astype(float)
             df['Low'] = df['Low'].astype(float)
             df['Volume'] = df['Volume'].astype(float)
             
-            # اتصال به اندیکاتورها
+            # اتصال به تابع محاسبه اندیکاتورها
             df = indicators.calculate_indicators(df)
             return df
     except Exception as e:
@@ -101,8 +103,7 @@ def is_signal_duplicate_dynamic(symbol, hours_limit=8):
         result = cursor.fetchone()
         
         conn.close()
-        # اگر ردیفی پیدا شد، یعنی در ۸ ساعت گذشته سیگنال داشتیم و نباید اسپم کنیم
-        return result is not None  
+        return result is not None  # اگر ردیفی پیدا شد، یعنی در بازه زمانی مشخص‌شده سیگنال داشتیم
     except Exception as e:
         print(f"⚠️ خطا در بررسی تکراری بودن سیگنال داینامیک: {e}")
         return False
@@ -113,7 +114,7 @@ def send_telegram_signal(sig):
     chat_id = os.getenv('TELEGRAM_CHAT_ID')
     
     if not token or not chat_id:
-        print("❌ خطا: متغیرهای تلگرام در سکرت‌های گیت‌هاب یافت نشدند.")
+        print("❌ خطا: متغیرهای TELEGRAM_BOT_TOKEN یا TELEGRAM_CHAT_ID در سکرت‌های گیت‌هاب یافت نشدند.")
         return
 
     token = str(token).strip()
@@ -145,14 +146,18 @@ def send_telegram_signal(sig):
     for url in urls:
         try:
             domain_name = url.split('/')[2]
+            print(f"📡 در حال تلاش برای پرتاب سیگنال از طریق سرور واسط: {domain_name}")
             response = requests.post(url, json=payload, timeout=15)
+            
             if response.status_code == 200:
-                print(f"🚀 موفقیت‌آمیز: پیام از طریق {domain_name} ارسال شد!")
+                print(f"🚀 موفقیت‌آمیز: پیام با تایید سرور {domain_name} به تلگرام شما شلیک شد!")
                 return
+            else:
+                print(f"⚠️ سرور {domain_name} درخواست را رد کرد. کد خطا: {response.status_code}")
         except Exception as e:
             pass
             
-    print("❌ خطای نهایی: فرستادن پیام موفقیت‌آمیز نبود.")
+    print("❌ خطای نهایی: فرستادن پیام از طریق هیچ‌کدام از تانل‌های کمکی موفقیت‌آمیز نبود.")
 
 def run_bot():
     print("🤖 اسکنر هوشمند با فیلتر داینامیک ۲ کندل (۸ ساعت) روشن شد...")
@@ -162,9 +167,11 @@ def run_bot():
     for symbol in SYMBOLS:
         print(f"\n🔄 در حال بررسی ارز {symbol}...")
         
-        # 🛡️ قانون جدید: اگر در ۸ ساعت گذشته برای این ارز سیگنال صادر شده، اسکن را رد کن
+        # 🛡️ فیوز زمانی داینامیک: اگر در ۸ ساعت گذشته سیگنال صادر شده، اسکن را رد کن
         if is_signal_duplicate_dynamic(symbol, hours_limit=8):
-            print(f"⏭️ کمتر از ۸ ساعت از آخرین سیگنال {symbol} گذشته است. جهت جلوگیری از اسپم رگباری، این ارز رد شد.")
+            print(f"⏭️ کمتر از ۸ ساعت از آخرین سیگنال {symbol} گذشته است. این ارز رد شد.")
+            # 🧠 ثبت لاگ اختصاصی برای اینکه زنجیره ۱۸۰ اسکنِ مغز سیستم (Brain) به هم نخورد
+            database.log_scan(symbol, "Skipped | Locked by 8h Filter")
             continue
             
         daily_trend = get_daily_trend(symbol)
@@ -173,6 +180,7 @@ def run_bot():
         if df is None:
             continue
             
+        # ارسال دیتای پردازش شده به بدنه استراتژی
         signal_result = strategy.generate_signal(df, f"{symbol}USDT")
         
         if signal_result and isinstance(signal_result, dict):
@@ -192,13 +200,13 @@ def run_bot():
                 database.save_signal(symbol, direction, signal_result['entry_price'], status="OPEN")
                 
             else:
-                print(f"⚠️ ارز {symbol} سیگنال داد ({direction}) اما با روند روزانه ({daily_trend}) هم‌جهت نبود.")
+                print(f"⚠️ ارز {symbol} سیگنال داد ({direction}) اما با روند روزانه ({daily_trend}) هم‌جهت نبود و فیلتر شد.")
                 database.log_scan(symbol, f"Filtered | {direction} against Daily {daily_trend}")
         else:
-            print(f"🔍 ارز {symbol} شرایط ورود مهیا نبود.")
+            print(f"🔍 ارز {symbol} با فیلترهای واقعی پایش شد: شرایط ورود مهیا نبود.")
             database.log_scan(symbol, "No Signal")
             
-    print("\n🏁 فرآیند اسکن بازار پایان یافت.")
+    print("\n🏁 فرآیند اسکن بازار و ثبت لاگ‌های اختصاصی پایان یافت.")
 
 if __name__ == "__main__":
     run_bot()
