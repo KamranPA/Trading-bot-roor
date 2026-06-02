@@ -1,5 +1,5 @@
 # src/strategy.py
-# ماژول هسته استراتژی و صدور سیگنال (نسخه v1.1 - شکار سریع لایو)
+# ماژول هسته استراتژی و صدور سیگنال (نسخه v1.2 - مدیریت ریسک چابک بر اساس ATR)
 
 import pandas as pd
 import config  # فراخوانی تنظیمات مرکزی برای حفظ ساختار ماژولار
@@ -29,7 +29,7 @@ def check_swing_low(df, index, window):
 def generate_signal(df, pair):
     """
     بررسی کندل لایو ۳۰ دقیقه‌ای برای صدور سیگنال به محض شکست سطوح سوئینگ ۴ ساعته
-    با حفظ اعتبار محاسبات گذشته بر اساس فیلترهای ADX و حجم معاملات
+    محاسبه پویای تارگت‌ها و حد ضرر بر اساس ATR جهت چابک‌سازی و خروج چند روزه از پوزیشن
     """
     if df is None or len(df) < (config.SWING_WINDOW * 2 + 1):
         return None
@@ -37,7 +37,7 @@ def generate_signal(df, pair):
     # آخرین کندل کاملاً بسته شده برای مبنای یاتاقان‌های سوئینگ
     last_closed_idx = len(df) - 2
     
-    # 🛠️ تغییر اصلی: انتخاب آخرین ردیف جدول (کندل لایو و در حال نوسان) برای ماشه ورود
+    # انتخاب آخرین ردیف جدول (کندل لایو و در حال نوسان) برای ماشه ورود سریع
     live_candle_idx = len(df) - 1
     current_candle = df.iloc[live_candle_idx]
     
@@ -61,16 +61,14 @@ def generate_signal(df, pair):
         return None # بازار رِنج است، خروج از تابع
 
     # بررسی شرط ورود برای معامله خرید (LONG) در لحظه شکست
-    # ۱. شکست قیمت کلوزِ لایو بالای سقف سوئینگ ۴ ساعته | ۲. حجم کندل لایو بالای میانگین حجم
     if current_candle['Close'] > last_swing_high and current_candle['Volume'] > current_candle['Volume_MA']:
         entry = current_candle['Close']
         atr = current_candle['ATR']
         
-        # محاسبات دقیق مدیریت ریسک بر اساس فرمول‌های توافق شده
-        sl = last_swing_low - (0.5 * atr)
-        risk = entry - sl
-        tp1 = entry + (config.RISK_REWARD_TP1 * risk)
-        tp2 = entry + (3.0 * risk) 
+        # 🛠️ بازنویسی فرمول مدیریت ریسک بر اساس نَفَسِ لایو مارکت (ATR)
+        sl = entry - (1.5 * atr)
+        tp1 = entry + (1.5 * atr)
+        tp2 = entry + (3.0 * atr) 
         
         return {
             'pair': pair,
@@ -88,10 +86,10 @@ def generate_signal(df, pair):
         entry = current_candle['Close']
         atr = current_candle['ATR']
         
-        sl = last_swing_high + (0.5 * atr)
-        risk = sl - entry
-        tp1 = entry - (config.RISK_REWARD_TP1 * risk)
-        tp2 = entry - (3.0 * risk)
+        # 🛠️ بازنویسی فرمول مدیریت ریسک بر اساس نَفَسِ لایو مارکت (ATR)
+        sl = entry + (1.5 * atr)
+        tp1 = entry - (1.5 * atr)
+        tp2 = entry - (3.0 * atr)
         
         return {
             'pair': pair,
