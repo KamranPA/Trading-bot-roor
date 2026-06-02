@@ -1,5 +1,5 @@
 # src/database.py
-# ماژول مدیریت دیتابیس (نسخه v1.3 - مجهز به فیوز جلوگیری از سیگنال تکراری)
+# ماژول مدیریت دیتابیس (نسخه v1.5 - هماهنگ با فیلتر زمانی داینامیک کندل‌ها)
 
 import os
 import sqlite3
@@ -79,32 +79,9 @@ def check_filters_lock():
         
     return False
 
-# =====================================================================
-# 🛡️ بخش جدید: توابع کنترل و مدیریت فیوز امنیتی پوزیشن‌های باز
-# =====================================================================
-
-def has_open_position(symbol):
-    """
-    بررسی اینکه آیا پوزیشن باز و مدیریت‌نشده (وضعیت 'OPEN') برای این ارز در دیتابیس وجود دارد یا خیر
-    """
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    
-    query = "SELECT 1 FROM signals WHERE symbol = ? AND status = 'OPEN' LIMIT 1;"
-    
-    try:
-        cursor.execute(query, (symbol,))
-        result = cursor.fetchone()
-        return result is not None
-    except sqlite3.OperationalError:
-        # در صورتی که جدول هنوز ساخته نشده باشد یا مشکلی در خواندن باشد
-        return False
-    finally:
-        conn.close()
-
 def save_signal(symbol, direction, entry_price, status="OPEN"):
     """
-    ثبت سیگنال جدید در دیتابیس با وضعیت اولیه OPEN برای فعال شدن فیوز امنیتی
+    ثبت سیگنال جدید در دیتابیس به همراه تایم‌استمپ دقیق برای مدیریت فیلترهای زمانی
     """
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -113,10 +90,13 @@ def save_signal(symbol, direction, entry_price, status="OPEN"):
         INSERT INTO signals (timestamp, symbol, direction, entry_price, status)
         VALUES (?, ?, ?, ?, ?)
     """
-    
-    cursor.execute(
-        query, 
-        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), symbol, direction, entry_price, status)
-    )
-    conn.commit()
-    conn.close()
+    try:
+        cursor.execute(
+            query, 
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), symbol, direction, entry_price, status)
+        )
+        conn.commit()
+    except sqlite3.OperationalError as e:
+        print(f"❌ خطا در ذخیره سیگنال در دیتابیس: {e}")
+    finally:
+        conn.close()
