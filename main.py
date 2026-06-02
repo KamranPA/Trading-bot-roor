@@ -1,9 +1,11 @@
+# main.py
+# فایل اصلی و مرکزی اجرای سیستم (نسخه v1.4 - مجهز به فیوز امنیتی دیتابیس و رفع باگ اسپم)
+
 import os
 import sys
 import requests
 import pandas as pd
-import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ۱. تنظیم دقیق مسیرهای دسترسی پکیج‌ها برای برطرف شدن ارورهای ایمپورت
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -74,36 +76,6 @@ def fetch_market_dataframe(symbol):
         print(f"⚠️ خطا در دریافت یا پردازش دیتای {symbol}: {e}")
     return None
 
-def is_signal_duplicate(symbol, direction):
-    """
-    🛠️ فیلتر ضد تکرار: بررسی دیتابیس برای جلوگیری از ارسال مجدد یک سیگنال در طول بازه ۴ ساعته جاری
-    """
-    db_path = os.path.join(CURRENT_DIR, "data", "trading_bot.db")
-    if not os.path.exists(db_path):
-        return False
-        
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        # پیدا کردن سیگنال‌های ثبت شده برای این ارز در ۴ ساعت گذشته
-        four_hours_ago = (datetime.now() - timedelta(hours=4)).strftime('%Y-%m-%d %H:%M:%S')
-        
-        # کوئری برای چک کردن اینکه آیا کلمه کلیدی سیگنال قبلاً در این ۴ ساعت ثبت شده یا خیر
-        query = """
-            SELECT message FROM scan_logs 
-            WHERE symbol = ? AND timestamp >= ? AND message LIKE ?
-        """
-        search_keyword = f"%Signal {direction}%"
-        cursor.execute(query, (symbol, four_hours_ago, search_keyword))
-        result = cursor.fetchone()
-        
-        conn.close()
-        return result is not None  # اگر ردیفی پیدا شد، یعنی سیگنال تکراری است
-    except Exception as e:
-        print(f"⚠️ خطا در بررسی تکراری بودن سیگنال از دیتابیس: {e}")
-        return False
-
 def send_telegram_signal(sig):
     """ارسال سیگنال به تلگرام با مکانیزم ضد فیلتر و دور زدن تحریم آی‌پي گیت‌هاب"""
     token = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -161,33 +133,41 @@ def run_bot():
     database.check_filters_lock()
     
     for symbol in SYMBOLS:
+        print(f"\n🔄 در حال بررسی ارز {symbol}...")
+        
+        # 🛡️ فیوز امنیتی دیتابیس: اگر پوزیشن باز داریم، اسکن این ارز را کاملاً متوقف کن
+        if database.has_open_position(symbol):
+            print(f"⚠️ پوزیشن باز مدیریت‌نشده روی {symbol} در دیتابیس وجود دارد. فرآیند اسکن رد شد.")
+            continue
+            
         daily_trend = get_daily_trend(symbol)
         df = fetch_market_dataframe(symbol)
         
         if df is None:
             continue
             
-        # ارسال دیتای پردازش شده با اندیکاتورهای واقعی شما به بدنه استراتژی
+        # ارسال دیتای پردازش شده با اندیکاتورهای واقعی شما به بدنه استراتژی چابک v1.2
         signal_result = strategy.generate_signal(df, f"{symbol}USDT")
         
         if signal_result and isinstance(signal_result, dict):
             direction = signal_result['direction']
             
-            # ۱. بررسی تکراری نبودن سیگنال در ۴ ساعت گذشته
-            if is_signal_duplicate(symbol, direction):
-                print(f"⏭️ سیگنال {direction} برای {symbol} قبلاً در این کندل ۴ ساعته ارسال شده است. رد شد.")
-                continue
-            
-            # ۲. شرط تلاقی همزمان ساختار روزانه و شکست سوئینگ ۴ ساعته
+            # شرط تلاقی همزمان ساختار روزانه و شکست سوئینگ ۴ ساعته
             if direction == "LONG" and daily_trend == "BULLISH":
-                print(f"✅ سیگنال خرید برای {symbol} تایید و به تلگرام پرتاب شد.")
+                print(f"✅ سیگنال خرید برای {symbol} تایید شد.")
                 send_telegram_signal(signal_result)
+                
+                # ثبت لاگ اسکن همزمان با قفل کردن پوزیشن در جدول signals
                 database.log_scan(symbol, f"Signal LONG | Entry: {signal_result['entry_price']}")
+                database.save_signal(symbol, direction, signal_result['entry_price'], status="OPEN")
                 
             elif direction == "SHORT" and daily_trend == "BEARISH":
-                print(f"✅ سیگنال فروش برای {symbol} تایید و به تلگرام پرتاب شد.")
+                print(f"✅ سیگنال فروش برای {symbol} تایید شد.")
                 send_telegram_signal(signal_result)
+                
+                # ثبت لاگ اسکن همزمان با قفل کردن پوزیشن در جدول signals
                 database.log_scan(symbol, f"Signal SHORT | Entry: {signal_result['entry_price']}")
+                database.save_signal(symbol, direction, signal_result['entry_price'], status="OPEN")
                 
             else:
                 print(f"⚠️ ارز {symbol} سیگنال داد ({direction}) اما با روند روزانه ({daily_trend}) هم‌جهت نبود و فیلتر شد.")
@@ -196,7 +176,7 @@ def run_bot():
             print(f"🔍 ارز {symbol} با فیلترهای واقعی پایش شد: شرایط ورود مهیا نبود.")
             database.log_scan(symbol, "No Signal")
             
-    print("🏁 فرآیند اسکن بازار و ثبت لاگ‌های اختصاصی پایان یافت.")
+    print("\n🏁 فرآیند اسکن بازار و ثبت لاگ‌های اختصاصی پایان یافت.")
 
 if __name__ == "__main__":
     run_bot()
