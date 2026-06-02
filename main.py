@@ -21,8 +21,11 @@ from src import telegram_bot
 
 SYMBOLS = ["BTC", "ETH", "SOL"]
 
-def is_signal_duplicate_dynamic(symbol, hours_limit=8):
-    """بررسی دقیق جهت عدم انتشار سیگنال تکراری در بازه قفل"""
+def is_telegram_locked_8h(symbol, hours_limit=8):
+    """
+    بررسی جدول signals برای چک کردن قفل ۸ ساعته ارسال به تلگرام.
+    این فیلتر دیگر مانع اسکن بازار و لاگ دیتابیس نمی‌شود.
+    """
     db_path = os.path.join(CURRENT_DIR, "data", "trading_bot.db")
     if not os.path.exists(db_path):
         return False
@@ -43,47 +46,50 @@ def is_signal_duplicate_dynamic(symbol, hours_limit=8):
         conn.close()
         return result is not None  
     except Exception as e:
-        print(f"⚠️ خطا در بررسی فیلتر داینامیک: {e}")
+        print(f"⚠️ خطا در بررسی فیلتر زمانی تلگرام: {e}")
         return False
 
 def run_bot():
-    print("🤖 اسکنر هوشمند نسخه v1.6 فعال شد...")
+    print("🤖 اسکنر هوشمند نسخه v1.7 (مجهز به لایه‌بندی لاگ پیشرفته) فعال شد...")
     database.init_db()
     database.check_filters_lock()
     
     for symbol in SYMBOLS:
         pair = f"{symbol}/USDT"
-        print(f"\n🔄 اسکنر در حال واکشی داده‌های: {pair}...")
+        print(f"\n🔄 اسکنر در حال پردازش و محاسبات تکنیکال: {pair}...")
         
-        if is_signal_duplicate_dynamic(symbol, hours_limit=8):
-            print(f"⏭️ فیلتر زمان‌محور فعال: ارز {symbol} در وضعیت قفل ۸ ساعته قرار دارد.")
-            database.log_scan(symbol, "Skipped | Locked by 8h Filter")
-            continue
-            
-        # واکشی استاندارد داده‌ها از کلاینت رسمی CCXT پیاده‌سازی شده در پروژه
+        # ۱. واکشی داده‌ها و محاسبه اندیکاتورها در هر شرایطی انجام می‌شود
         df = coinex_client.get_coinex_candles(pair)
         
         if df is None or df.empty:
             print(f"❌ دیتایی برای جفت‌ارز {pair} دریافت نشد.")
             continue
             
-        # تزریق اندیکاتورها از ماژول اختصاصی شما
         from src import indicators
         df = indicators.calculate_indicators(df)
         
+        # ۲. سنجش وضعیت استراتژی روی کندل لایو
         signal_result = strategy.generate_signal(df, pair)
         
         if signal_result and isinstance(signal_result, dict):
-            print(f"✅ سیگنال تایید شده {signal_result['direction']} تولید شد.")
+            direction = signal_result['direction']
+            print(f"🎯 استراتژی روی {symbol} سیگنال {direction} صادر کرد.")
             
-            # ثبت آنی در دیتابیس محلی پیش از ارسال به تلگرام برای جلوگیری از Race Condition
-            database.save_signal(symbol, signal_result['direction'], signal_result['entry_price'], status="OPEN")
-            database.log_scan(symbol, f"Signal {signal_result['direction']} | Entry: {signal_result['entry_price']}")
+            # ۳. ثبت دیتای واقعی استراتژی در اسکن لاگ (برای تغذیه هوش مصنوعی ماهانه)
+            database.log_scan(symbol, f"Signal {direction} | Entry: {signal_result['entry_price']}")
             
-            # ارسال نهایی پیام ساختاریافته به کانال یا ربات تلگرام
+            # ۴. بررسی قفل ۸ ساعته تلگرام درست قبل از ارسال نهایی
+            if is_telegram_locked_8h(symbol, hours_limit=8):
+                print(f"⏭️ ارسال به تلگرام مسدود شد: کمتر از ۸ ساعت از آخرین سیگنال ارسال‌شده {symbol} گذشته است.")
+                continue
+                
+            # ۵. ذخیره در جدول پوزیشن‌های اصلی و ارسال به تلگرام (در صورت عبور از فیلتر ۸ ساعته)
+            database.save_signal(symbol, direction, signal_result['entry_price'], status="OPEN")
             telegram_bot.format_and_send_signal(signal_result)
+            
         else:
-            print(f"🔍 ارز {symbol} شرایط ورود به معامله را ندارد.")
+            print(f"🔍 ارز {symbol} شرایط ورود به معامله را نداشت.")
+            # ثبت لاگ عدم صدور سیگنال برای محاسبات آماری دیتابیس
             database.log_scan(symbol, "No Signal")
             
     print("\n🏁 فرآیند دوره جاری اسکن بازار به پایان رسید.")
