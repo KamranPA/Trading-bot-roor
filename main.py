@@ -23,8 +23,8 @@ SYMBOLS = ["BTC", "ETH", "SOL"]
 
 def is_telegram_locked_8h(symbol, hours_limit=8):
     """
-    بررسی دقیق و ضد نشت جدول signals برای چک کردن قفل ۸ ساعته ارسال به تلگرام.
-    بدون وابستگی به فرمت دقیق کوئری دیتابیس، تفاضل زمانی را به صورت عددی محاسبه می‌کند.
+    بررسی هوشمند جدول signals برای چک کردن قفل ۸ ساعته تلگرام.
+    تفاضل زمانی را به صورت ریاضی محاسه می‌کند تا با تفاوت ساعت سرور و فرمت‌ها تداخل نداشته باشد.
     """
     db_path = os.path.join(CURRENT_DIR, "data", "trading_bot.db")
     if not os.path.exists(db_path):
@@ -34,7 +34,7 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
-        # واکشی آخرین سیگنال صادر شده برای ارز بدون محدود کردن کوئری با زمان سرور
+        # استخراج آخرین سیگنال ثبت شده برای ارز (بدون قید و شرط زمانی در کوئری)
         query = """
             SELECT timestamp FROM signals 
             WHERE symbol = ? 
@@ -45,31 +45,36 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
         conn.close()
         
         if result and result[0]:
-            last_signal_time_str = result[0]
+            last_signal_time_str = str(result[0])
             
-            # تبدیل منعطف رشته به آبجکت datetime (پشتیبانی از فرمت‌های با یا بدون میلی‌ثانیه)
+            # پاک‌سازی و استخراج بخش تاریخ و ساعت اصلی (حذف کاراکتر T یا میلی‌ثانیه‌ها در صورت وجود)
+            clean_time_str = last_signal_time_str.replace('T', ' ').split('.')[0]
+            
             try:
-                last_signal_time = datetime.strptime(last_signal_time_str, '%Y-%m-%d %H:%M:%S')
-            except ValueError:
-                # هندل کردن فرمت‌های حاوی میلی‌ثانیه یا ساختار استاندارد ISO
-                last_signal_time = datetime.fromisoformat(last_signal_time_str.split('.')[0])
+                last_signal_time = datetime.strptime(clean_time_str, '%Y-%m-%d %H:%M:%S')
+            except Exception:
+                print(f"⚠️ [Filter] نتوانست فرمت زمان دیتابیس ({last_signal_time_str}) را بخواند.")
+                return False
                 
-            # محاسبه تفاضل واقعی بر اساس ساعت عددی
+            # محاسبه اختلاف ساعت واقعی به صورت عددی
             time_difference = datetime.now() - last_signal_time
-            hours_passed = time_difference.total_seconds() / 3600
+            hours_passed = abs(time_difference.total_seconds() / 3600)
             
-            print(f"⏱️ [بررسی فیلتر] برای {symbol}: {hours_passed:.2f} ساعت از آخرین سیگنال گذشته است.")
+            print(f"⏱️ [Filter Check] برای {symbol}: {hours_passed:.2f} ساعت از آخرین سیگنال گذشته است.")
             
-            if hours_passed < hours_limit:
-                return True  # قفل فعال است، اجازه ارسال نده
+            # اگر اختلاف زمان کمتر از ۸ ساعت باشد یا به خاطر تفاوت ریجن ساعت‌ها نزدیک به هم باشند، قفل فعال است
+            if hours_passed < hours_limit or hours_passed > (24 - hours_limit):
+                # شرط دوم (24 - hours_limit) برای خنثی کردن تداخل کاملا معکوس Timezone سرور و لوکال است
+                print(f"🔒 [Locked] ارسال سیگنال تکراری {symbol} به تلگرام مسدود شد.")
+                return True
                 
-        return False  # قفل باز است، سیگنال جدید مجاز است
+        return False
     except Exception as e:
         print(f"⚠️ خطا در بررسی فیلتر زمانی تلگرام: {e}")
         return False
 
 def run_bot():
-    print("🤖 اسکنر هوشمند نسخه v1.7 (مجهز به لایه‌بندی لاگ پیشرفته) فعال شد...")
+    print("🤖 اسکنر هوشمند نسخه v1.8 (مجهز به فیلتر ضد نشت لایو) فعال شد...")
     database.init_db()
     database.check_filters_lock()
     
@@ -99,7 +104,7 @@ def run_bot():
             
             # ۴. بررسی قفل ۸ ساعته تلگرام درست قبل از ارسال نهایی
             if is_telegram_locked_8h(symbol, hours_limit=8):
-                print(f"⏭️ ارسال به تلگرام مسدود شد: کمتر از ۸ ساعت از آخرین سیگنال ارسال‌شده {symbol} گذشته است.")
+                print(f"⏭️ ارسال به تلگرام مسدود شد: فیلتر ۸ ساعته برای {symbol} فعال است.")
                 continue
                 
             # ۵. ذخیره در جدول پوزیشن‌های اصلی و ارسال به تلگرام (در صورت عبور از فیلتر ۸ ساعته)
@@ -108,7 +113,6 @@ def run_bot():
             
         else:
             print(f"🔍 ارز {symbol} شرایط ورود به معامله را نداشت.")
-            # ثبت لاگ عدم صدور سیگنال برای محاسبات آماری دیتابیس
             database.log_scan(symbol, "No Signal")
             
     print("\n🏁 فرآیند دوره جاری اسکن بازار به پایان رسید.")
