@@ -23,8 +23,8 @@ SYMBOLS = ["BTC", "ETH", "SOL"]
 
 def is_telegram_locked_8h(symbol, hours_limit=8):
     """
-    بررسی جدول signals برای چک کردن قفل ۸ ساعته ارسال به تلگرام.
-    این فیلتر دیگر مانع اسکن بازار و لاگ دیتابیس نمی‌شود.
+    بررسی دقیق و ضد نشت جدول signals برای چک کردن قفل ۸ ساعته ارسال به تلگرام.
+    بدون وابستگی به فرمت دقیق کوئری دیتابیس، تفاضل زمانی را به صورت عددی محاسبه می‌کند.
     """
     db_path = os.path.join(CURRENT_DIR, "data", "trading_bot.db")
     if not os.path.exists(db_path):
@@ -34,17 +34,36 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
-        time_threshold = (datetime.now() - timedelta(hours=hours_limit)).strftime('%Y-%m-%d %H:%M:%S')
-        
+        # واکشی آخرین سیگنال صادر شده برای ارز بدون محدود کردن کوئری با زمان سرور
         query = """
             SELECT timestamp FROM signals 
-            WHERE symbol = ? AND timestamp >= ? 
+            WHERE symbol = ? 
             ORDER BY id DESC LIMIT 1
         """
-        cursor.execute(query, (symbol, time_threshold))
+        cursor.execute(query, (symbol,))
         result = cursor.fetchone()
         conn.close()
-        return result is not None  
+        
+        if result and result[0]:
+            last_signal_time_str = result[0]
+            
+            # تبدیل منعطف رشته به آبجکت datetime (پشتیبانی از فرمت‌های با یا بدون میلی‌ثانیه)
+            try:
+                last_signal_time = datetime.strptime(last_signal_time_str, '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                # هندل کردن فرمت‌های حاوی میلی‌ثانیه یا ساختار استاندارد ISO
+                last_signal_time = datetime.fromisoformat(last_signal_time_str.split('.')[0])
+                
+            # محاسبه تفاضل واقعی بر اساس ساعت عددی
+            time_difference = datetime.now() - last_signal_time
+            hours_passed = time_difference.total_seconds() / 3600
+            
+            print(f"⏱️ [بررسی فیلتر] برای {symbol}: {hours_passed:.2f} ساعت از آخرین سیگنال گذشته است.")
+            
+            if hours_passed < hours_limit:
+                return True  # قفل فعال است، اجازه ارسال نده
+                
+        return False  # قفل باز است، سیگنال جدید مجاز است
     except Exception as e:
         print(f"⚠️ خطا در بررسی فیلتر زمانی تلگرام: {e}")
         return False
