@@ -1,9 +1,9 @@
 # src/strategy.py
-# ماژول استراتژی (نسخه v5.0 - کالیبره شده برای استخراج فاکتورهای عددی یادگیری ماشین)
+# ماژول استراتژی (نسخه v5.6 - کالیبره شده برای استخراج فاکتورهای عددی دید ۳۶۰ درجه)
 
 import pandas as pd
 import config
-import database
+from src import database
 
 def check_swing_high(df, index, window):
     if index < window or index >= len(df) - window:
@@ -49,19 +49,20 @@ def generate_signal(df, pair):
     if last_swing_high is None or last_swing_low is None:
         return None
 
-    # 🧮 محاسبات فاکتورهای ریاضی هوش مصنوعی (ML Features)
+    # 🧮 محاسبات ۵ فاکتور ریاضی هوش مصنوعی (دید ۳۶۰ درجه)
     adx_val = float(current_candle['ADX'])
-    
-    # نسبت حجم فعلی به میانگین متحرک حجم (چند برابر بودن حجم نسبت به میانگین)
     vol_ma = current_candle['Volume_MA']
     vol_ratio = float(current_candle['Volume'] / vol_ma) if vol_ma > 0 else 1.0
     
-    # نسبت نوسان بازار (میزان درصد نوسان بر اساس ATR نسبت به قیمت ورود)
     entry_est = float(current_candle['Close'])
     atr_val = current_candle['ATR'] if current_candle['ATR'] > 0 else (entry_est * 0.02)
     atr_percent = float((atr_val / entry_est) * 100)
+    
+    # فاکتورهای افزوده شده دید ۳۶۰ درجه
+    rsi_val = float(current_candle['RSI'])
+    trend_line = 1.0 if entry_est > current_candle['EMA_200'] else 0.0
 
-    # شرط خرید
+    # شرط خرید (LONG)
     if current_candle['Close'] > last_swing_high and current_candle['Volume'] > current_candle['Volume_MA']:
         sl = entry_est - (1.5 * atr_val)
         risk_dist = entry_est - sl
@@ -73,10 +74,11 @@ def generate_signal(df, pair):
         return {
             'pair': pair, 'direction': 'LONG', 'entry_price': round(entry_est, 4),
             'stop_loss': round(sl, 4), 'tp1': round(tp1, 4), 'tp2': round(tp2, 4),
-            'feat_adx': round(adx_val, 2), 'feat_vol_ratio': round(vol_ratio, 2), 'feat_atr_percent': round(atr_percent, 2)
+            'feat_adx': round(adx_val, 2), 'feat_vol_ratio': round(vol_ratio, 2), 'feat_atr_percent': round(atr_percent, 2),
+            'feat_rsi': round(rsi_val, 2), 'feat_trend_line': trend_line
         }
 
-    # شرط فروش
+    # شرط فروش (SHORT)
     elif current_candle['Close'] < last_swing_low and current_candle['Volume'] > current_candle['Volume_MA']:
         sl = entry_est + (1.5 * atr_val)
         risk_dist = sl - entry_est
@@ -88,7 +90,8 @@ def generate_signal(df, pair):
         return {
             'pair': pair, 'direction': 'SHORT', 'entry_price': round(entry_est, 4),
             'stop_loss': round(sl, 4), 'tp1': round(tp1, 4), 'tp2': round(tp2, 4),
-            'feat_adx': round(adx_val, 2), 'feat_vol_ratio': round(vol_ratio, 2), 'feat_atr_percent': round(atr_percent, 2)
+            'feat_adx': round(adx_val, 2), 'feat_vol_ratio': round(vol_ratio, 2), 'feat_atr_percent': round(atr_percent, 2),
+            'feat_rsi': round(rsi_val, 2), 'feat_trend_line': trend_line
         }
 
     return None
