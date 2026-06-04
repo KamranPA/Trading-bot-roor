@@ -1,13 +1,12 @@
 name: Automated Crypto Trading Bot
 
 on:
-  # ۱. بازگرداندن زمان‌بندی ۳۰ دقیقه‌ای گیت‌هاب (اگر از کرون اکسترنال استفاده می‌کنی این بخش ضرری ندارد)
   schedule:
+    # بازگرداندن زمان‌بندی ۳۰ دقیقه‌ای گیت‌هاب به عنوان لایه پشتیبان (در صورت عدم استفاده از کرون اکسترنال)
     - cron: '*/30 * * * *'
-  # امکان اجرای دستی و اکسترنال
-  workflow_dispatch:
+  workflow_dispatch: # امکان اجرای دستی از تب Actions یا فراخوانی توسط وب‌هوک اکسترنال
 
-# ۲. اضافه کردن مجوز حیاتی برای اینکه اکشنِ کامیت دیتابیس ارور ندهد
+# مجوز حیاتی برای اینکه اکشنِ کامیت دیتابیس با خطای عدم دسترسی (Permission Denied) مواجه نشود
 permissions:
   contents: write
 
@@ -18,7 +17,6 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
       with:
-        # استفاده از همان توکن پیش‌فرض گیت‌هاب با اکشن v4 شما
         token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Set up Python
@@ -26,11 +24,10 @@ jobs:
       with:
         python-version: '3.11'
 
-    # نصب کتابخانه‌ها از روی فایل requirements شما
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install requests pandas ta-lib; fi
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install requests pandas; fi
 
     - name: Execute Trading Engine
       env:
@@ -38,11 +35,10 @@ jobs:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python main.py
 
-    # ۳. کامیت هوشمند دیتابیس با همان اکشن مورد نظر شما
+    # کامیت هوشمند فایل دیتابیس برای حفظ تاریخچه لاگ‌ها و وضعیت فیلترها
     - name: Auto-Commit & Push Database Modifications
       uses: stefanzweifel/git-auto-commit-action@v5
       with:
         commit_message: "📊 ربات: به‌روزرسانی خودکار دیتابیس و لاگ اسکن‌ها [Skip CI]"
         file_pattern: 'data/trading_bot.db'
-        # مطمئن شو که اسم برنچ اصلی‌ات دقیقا main است (اگر master است، به master تغییرش بده)
         branch: main
