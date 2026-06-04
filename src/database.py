@@ -1,18 +1,15 @@
 # src/database.py
-# ماژول مدیریت دیتابیس (نسخه v1.5 - هماهنگ با فیلتر زمانی داینامیک کندل‌ها)
+# ماژول جامع و ساختاریافته مدیریت دیتابیس (نسخه v2.0 - نسخه طلایی)
 
 import os
 import sqlite3
 from datetime import datetime
 
-# پیدا کردن مسیر ریشه پروژه (یک پوشه عقب‌تر از پوشه src)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# آدرس‌دهی دقیق و داینامیک به فایل دیتابیس درون پوشه data
 DB_NAME = os.path.join(BASE_DIR, "data", "trading_bot.db")
 
 def init_db():
-    """ایجاد دیتابیس و جدول‌های مورد نیاز در پوشه data در صورت عدم وجود"""
+    """راه‌اندازی ساختار کامل و مدرن دیتابیس به همراه مکانیزم مهاجرت خودکار ستون‌ها"""
     data_dir = os.path.dirname(DB_NAME)
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
@@ -20,7 +17,7 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # ۱. جدول ثبت سیگنال‌ها (جهت، قیمت ورود و وضعیت پوزیشن)
+    # ۱. ایجاد جدول جامع سیگنال‌ها و پوزیشن‌ها با جزئیات کامل خروج و مدیریت ریسک
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,11 +25,17 @@ def init_db():
             symbol TEXT,
             direction TEXT,
             entry_price REAL,
-            status TEXT
+            tp1 REAL,
+            tp2 REAL,
+            stop_loss REAL,
+            exit_price REAL,
+            status TEXT,
+            closed_at TEXT,
+            pnl_percent REAL
         )
     ''')
     
-    # ۲. جدول ثبت وضعیت تمام اسکن‌ها برای فرآیند خود‌ارتقایی (Self-Correction)
+    # ۲. ایجاد جدول جعبه سیاه (لاگ اسکن‌ها برای تغذیه Brain)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS scan_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,11 +45,28 @@ def init_db():
         )
     ''')
     
+    # 🛡️ سیستم هوشمند آپدیت خودکار دیتابیس (اگر ستون‌ها در دیتابیس گیت‌هاب موجود نباشند اضافه می‌شوند)
+    ستون_های_جدید = {
+        "tp1": "REAL",
+        "tp2": "REAL",
+        "stop_loss": "REAL",
+        "exit_price": "REAL",
+        "closed_at": "TEXT",
+        "pnl_percent": "REAL"
+    }
+    
+    for column, col_type in ستون_های_جدید.items():
+        try:
+            cursor.execute(f"ALTER TABLE signals ADD COLUMN {column} {col_type}")
+        except sqlite3.OperationalError:
+            # ستون از قبل وجود دارد، عملیات رد می‌شود
+            pass
+            
     conn.commit()
     conn.close()
 
 def log_scan(symbol, result):
-    """ثبت وضعیت و خروجی هر اسکن در دیتابیس جهت تحلیل‌های آینده ربات"""
+    """ثبت لاگ ریز به ریز اسکن‌ها برای مانیتورینگ عملکرد استراتژی"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute(
@@ -56,15 +76,51 @@ def log_scan(symbol, result):
     conn.commit()
     conn.close()
 
-def check_filters_lock():
+def save_signal(symbol, direction, entry_price, tp1, tp2, stop_loss, status="OPEN"):
+    """قفل کردن پوزیشن جدید با تمام پارامترهای مدیریت ریسک و تارگت‌ها"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    query = """
+        INSERT INTO signals (timestamp, symbol, direction, entry_price, tp1, tp2, stop_loss, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """
-    بررسی هوشمند دیتابیس برای فرآیند یادگیری ماشین (brain.py):
-    اگر ۱۸۰ اسکن متوالی هیچ سیگنالی تولید نکنند،
-    سیستم متوجه بن‌بست فیلترها شده و این موضوع را گزارش می‌دهد.
+    try:
+        cursor.execute(
+            query, 
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), symbol, direction, entry_price, tp1, tp2, stop_loss, status)
+        )
+        conn.commit()
+        print(f"💾 [DB SUCCESS]: سیگنال معتبر {symbol} با تمام تارگت‌ها و استاپ‌لاس ثبت و قفل شد.")
+    except Exception as e:
+        print(f"❌ خطای دیتابیس در ذخیره سیگنال: {e}")
+    finally:
+        conn.close()
+
+def update_position_status(signal_id, new_status, exit_price=None, pnl=None):
+    """
+    تغییر وضعیت پوزیشن (مثلا از OPEN به CLOSED یا TP1_HIT) 
+    این تابع به ربات اجازه می‌دهد مدیریت پوزیشن زنده داشته باشد.
     """
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    if new_status == "CLOSED":
+        query = "UPDATE signals SET status = ?, exit_price = ?, closed_at = ?, pnl_percent = ? WHERE id = ?"
+        cursor.execute(query, (new_status, exit_price, now_str, pnl, signal_id))
+    else:
+        query = "UPDATE signals SET status = ? WHERE id = ?"
+        cursor.execute(query, (new_status, signal_id))
+        
+    conn.commit()
+    conn.close()
+
+def check_filters_lock():
+    """مکانیزم بررسی قفل فیلترها برای موتور هوش مصنوعی (Brain)"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
     try:
         cursor.execute("SELECT result FROM scan_logs ORDER BY id DESC LIMIT 180")
         logs = cursor.fetchall()
@@ -74,29 +130,5 @@ def check_filters_lock():
         conn.close()
     
     if len(logs) >= 180 and all(log[0] == "No Signal" for log in logs):
-        print("⚠️ [Brain Setup]: سیستم متوجه قفل شدن فیلترها شد! ماژول خود‌ارتقایی فعال می‌شود.")
         return True
-        
     return False
-
-def save_signal(symbol, direction, entry_price, status="OPEN"):
-    """
-    ثبت سیگنال جدید در دیتابیس به همراه تایم‌استمپ دقیق برای مدیریت فیلترهای زمانی
-    """
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    
-    query = """
-        INSERT INTO signals (timestamp, symbol, direction, entry_price, status)
-        VALUES (?, ?, ?, ?, ?)
-    """
-    try:
-        cursor.execute(
-            query, 
-            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), symbol, direction, entry_price, status)
-        )
-        conn.commit()
-    except sqlite3.OperationalError as e:
-        print(f"❌ خطا در ذخیره سیگنال در دیتابیس: {e}")
-    finally:
-        conn.close()
