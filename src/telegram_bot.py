@@ -14,7 +14,6 @@ def send_telegram_message(text):
     token = str(token).strip()
     chat_id = str(chat_id).strip()
 
-    # لیست تانل‌های موازی شبکه برای تضمین پایداری ارسال
     urls = [
         f"https://api.telegram.org/bot{token}/sendMessage",
         f"https://teleapi.ir/bot{token}/sendMessage",
@@ -42,12 +41,13 @@ def send_telegram_message(text):
     return False
 
 def format_and_send_signal(signal_data):
-    """فرمت‌بندی پیشرفته فارسی برای سیگنال خروجی ربات"""
+    """فرمت‌بندی پیشرفته فارسی برای سیگنال خروجی ربات (اصلاح شده با کلیدهای ML)"""
     if not signal_data:
         return False
         
     emoji_dir = "🟢 LONG (خرید)" if signal_data['direction'] == 'LONG' else "🔴 SHORT (فروش)"
 
+    # 🟢 اصلاح کلیدها: فراخوانی دقیق کلیدهایی که از استراتژی ارسال می‌شوند
     message = (
         f"🎯 **سیگنال جدید و زنده (ورود سریع)**\n\n"
         f"🔹 **جفت ارز:** {signal_data['pair']}\n"
@@ -56,8 +56,9 @@ def format_and_send_signal(signal_data):
         f"🛑 **حد ضرر (Stop Loss):** {signal_data['stop_loss']}\n"
         f"✅ **تارگت اول (TP1):** {signal_data['tp1']}\n"
         f"💎 **تارگت دوم (TP2):** {signal_data['tp2']}\n\n"
-        f"📊 شاخص نوسان (ATR): {signal_data['atr_value']}\n"
-        f"📈 قدرت روند واقعی (ADX): {signal_data['adx_value']}\n\n"
-        f"✓ این موقعیت با فیلتر زمانی داینامیک ۸ ساعته محافظت شده است."
+        f"📊 شاخص نوسان (ATR %): {signal_data['feat_atr_percent']}%\n"
+        f"📈 قدرت روند واقعی (ADX): {signal_data['feat_adx']}\n"
+        f"🔊 ضریب حجم معاملات: {signal_data['feat_vol_ratio']}x\n\n"
+        f"✓ این موقعیت با لایه فیلترینگ هوش مصنوعی (ML) ارزیابی شده است."
     )
     return send_telegram_message(message)
