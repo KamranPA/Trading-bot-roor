@@ -1,5 +1,5 @@
 # main.py
-# فایل اصلی اجرای ربات (نسخه v5.6 - مجهز به سیستم فیلترینگ ۳۶۰ درجه لایو با یادگیری ماشین)
+# فایل اصلی اجرای ربات (نسخه v6.0 - مجهز به هوش مصنوعی ۳۶۰ درجه و مدیریت ریسک توزیع‌شده Trailing Stop)
 
 import os
 import sys
@@ -8,6 +8,7 @@ import sqlite3
 from datetime import datetime
 import joblib
 
+# تنظیم مسیرهای اصلی پروژه جهت جلوگیری از ارورهای ایمپورت ماژول
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if CURRENT_DIR not in sys.path:
     sys.path.append(CURRENT_DIR)
@@ -27,7 +28,7 @@ from src import train_model
 MODEL_PATH = os.path.join(CURRENT_DIR, "src", "models", "trading_filter_model.pkl")
 
 def check_ai_permission(feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line):
-    """🧠 دروازه‌بان هوش مصنوعی ۳۶۰ درجه: بررسی شکست با ۵ ویژگی قدرتمند"""
+    """🧠 دروازه‌بان هوش مصنوعی ۳۶۰ درجه: بررسی شکست با ۵ ویژگی قدرتمند تکنیکال"""
     if not os.path.exists(MODEL_PATH):
         print("ℹ️ مدل هوش مصنوعی یافت نشد؛ سیگنال با فیلترهای کلاسیک ارزیابی می‌شود.")
         return True, 1.0
@@ -35,6 +36,7 @@ def check_ai_permission(feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, fe
     try:
         model = joblib.load(MODEL_PATH)
         
+        # ساخت دیتافریم منطبق بر ویژگی‌های زمان آموزش مدل
         input_data = pd.DataFrame([{
             'feat_adx': feat_adx,
             'feat_vol_ratio': feat_vol_ratio,
@@ -59,6 +61,7 @@ def check_ai_permission(feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, fe
         return True, 1.0
 
 def update_open_positions():
+    """🛡️ مکانیزم مدیریت ریسک پیشرفته: بررسی پوزیشن‌های باز، ریسک‌فری خودکار و خروج در تارگت‌ها"""
     db_path = database.DB_NAME
     if not os.path.exists(db_path):
         return
@@ -67,6 +70,7 @@ def update_open_positions():
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
+        # ۱. استخراج پوزیشن‌های باز از دیتابیس
         cursor.execute("SELECT id, symbol, direction, entry_price, stop_loss FROM signals WHERE status = 'OPEN'")
         open_positions = cursor.fetchall()
         
@@ -78,14 +82,20 @@ def update_open_positions():
             pos_id, symbol, direction, entry_price, stop_loss = pos
             pair = f"{symbol}/USDT"
             
+            # دریافت قیمت لحظه‌ای از صرافی کوین‌اکس
             df = coinex_client.get_coinex_candles(pair)
             if df is None or df.empty:
                 continue
                 
-            current_price = df.iloc[-1]['Close']
+            current_price = float(df.iloc[-1]['Close'])
             
-            cursor.execute("SELECT target_number, target_price FROM signal_targets WHERE signal_id = ?", (pos_id,))
-            targets = {row[0]: row[1] for row in cursor.fetchall()}
+            # استخراج تارگت‌های مربوط به این پوزیشن
+            cursor.execute("SELECT target_number, target_price, status FROM signal_targets WHERE signal_id = ?", (pos_id,))
+            targets_data = cursor.fetchall()
+            
+            targets = {row[0]: row[1] for row in targets_data}
+            targets_status = {row[0]: row[2] for row in targets_data}
+            
             tp1 = targets.get(1)
             tp2 = targets.get(2)
             
@@ -93,34 +103,61 @@ def update_open_positions():
             pnl = 0.0
             reason = ""
             
+            # 🟢 سناریوی معاملات خرید (LONG)
             if direction == 'LONG':
+                # الف) بررسی فعال‌سازی ریسک‌فری خودکار (قیمت به TP1 رسیده اما وضعیت آن PENDING است)
+                if tp1 and current_price >= tp1 and targets_status.get(1) == 'PENDING':
+                    cursor.execute("UPDATE signal_targets SET status = 'HIT' WHERE signal_id = ? AND target_number = 1", (pos_id,))
+                    cursor.execute("UPDATE signals SET stop_loss = ? WHERE id = ?", (entry_price, pos_id))
+                    stop_loss = entry_price # همگام‌سازی متغیر محلی برای ادامه پردازش کندل فعلی
+                    
+                    telegram_bot.send_telegram_message(
+                        f"🛡️ **عملیات ریسک‌فری خودکار (Risk-Free)**\n\n"
+                        f"🔹 جفت ارز: #{symbol}\n"
+                        f"✅ تارگت اول (TP1) با موفقیت لمس شد.\n"
+                        f"📉 حد ضرر (SL) برای امنیت کامل حساب به **نقطه ورود ({entry_price})** منتقل شد. معامله کاملاً بیمه است! 👌"
+                    )
+                
+                # ب) بررسی فعال شدن حد ضرر (اصلی یا ریسک‌فری شده)
                 if current_price <= stop_loss:
                     closed = True
                     pnl = ((stop_loss - entry_price) / entry_price) * 100
-                    reason = "SL Hit"
+                    reason = "Stop Loss Hit (حد ضرر یا ریسک‌فری)"
+                
+                # ج) بررسی لمس تارگت نهایی و اصلی
                 elif tp2 and current_price >= tp2:
                     closed = True
                     pnl = ((tp2 - entry_price) / entry_price) * 100
-                    reason = "TP2 Hit"
-                elif tp1 and current_price >= tp1:
-                    closed = True
-                    pnl = ((tp1 - entry_price) / entry_price) * 100
-                    reason = "TP1 Hit"
+                    reason = "تارگت دوم (TP2 Hit)"
                     
+            # 🔴 سناریوی معاملات فروش (SHORT)
             elif direction == 'SHORT':
+                # الف) بررسی فعال‌سازی ریسک‌فری خودکار
+                if tp1 and current_price <= tp1 and targets_status.get(1) == 'PENDING':
+                    cursor.execute("UPDATE signal_targets SET status = 'HIT' WHERE signal_id = ? AND target_number = 1", (pos_id,))
+                    cursor.execute("UPDATE signals SET stop_loss = ? WHERE id = ?", (entry_price, pos_id))
+                    stop_loss = entry_price
+                    
+                    telegram_bot.send_telegram_message(
+                        f"🛡️ **عملیات ریسک‌فری خودکار (Risk-Free)**\n\n"
+                        f"🔹 جفت ارز: #{symbol}\n"
+                        f"✅ تارگت اول (TP1) با موفقیت لمس شد.\n"
+                        f"📈 حد ضرر (SL) برای امنیت کامل حساب به **نقطه ورود ({entry_price})** منتقل شد. معامله کاملاً بیمه است! 👌"
+                    )
+                
+                # ب) بررسی فعال شدن حد ضرر
                 if current_price >= stop_loss:
                     closed = True
                     pnl = ((entry_price - stop_loss) / entry_price) * 100
-                    reason = "SL Hit"
+                    reason = "Stop Loss Hit (حد ضرر یا ریسک‌فری)"
+                
+                # ج) بررسی لمس تارگت نهایی
                 elif tp2 and current_price <= tp2:
                     closed = True
                     pnl = ((entry_price - tp2) / entry_price) * 100
-                    reason = "TP2 Hit"
-                elif tp1 and current_price <= tp1:
-                    closed = True
-                    pnl = ((entry_price - tp1) / entry_price) * 100
-                    reason = "TP1 Hit"
+                    reason = "تارگت دوم (TP2 Hit)"
             
+            # اگر پوزیشن در این اسکن بسته شده باشد
             if closed:
                 cursor.execute("""
                     UPDATE signals 
@@ -128,16 +165,27 @@ def update_open_positions():
                     WHERE id = ?
                 """, (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), round(pnl, 2), pos_id))
                 
-                target_status = "HIT" if "TP" in reason else "FAILED"
-                cursor.execute("UPDATE signal_targets SET status = ? WHERE signal_id = ?", (target_status, pos_id))
-                print(f"🚨 [POSITION CLOSED] ارز {symbol} بسته شد | بازدهی: {pnl:.2f}%")
+                final_status = "HIT" if "TP2" in reason else "FAILED"
+                cursor.execute("UPDATE signal_targets SET status = ? WHERE signal_id = ? AND target_number = 2", (final_status, pos_id))
+                
+                # ارسال بیانیه خروج به تلگرام شما
+                status_emoji = "💎" if "TP2" in reason else "🚪"
+                telegram_bot.send_telegram_message(
+                    f"{status_emoji} **خروج از پوزیشن معاملاتی**\n\n"
+                    f"🔹 جفت ارز: #{symbol}\n"
+                    f"🔸 موقعیت: {direction}\n"
+                    f"💡 علت خروج: {reason}\n"
+                    f"💰 بازدهی نهایی پوزیشن: **{pnl:.2f}%**"
+                )
+                print(f"🚨 [POSITION CLOSED] ارز {symbol} بسته شد | علت: {reason} | بازدهی: {pnl:.2f}%")
                 
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"⚠️ خطا در بروزرسانی معاملات: {e}")
+        print(f"⚠️ خطا در مدیریت ریسک و بروزرسانی معاملات: {e}")
 
 def is_telegram_locked_8h(symbol, hours_limit=8):
+    """🔏 جلوگیری از ارسال سیگنال‌های تکراری و هم‌پوشان از یک ارز در بازه ۸ ساعته"""
     db_path = database.DB_NAME
     if not os.path.exists(db_path):
         return False
@@ -160,16 +208,21 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
         return False
 
 def run_bot():
-    print("🤖 اسکنر هوشمند نسخه v5.6 (دید ۳۶۰ درجه یادگیری ماشین) فعال شد...")
+    print("🤖 اسکنر هوشمند نسخه v6.0 (دید ۳۶۰ درجه هوش مصنوعی + Trailing Stop لایو) فعال شد...")
     
+    # راه‌اندازی دیتابیس کالیبره شده با ساختار جدید
     database.init_db()
     if str(database.get_setting("bot_status", "ACTIVE")).strip().upper() != "ACTIVE":
-        print("🛑 ربات غیرفعال است.")
+        print("🛑 ربات از طریق تنظیمات دیتابیس غیرفعال شده است.")
         return
     
+    # گام اول: اجرای سیستم مدیریت ریسک روی پوزیشن‌های باز قبلی
     update_open_positions()
+    
+    # گام دوم: بررسی خودکار نیاز به بازآموزی مدل یادگیری ماشین
     train_model.train_ai_model()
     
+    # گام سوم: اسکن چرخشی واچ‌لیست ارزها
     for pair in config.WATCHLIST:
         symbol = pair.split('/')[0]
         
@@ -180,9 +233,11 @@ def run_bot():
         df = indicators.calculate_indicators(df)
         signal_result = strategy.generate_signal(df, pair)
         
+        # اگر استراتژی کلاسیک سیگنال معتبری پیدا کرد
         if signal_result and isinstance(signal_result, dict):
             direction = signal_result['direction']
             
+            # استعلام فیلترینگ هوشمند ۵ فاکتوره از هوش مصنوعی
             ai_approved, win_rate = check_ai_permission(
                 feat_adx=signal_result['feat_adx'],
                 feat_vol_ratio=signal_result['feat_vol_ratio'],
@@ -195,6 +250,7 @@ def run_bot():
                 database.log_scan(symbol, f"Blocked by AI (Est Win: {win_rate*100:.1f}%)")
                 continue
             
+            # ذخیره پوزیشن تایید شده در دیتابیس
             database.save_signal_advanced(
                 symbol=symbol, direction=direction,
                 entry_price=signal_result['entry_price'], stop_loss=signal_result['stop_loss'],
@@ -204,9 +260,12 @@ def run_bot():
                 feat_trend_line=signal_result['feat_trend_line'], status="OPEN"
             )
             
+            # بررسی قفل زمانی ۸ ساعته کانال تلگرام برای این ارز
             if is_telegram_locked_8h(symbol, hours_limit=8):
+                print(f"ℹ️ سیگنال {symbol} در دیتابیس ثبت شد اما به دلیل قفل ۸ ساعته تلگرام، ارسال نشد.")
                 continue
                 
+            # ارسال پیام شکیل سیگنال به تلگرام
             telegram_bot.format_and_send_signal(signal_result)
         else:
             database.log_scan(symbol, "No Signal")
