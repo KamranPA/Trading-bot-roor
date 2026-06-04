@@ -1,5 +1,5 @@
 # src/database.py
-# ماژول جامع و ساختاریافته مدیریت دیتابیس (نسخه v3.0 - معماری نهایی و صنعتی)
+# ماژول جامع و ساختاریافته مدیریت دیتابیس (نسخه v3.1 - هماهنگ شده با زمان UTC سرور)
 
 import os
 import sqlite3
@@ -17,7 +17,6 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # فعال کردن پشتیبانی از Foreign Key در اس‌کیوال‌لایت
     cursor.execute("PRAGMA foreign_keys = ON;")
     
     # ۱. جدول اصلی سیگنال‌ها و پوزیشن‌ها
@@ -36,19 +35,19 @@ def init_db():
         )
     ''')
     
-    # ۲. جدول تفکیکی تارگت‌ها (مرتبط با جدول اصلی)
+    # ۲. جدول تفکیکی تارگت‌ها
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS signal_targets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             signal_id INTEGER,
-            target_number INTEGER, -- 1 یا 2
+            target_number INTEGER,
             target_price REAL,
-            status TEXT, -- PENDING, HIT
+            status TEXT,
             FOREIGN KEY(signal_id) REFERENCES signals(id) ON DELETE CASCADE
         )
     ''')
     
-    # ۳. جدول جعبه سیاه لاگ‌ها برای تغذیه هوش مصنوعی
+    # ۳. جدول لاگ‌ها برای تغذیه هوش مصنوعی
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS scan_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,7 +57,7 @@ def init_db():
         )
     ''')
     
-    # ۴. جدول تنظیمات زنده سیستم (برای آپدیت‌های monthly_brain)
+    # ۴. جدول تنظیمات زنده سیستم
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS bot_settings (
             setting_key TEXT PRIMARY KEY,
@@ -67,7 +66,7 @@ def init_db():
         )
     ''')
     
-    # 🛡️ تزریق پیش‌فرض تنظیمات در صورت خالی بودن (جهت استارت اولیه ربات)
+    # تزریق پیش‌فرض تنظیمات در صورت خالی بودن (با زمان UTC)
     default_settings = {
         "atr_period": "14",
         "risk_reward_ratio": "2.0",
@@ -77,42 +76,41 @@ def init_db():
         cursor.execute("""
             INSERT OR IGNORE INTO bot_settings (setting_key, setting_value, updated_at)
             VALUES (?, ?, ?)
-        """, (key, val, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        """, (key, val, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
         
     conn.commit()
     conn.close()
 
 def log_scan(symbol, result):
-    """ثبت دقیق لاگ عملکرد اسکنر بازار"""
+    """ثبت دقیق لاگ عملکرد اسکنر بازار بر پایه UTC"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute(
         "INSERT INTO scan_logs (timestamp, symbol, result) VALUES (?, ?, ?)",
-        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), symbol, result)
+        (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), symbol, result)
     )
     conn.commit()
     conn.close()
 
 def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, status="OPEN"):
-    """ذخیره هوشمند پوزیشن در جدول اصلی و تفکیک تارگت‌ها در جدول هدف"""
+    """ذخیره هوشمند پوزیشن و تارگت‌ها بر پایه کالیبراسیون زمانی UTC"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("PRAGMA foreign_keys = ON;")
     
     try:
-        # الف) ثبت در جدول اصلی signals
+        # ثبت در جدول اصلی signals همراه با زمان UTC گیت‌هاب
         query_main = """
             INSERT INTO signals (timestamp, symbol, direction, entry_price, stop_loss, status)
             VALUES (?, ?, ?, ?, ?, ?)
         """
         cursor.execute(query_main, (
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"), symbol, direction, entry_price, stop_loss, status
+            datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), symbol, direction, entry_price, stop_loss, status
         ))
         
-        # دریافت ID پوزیشنی که همین الان ساخته شد
         signal_id = cursor.lastrowid
         
-        # ب) ثبت تارگت‌ها در جدول مجزای signal_targets
+        # ثبت تارگت‌ها در جدول مجزا
         query_target = """
             INSERT INTO signal_targets (signal_id, target_number, target_price, status)
             VALUES (?, ?, ?, ?)
@@ -121,15 +119,15 @@ def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, st
         cursor.execute(query_target, (signal_id, 2, tp2, "PENDING"))
         
         conn.commit()
-        print(f"🎯 [DB v3.0 SUCCESS]: پوزیشن {symbol} و تارگت‌های تفکیکی با موفقیت جفت شدند.")
+        print(f"🎯 [DB v3.1 SUCCESS]: پوزیشن {symbol} با زمان استاندارد UTC ثبت شد.")
     except Exception as e:
-        print(f"❌ خطای معماری دیتابیس در ذخیره پوزیشن ترکیبی: {e}")
+        print(f"❌ خطای معماری دیتابیس در ذخیره پوزیشن: {e}")
         conn.rollback()
     finally:
         conn.close()
 
 def get_setting(key, default_value):
-    """خواندن تنظیمات زنده سیستم (مورد نیاز برای پویایی ربات)"""
+    """خواندن تنظیمات زنده سیستم"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT setting_value FROM bot_settings WHERE setting_key = ?", (key,))
