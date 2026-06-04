@@ -1,5 +1,5 @@
 # main.py
-# فایل اصلی اجرای ربات (نسخه v3.6 - اصلاح تداخل ماژول دیتابیس در گیت‌هاب اکشنز)
+# فایل اصلی اجرای ربات (نسخه v3.7 - اصلاح ترتیب ذخیره‌سازی سیگنال‌ها برای رفع مشکل خالی ماندن جداول)
 
 import os
 import sys
@@ -18,7 +18,7 @@ if SRC_DIR not in sys.path:
 
 # ایمپورت‌های کالیبره‌شده برای سرور لینوکس گیت‌هاب
 import config
-from src import database          # 🛠️ اصلاح اصلی: فراخوانی مستقیم از پوشه src جهت رفع خطای AttributeError
+from src import database
 from src import coinex_client
 from src import strategy
 from src import telegram_bot
@@ -157,7 +157,7 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
         return False
 
 def run_bot():
-    print("🤖 اسکنر هوشمند نسخه v3.6 (مجهز به بازخورد PnL و ضد اسپم UTC) فعال شد...")
+    print("🤖 اسکنر هوشمند نسخه v3.7 (مجهز به بازخورد PnL و ضد اسپم UTC) فعال شد...")
     
     # فراخوانی متدها مستقیماً از نمونه ایمپورت شده سورس داخلی
     database.init_db()
@@ -193,15 +193,8 @@ def run_bot():
             direction = signal_result['direction']
             print(f"🎯 استراتژی روی {symbol} سیگنال {direction} صادر کرد.")
             
-            # ۱. ثبت لاگ اولیه اسکن در دیتابیس
-            database.log_scan(symbol, f"Signal {direction} | Entry: {signal_result['entry_price']}")
-            
-            # ۲. اعمال فیلتر زمانی ضد اسپم ۸ ساعته کالیبره شده با UTC سرور
-            if is_telegram_locked_8h(symbol, hours_limit=8):
-                print(f"⏭️ ارسال به تلگرام مسدود شد: فیلتر ۸ ساعته برای {symbol} فعال است.")
-                continue
-                
-            # ۳. ذخیره‌سازی داده‌ها در معماری تفکیکی و ۴ جدوله دیتابیس با زمان استاندارد
+            # 🔥 تغییر حیاتی فاز دوم: ثبت پوزیشن در جداول signals و signal_targets بلافاصله بعد از صدور استراتژی
+            # این خطوط قبل از فیلتر 8 ساعته تلگرام اجرا می‌شوند تا پوزیشن‌ها حتما ذخیره شوند.
             database.save_signal_advanced(
                 symbol=symbol,
                 direction=direction,
@@ -212,7 +205,12 @@ def run_bot():
                 status="OPEN"
             )
             
-            # ۴. فرمت‌بندی فارسی و ارسال سیگنال لایو به تلگرام
+            # حالا اعمال فیلتر زمانی ضد اسپم ۸ ساعته کالیبره شده با UTC سرور برای "ارسال تلگرام"
+            if is_telegram_locked_8h(symbol, hours_limit=8):
+                print(f"⏭️ ارسال به تلگرام مسدود شد: فیلتر ۸ ساعته برای {symbol} فعال است.")
+                continue
+                
+            # فرمت‌بندی فارسی و ارسال سیگنال لایو به تلگرام
             telegram_bot.format_and_send_signal(signal_result)
             
         else:
