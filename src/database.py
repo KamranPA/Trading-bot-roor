@@ -1,112 +1,145 @@
-# src/strategy.py
-# ماژول منطق استراتژی بر پایه شکست سطوح سوئینگ (Pivot) کالیبره شده با فیلتر روند و مدیریت ریسک داینامیک
+# src/database.py
+# ماژول مدیریت دیتابیس پیشرفته (معماری ۴ جدوله تفکیک‌شده نسخه v3.6)
 
-import pandas as pd
-import config
+import os
+import sqlite3
+from datetime import datetime
 
-def check_swing_high(df, index, window):
-    """بررسی تایید سقف سوئینگ بر اساس کندل‌های قبل و بعد در پنجره مشخص شده"""
-    if index < window or index >= len(df) - window:
-        return False
-    current_high = df.loc[index, 'High']
+# تعیین مسیر ثابت برای ذخیره‌سازی دیتابیس در پوشه data ریشه پروژه
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+
+# مطمئن شدن از وجود پوشه data
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
+
+DB_NAME = os.path.join(DATA_DIR, "trading_bot.db")
+
+def init_db():
+    """🛡️ تابع حیاتی راه‌اندازی و ساخت جداول دیتابیس (رفع خطای AttributeError)"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
     
-    # بررسی اینکه آیا سقف کندل جاری از تمام کندل‌های بازه پنجره بلندتر است یا خیر
-    for i in range(1, window + 1):
-        if df.loc[index - i, 'High'] > current_high or df.loc[index + i, 'High'] > current_high:
+    # ۱. جدول اصلی سیگنال‌ها و پوزیشن‌ها
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS signals (
+            id INTEGER PRIMARY KEY AUTO_INCREMENT,
+            timestamp TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            entry_price REAL NOT NULL,
+            stop_loss REAL NOT NULL,
+            status TEXT DEFAULT 'OPEN',
+            closed_at TEXT,
+            pnl_percent REAL DEFAULT 0.0
+        )
+    """)
+    
+    # ۲. جدول تفکیکی تارگت‌ها و حد سودها
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS signal_targets (
+            id INTEGER PRIMARY KEY AUTO_INCREMENT,
+            signal_id INTEGER NOT NULL,
+            target_number INTEGER NOT NULL,
+            target_price REAL NOT NULL,
+            status TEXT DEFAULT 'PENDING',
+            FOREIGN KEY (signal_id) REFERENCES signals(id) ON DELETE CASCADE
+        )
+    """)
+    
+    # ۳. جدول لاگ اسکن‌های دوره‌ای بازار برای تغذیه مغز سیستم
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scan_logs (
+            id INTEGER PRIMARY KEY AUTO_INCREMENT,
+            timestamp TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            result TEXT NOT NULL
+        )
+    """)
+    
+    # ۴. جدول تنظیمات داینامیک ربات (مانند وضعیت فعال/غیرفعال بودن)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bot_settings (
+            setting_key TEXT PRIMARY KEY,
+            setting_value TEXT NOT NULL
+        )
+    """)
+    
+    # مقداردهی اولیه تنظیمات در صورت عدم وجود
+    cursor.execute("INSERT OR IGNORE INTO bot_settings (setting_key, setting_value) VALUES ('bot_status', 'ACTIVE')")
+    
+    conn.commit()
+    conn.close()
+    print("🗄️ دیتابیس و جداول ۴ گانه با موفقیت راه‌اندازی و هماهنگ شدند.")
+
+def log_scan(symbol, result):
+    """ثبت لاگ دوره‌ای اسکن جفت‌ارزها"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(
+            "INSERT INTO scan_logs (timestamp, symbol, result) VALUES (?, ?, ?)",
+            (current_time, symbol, result)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ خطا در ثبت لاگ اسکن: {e}")
+
+def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, status="OPEN"):
+    """ذخیره‌سازی پیشرفته و تفکیک‌شده سیگنال در دو جدول مجزا"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # ثبت در جدول اصلی سیگنال‌ها
+        cursor.execute("""
+            INSERT INTO signals (timestamp, symbol, direction, entry_price, stop_loss, status)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (current_time, symbol, direction, entry_price, stop_loss, status))
+        
+        signal_id = cursor.lastrowid
+        
+        # ثبت تارگت‌ها در جدول تفکیکی تارگت‌ها
+        if tp1:
+            cursor.execute("INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, ?, ?)", (signal_id, 1, tp1))
+        if tp2:
+            cursor.execute("INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, ?, ?)", (signal_id, 2, tp2))
+            
+        conn.commit()
+        conn.close()
+        print(f"💾 سیگنال {symbol} با شناسه {signal_id} در دیتابیس بایگانی شد.")
+    except Exception as e:
+        print(f"⚠️ خطا در ذخیره پیشرفته سیگنال: {e}")
+
+def get_setting(key, default_value):
+    """دریافت مقادیر تنظیمات از دیتابیس"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("SELECT setting_value FROM bot_settings WHERE setting_key = ?", (key,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row else default_value
+    except Exception:
+        return default_value
+
+def check_filters_lock():
+    """بررسی وضعیت سخت‌گیری فیلترها بر اساس لاگ‌های ۱۸۰ اسکن اخیر"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("SELECT result FROM scan_logs ORDER BY id DESC LIMIT 180")
+        logs = cursor.fetchall()
+        conn.close()
+        
+        if len(logs) < 180:
             return False
-    return True
-
-def check_swing_low(df, index, window):
-    """بررسی تایید کف سوئینگ بر اساس کندل‌های قبل و بعد در پنجره مشخص شده"""
-    if index < window or index >= len(df) - window:
+            
+        # اگر در ۱۸۰ لاگ اخیر همگی وضعیت No Signal داشته باشند، یعنی فیلترها بازار را قفل کرده‌اند
+        all_no_signal = all("No Signal" in row[0] for row in logs)
+        return all_no_signal
+    except Exception:
         return False
-    current_low = df.loc[index, 'Low']
-    
-    # بررسی اینکه آیا کف کندل جاری از تمام کندل‌های بازه پنجره پایین‌تر است یا خیر
-    for i in range(1, window + 1):
-        if df.loc[index - i, 'Low'] < current_low or df.loc[index + i, 'Low'] < current_low:
-            return False
-    return True
-
-def generate_signal(df, pair):
-    """
-    سنجش شکست آخرین سطوح سوئینگ معتبر توسط کندل لایو بازار با فیلترهای ADX و میانگین حجم
-    """
-    # بررسی کفایت تعداد کندل‌ها برای محاسبات سوئینگ
-    if df is None or len(df) < (config.SWING_WINDOW * 2 + 1):
-        return None
-
-    live_candle_idx = len(df) - 1
-    current_candle = df.iloc[live_candle_idx]
-    
-    # فیلتر اول: خروج سریع در صورت رِنج و بی‌رمق بودن بازار بر اساس اندیکاتور ADX زنده
-    if current_candle['ADX'] < config.ADX_THRESHOLD:
-        return None
-
-    last_swing_high = None
-    last_swing_low = None
-    
-    # نقطه شروع جستجوی معکوس (باید به اندازه پنجره از کندل لایو فاصله داشته باشد تا تاییدیه کامل باشد)
-    search_start_idx = len(df) - 1 - config.SWING_WINDOW
-    
-    # حرکت معکوس در تاریخچه کندل‌ها برای پیدا کردن آخرین سقف و کف سوئینگ معتبر
-    for idx in range(search_start_idx, config.SWING_WINDOW, -1):
-        if last_swing_high is None and check_swing_high(df, idx, config.SWING_WINDOW):
-            last_swing_high = df.loc[idx, 'High']
-        if last_swing_low is None and check_swing_low(df, idx, config.SWING_WINDOW):
-            last_swing_low = df.loc[idx, 'Low']
-        
-        # به محض پیدا شدن هر دو سطح، برای بهینه‌سازی سرعت لوپ را متوقف می‌کنیم
-        if last_swing_high is not None and last_swing_low is not None:
-            break
-
-    if last_swing_high is None or last_swing_low is None:
-        return None
-
-    # 🟢 بررسی شرط ورود خرید (LONG) - شکست سقف سوئینگ + فیلتر تایید حجم معاملاتی
-    if current_candle['Close'] > last_swing_high and current_candle['Volume'] > current_candle['Volume_MA']:
-        entry = current_candle['Close']
-        atr = current_candle['ATR'] if current_candle['ATR'] > 0 else (entry * 0.02)
-        
-        # محاسبه حد ضرر و حد سودهای داینامیک متصل به فایل تنظیمات مرکزی
-        sl = entry - (1.5 * atr)
-        risk_distance = entry - sl
-        
-        tp1 = entry + (risk_distance * config.RISK_REWARD_TP1)
-        tp2 = entry + (risk_distance * config.RISK_REWARD_TP1 * 2.0) # تارگت دوم با دو برابر ریسک به ریوارد اصلی
-        
-        return {
-            'pair': pair,
-            'direction': 'LONG',
-            'entry_price': round(entry, 4),
-            'stop_loss': round(sl, 4),
-            'tp1': round(tp1, 4),
-            'tp2': round(tp2, 4),
-            'atr_value': round(atr, 4),
-            'adx_value': round(current_candle['ADX'], 2)
-        }
-
-    # 🔴 بررسی شرط ورود فروش (SHORT) - شکست کف سوئینگ + فیلتر تایید حجم معاملاتی
-    elif current_candle['Close'] < last_swing_low and current_candle['Volume'] > current_candle['Volume_MA']:
-        entry = current_candle['Close']
-        atr = current_candle['ATR'] if current_candle['ATR'] > 0 else (entry * 0.02)
-        
-        # محاسبه حد ضرر و حد سودهای داینامیک برای موقعیت فروش
-        sl = entry + (1.5 * atr)
-        risk_distance = sl - entry
-        
-        tp1 = entry - (risk_distance * config.RISK_REWARD_TP1)
-        tp2 = entry - (risk_distance * config.RISK_REWARD_TP1 * 2.0)
-        
-        return {
-            'pair': pair,
-            'direction': 'SHORT',
-            'entry_price': round(entry, 4),
-            'stop_loss': round(sl, 4),
-            'tp1': round(tp1, 4),
-            'tp2': round(tp2, 4),
-            'atr_value': round(atr, 4),
-            'adx_value': round(current_candle['ADX'], 2)
-        }
-
-    return None
