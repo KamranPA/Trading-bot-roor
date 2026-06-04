@@ -1,5 +1,5 @@
 # main.py
-# فایل اصلی اجرای ربات (نسخه v3.1 - اصلاح‌شده با فیلتر UTC و لیست واچ‌لیست پویا)
+# فایل اصلی اجرای ربات (نسخه v3.2 - اصلاح‌شده با فیلتر هوشمند UTC و لیست واچ‌لیست پویا)
 
 import os
 import sys
@@ -23,7 +23,7 @@ from src import telegram_bot
 from src import indicators
 
 def is_telegram_locked_8h(symbol, hours_limit=8):
-    """بررسی هوشمند ریاضی اختلاف زمان آخرین پوزیشن بر پایه UTC جهت فعال‌سازی فیلتر ۸ ساعته"""
+    """بررسی هوشمند اختلاف زمان آخرین پوزیشن بر پایه UTC جهت جلوگیری از اسپم در بازه زمانی مشخص"""
     db_path = database.DB_NAME
     if not os.path.exists(db_path):
         return False
@@ -43,13 +43,14 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
             except Exception:
                 return False
                 
-            # محاسبه اختلاف بر پایه زمان استاندارد بین‌المللی گیت‌هاب (UTC)
+            # محاسبه دقیق اختلاف زمان جاری سرور با زمان آخرین سیگنال ثبت شده
             time_difference = datetime.utcnow() - last_signal_time
-            hours_passed = abs(time_difference.total_seconds() / 3600)
+            hours_passed = time_difference.total_seconds() / 3600
             
             print(f"⏱️ [Filter Check] برای {symbol}: {hours_passed:.2f} ساعت از آخرین پوزیشن گذشته است.")
             
-            if hours_passed < hours_limit or hours_passed > (24 - hours_limit):
+            # اصلاح باگ سرریز منطقی: صرفاً اگر زمان گذشته کمتر از حد مجاز باشد، ارسال قفل است.
+            if hours_passed < hours_limit:
                 print(f"🔒 [Locked] ارسال سیگنال تکراری {symbol} به تلگرام مسدود شد.")
                 return True
                 
@@ -59,18 +60,19 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
         return False
 
 def run_bot():
-    print("🤖 اسکنر هوشمند نسخه v3.1 (معماری داده تفکیکی و ضد اسپم UTC) فعال شد...")
+    print("🤖 اسکنر هوشمند نسخه v3.2 (معماری داده تفکیکی و ضد اسپم UTC) فعال شد...")
     database.init_db()
     database.check_filters_lock()
     
-    bot_mode = database.get_setting("bot_status", "ACTIVE")
+    # بررسی وضعیت فعال یا غیرفعال بودن ربات از دیتابیس
+    bot_mode = str(database.get_setting("bot_status", "ACTIVE")).strip().upper()
     if bot_mode != "ACTIVE":
         print("🛑 ربات از طریق تنظیمات دیتابیس غیرفعال شده است.")
         return
     
-    # 🛠️ اصلاح حیاتی: استفاده مستقیم از واچ‌لیست مرکزی بجای لیست دستی قدیمی
+    # استفاده مستقیم از واچ‌لیست مرکزی برای گردش در جفت‌ارزها
     for pair in config.WATCHLIST:
-        symbol = pair.split('/')[0] # استخراج نام ارز (مثلاً BTC) برای دیتابیس
+        symbol = pair.split('/')[0]  # استخراج نام ارز (مثلاً BTC) برای ثبت تمیز در دیتابیس
         print(f"\n🔄 اسکنر در حال پردازش و محاسبات تکنیکال: {pair}...")
         
         df = coinex_client.get_coinex_candles(pair)
@@ -78,22 +80,25 @@ def run_bot():
             print(f"❌ دیتایی برای جفت‌ارز {pair} دریافت نشد.")
             continue
             
+        # محاسبه اندیکاتورهای شخصی‌سازی شده داخلی
         df = indicators.calculate_indicators(df)
+        
+        # پردازش استراتژی شکست سطوح سوئینگ
         signal_result = strategy.generate_signal(df, pair)
         
         if signal_result and isinstance(signal_result, dict):
             direction = signal_result['direction']
             print(f"🎯 استراتژی روی {symbol} سیگنال {direction} صادر کرد.")
             
-            # ثبت در لاگ اسکن
+            # ۱. ثبت در لاگ اسکن دیتابیس
             database.log_scan(symbol, f"Signal {direction} | Entry: {signal_result['entry_price']}")
             
-            # فیلتر نشت لایو ۸ ساعته (اکنون با UTC کالیبره شده است)
+            # ۲. بررسی فیلتر ضد اسپم با زمان کالیبره شده UTC
             if is_telegram_locked_8h(symbol, hours_limit=8):
                 print(f"⏭️ ارسال به تلگرام مسدود شد: فیلتر ۸ ساعته برای {symbol} فعال است.")
                 continue
                 
-            # ذخیره‌سازی داده‌ها در معماری تفکیکی دیتابیس
+            # ۳. ذخیره‌سازی پیشرفته پوزیشن و تارگت‌ها در جداول تفکیکی دیتابیس
             database.save_signal_advanced(
                 symbol=symbol,
                 direction=direction,
@@ -104,6 +109,7 @@ def run_bot():
                 status="OPEN"
             )
             
+            # ۴. ارسال خروجی فارسی سازی شده به کانال یا گروه تلگرام
             telegram_bot.format_and_send_signal(signal_result)
             
         else:
