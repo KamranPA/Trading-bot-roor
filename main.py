@@ -1,5 +1,5 @@
 # main.py
-# فایل اصلی اجرای ربات (نسخه v3.5 - مجهز به موتور مدیریت پوزیشن‌های باز، محاسبه PnL و فیلتر ضد اسپم UTC)
+# فایل اصلی اجرای ربات (نسخه v3.6 - اصلاح تداخل ماژول دیتابیس در گیت‌هاب اکشنز)
 
 import os
 import sys
@@ -7,6 +7,7 @@ import pandas as pd
 import sqlite3
 from datetime import datetime
 
+# تنظیم دقیق و مستقل مسیرهای پروژه برای جلوگیری از تداخل لود ماژول‌ها
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if CURRENT_DIR not in sys.path:
     sys.path.append(CURRENT_DIR)
@@ -15,8 +16,9 @@ SRC_DIR = os.path.join(CURRENT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.append(SRC_DIR)
 
+# ایمپورت‌های کالیبره‌شده برای سرور لینوکس گیت‌هاب
 import config
-import database
+from src import database          # 🛠️ اصلاح اصلی: فراخوانی مستقیم از پوشه src جهت رفع خطای AttributeError
 from src import coinex_client
 from src import strategy
 from src import telegram_bot
@@ -155,9 +157,9 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
         return False
 
 def run_bot():
-    print("🤖 اسکنر هوشمند نسخه v3.5 (مجهز به بازخورد PnL و ضد اسپم UTC) فعال شد...")
+    print("🤖 اسکنر هوشمند نسخه v3.6 (مجهز به بازخورد PnL و ضد اسپم UTC) فعال شد...")
     
-    # راه‌اندازی و تزریق ساختارهای اولیه دیتابیس در صورت نیاز
+    # فراخوانی متدها مستقیماً از نمونه ایمپورت شده سورس داخلی
     database.init_db()
     database.check_filters_lock()
     
@@ -167,7 +169,7 @@ def run_bot():
         print("🛑 ربات از طریق تنظیمات دیتابیس غیرفعال شده است.")
         return
     
-    # 🔥 گام طلایی: ابتدا بررسی پوزیشن‌های باز قدیمی و آپدیت سود و ضررها در دیتابیس برای مغز
+    # ابتدا بررسی پوزیشن‌های باز قدیمی و آپدیت سود و ضررها در دیتابیس برای تغذیه مغز
     update_open_positions()
     
     print("\n🔍 شروع فرآیند اسکن بازار و جفت‌ارزهای واچ‌لیست...")
