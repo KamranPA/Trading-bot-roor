@@ -1,4 +1,6 @@
 # main.py
+# فایل اصلی اجرای ربات (نسخه v2.0 - هماهنگ شده با دیتابیس جامع و فیلتر ریاضی ۸ ساعته)
+
 import os
 import sys
 import pandas as pd
@@ -18,15 +20,17 @@ import database
 from src import coinex_client
 from src import strategy
 from src import telegram_bot
+from src import indicators
 
 SYMBOLS = ["BTC", "ETH", "SOL"]
 
 def is_telegram_locked_8h(symbol, hours_limit=8):
     """
     بررسی هوشمند جدول signals برای چک کردن قفل ۸ ساعته تلگرام.
-    تفاضل زمانی را به صورت ریاضی محاسه می‌کند تا با تفاوت ساعت سرور و فرمت‌ها تداخل نداشته باشد.
+    تفاضل زمانی را به صورت ریاضی محاسبه می‌کند تا با تفاوت ساعت سرور و فرمت‌ها تداخل نداشته باشد.
     """
-    db_path = os.path.join(CURRENT_DIR, "data", "trading_bot.db")
+    # استفاده از مسیر استاندارد و یکپارچه شده با ماژول database
+    db_path = database.DB_NAME
     if not os.path.exists(db_path):
         return False
         
@@ -34,7 +38,7 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
-        # استخراج آخرین سیگنال ثبت شده برای ارز (بدون قید و شرط زمانی در کوئری)
+        # استخراج آخرین سیگنال ثبت شده برای ارز
         query = """
             SELECT timestamp FROM signals 
             WHERE symbol = ? 
@@ -47,7 +51,7 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
         if result and result[0]:
             last_signal_time_str = str(result[0])
             
-            # پاک‌سازی و استخراج بخش تاریخ و ساعت اصلی (حذف کاراکتر T یا میلی‌ثانیه‌ها در صورت وجود)
+            # پاک‌سازی و استخراج بخش تاریخ و ساعت اصلی
             clean_time_str = last_signal_time_str.replace('T', ' ').split('.')[0]
             
             try:
@@ -64,7 +68,6 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
             
             # اگر اختلاف زمان کمتر از ۸ ساعت باشد یا به خاطر تفاوت ریجن ساعت‌ها نزدیک به هم باشند، قفل فعال است
             if hours_passed < hours_limit or hours_passed > (24 - hours_limit):
-                # شرط دوم (24 - hours_limit) برای خنثی کردن تداخل کاملا معکوس Timezone سرور و لوکال است
                 print(f"🔒 [Locked] ارسال سیگنال تکراری {symbol} به تلگرام مسدود شد.")
                 return True
                 
@@ -74,7 +77,7 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
         return False
 
 def run_bot():
-    print("🤖 اسکنر هوشمند نسخه v1.8 (مجهز به فیلتر ضد نشت لایو) فعال شد...")
+    print("🤖 اسکنر هوشمند نسخه v2.0 (مجهز به فیلتر ضد نشت لایو و دیتابیس غنی) فعال شد...")
     database.init_db()
     database.check_filters_lock()
     
@@ -82,14 +85,13 @@ def run_bot():
         pair = f"{symbol}/USDT"
         print(f"\n🔄 اسکنر در حال پردازش و محاسبات تکنیکال: {pair}...")
         
-        # ۱. واکشی داده‌ها و محاسبه اندیکاتورها در هر شرایطی انجام می‌شود
+        # ۱. واکشی داده‌ها و محاسبه اندیکاتورها
         df = coinex_client.get_coinex_candles(pair)
         
         if df is None or df.empty:
             print(f"❌ دیتایی برای جفت‌ارز {pair} دریافت نشد.")
             continue
             
-        from src import indicators
         df = indicators.calculate_indicators(df)
         
         # ۲. سنجش وضعیت استراتژی روی کندل لایو
@@ -99,7 +101,7 @@ def run_bot():
             direction = signal_result['direction']
             print(f"🎯 استراتژی روی {symbol} سیگنال {direction} صادر کرد.")
             
-            # ۳. ثبت دیتای واقعی استراتژی در اسکن لاگ (برای تغذیه هوش مصنوعی ماهانه)
+            # ۳. ثبت دیتای واقعی استراتژی در اسکن لاگ (برای تغذیه هوش مصنوعی)
             database.log_scan(symbol, f"Signal {direction} | Entry: {signal_result['entry_price']}")
             
             # ۴. بررسی قفل ۸ ساعته تلگرام درست قبل از ارسال نهایی
@@ -107,8 +109,18 @@ def run_bot():
                 print(f"⏭️ ارسال به تلگرام مسدود شد: فیلتر ۸ ساعته برای {symbol} فعال است.")
                 continue
                 
-            # ۵. ذخیره در جدول پوزیشن‌های اصلی و ارسال به تلگرام (در صورت عبور از فیلتر ۸ ساعته)
-            database.save_signal(symbol, direction, signal_result['entry_price'], status="OPEN")
+            # ۵. 🔥 ذخیره در دیتابیس با فرمت نسخه v2.0 (ارسال تمام تارگت‌ها و حد ضرر جهت جلوگیری از ارور تعداد آرگومان)
+            database.save_signal(
+                symbol=symbol,
+                direction=direction,
+                entry_price=signal_result['entry_price'],
+                tp1=signal_result['tp1'],
+                tp2=signal_result['tp2'],
+                stop_loss=signal_result['stop_loss'],
+                status="OPEN"
+            )
+            
+            # ۶. ارسال به تلگرام
             telegram_bot.format_and_send_signal(signal_result)
             
         else:
