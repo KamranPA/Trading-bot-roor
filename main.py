@@ -1,11 +1,12 @@
 # main.py
-# فایل اصلی اجرای ربات (نسخه v5.0 - کالیبره شده با موتور ذخیره‌سازی داده‌های یادگیری ماشین)
+# فایل اصلی اجرای ربات (نسخه v5.5 - مجهز به سیستم فیلترینگ هوشمند لایو با یادگیری ماشین)
 
 import os
 import sys
 import pandas as pd
 import sqlite3
 from datetime import datetime
+import joblib  # 🧠 ایمپورت کتابخانه لود مدل‌های هوش مصنوعی
 
 # تنظیم دقیق و مستقل مسیرهای پروژه برای جلوگیری از تداخل لود ماژول‌ها
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,12 +24,48 @@ from src import coinex_client
 from src import strategy
 from src import telegram_bot
 from src import indicators
+from src import train_model  # ایمپورت اسکریپت آموزش برای بهینه‌سازی همزمان
+
+MODEL_PATH = os.path.join(CURRENT_DIR, "src", "models", "trading_filter_model.pkl")
+
+def check_ai_permission(feat_adx, feat_vol_ratio, feat_atr_percent):
+    """🧠 دروازه‌بان هوش مصنوعی: بررسی سیگنال با مدل یادگیری ماشین"""
+    if not os.path.exists(MODEL_PATH):
+        # اگر هنوز مدلی آموزش داده نشده، با زدن رای مثبت اجازه عبور می‌دهیم تا دیتا جمع شود
+        print("ℹ️ مدل هوش مصنوعی یافت نشد؛ سیگنال با فیلترهای کلاسیک ارزیابی می‌شود.")
+        return True, 1.0
+
+    try:
+        # لود مغز الکترونیک مدل
+        model = joblib.load(MODEL_PATH)
+        
+        # ساخت دیتافریم تک‌ردیفه دقیقا با همان نام ستون‌هایی که مدل با آن‌ها آموزش دیده است
+        input_data = pd.DataFrame([{
+            'feat_adx': feat_adx,
+            'feat_vol_ratio': feat_vol_ratio,
+            'feat_atr_percent': feat_atr_percent
+        }])
+        
+        # پیش‌بینی مدل (1 یعنی سودده، 0 یعنی ضررده/شکست فیک)
+        prediction = model.predict(input_data)[0]
+        
+        # محاسبه درصد احتمال موفقیت معامله توسط مدل
+        probabilities = model.predict_proba(input_data)[0]
+        win_probability = probabilities[1]  # احتمال کلاس 1 (برد)
+        
+        if prediction == 1:
+            print(f"🟢 [AI APPROVED] هوش مصنوعی سیگنال را تایید کرد! (احتمال برد: {win_probability*100:.1f}%)")
+            return True, win_probability
+        else:
+            print(f"🔴 [AI BLOCKED] هوش مصنوعی جلو این پوزیشن را گرفت! خطر شکست فیک! (احتمال برد: {win_probability*100:.1f}%)")
+            return False, win_probability
+            
+    except Exception as e:
+        print(f"⚠️ خطا در ارزیابی مدل هوش مصنوعی: {e}")
+        return True, 1.0  # در صورت بروز خطای سیستمی، معامله را مسدود نمی‌کنیم
 
 def update_open_positions():
-    """
-    بررسی پوزیشن‌های باز، مقایسه قیمت لایو با تارگت‌ها/استاپ،
-    محاسبه درصد سود یا ضرر واقعی (PnL) و بستن پوزیشن در دیتابیس برای تغذیه مغز سیستم.
-    """
+    """بررسی پوزیشن‌های باز، محاسبه PnL لایو و آپدیت دیتابیس برای تغذیه مدل هوش مصنوعی"""
     db_path = database.DB_NAME
     if not os.path.exists(db_path):
         return
@@ -37,7 +74,6 @@ def update_open_positions():
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
-        # ۱. دریافت تمام پوزیشن‌های باز (OPEN) از دیتابیس
         cursor.execute("SELECT id, symbol, direction, entry_price, stop_loss FROM signals WHERE status = 'OPEN'")
         open_positions = cursor.fetchall()
         
@@ -52,7 +88,6 @@ def update_open_positions():
             pos_id, symbol, direction, entry_price, stop_loss = pos
             pair = f"{symbol}/USDT"
             
-            # دریافت کندل لایو از صرافی کوئینکس
             df = coinex_client.get_coinex_candles(pair)
             if df is None or df.empty:
                 print(f"⚠️ خطای دریافت قیمت لایو برای جفت‌ارز {pair}")
@@ -60,7 +95,6 @@ def update_open_positions():
                 
             current_price = df.iloc[-1]['Close']
             
-            # دریافت تارگت‌های اختصاصی پوزیشن از جدول signal_targets
             cursor.execute("SELECT target_number, target_price FROM signal_targets WHERE signal_id = ?", (pos_id,))
             targets = {row[0]: row[1] for row in cursor.fetchall()}
             tp1 = targets.get(1)
@@ -70,45 +104,41 @@ def update_open_positions():
             pnl = 0.0
             reason = ""
             
-            # ۲. محاسبات ریاضی خروج و ارزیابی لایو حد سود و حد ضرر
             if direction == 'LONG':
-                if current_price <= stop_loss:  # برخورد با حد ضرر
+                if current_price <= stop_loss:
                     closed = True
                     pnl = ((stop_loss - entry_price) / entry_price) * 100
                     reason = "SL Hit"
-                elif tp2 and current_price >= tp2:  # برخورد با تارگت دوم (اصلی)
+                elif tp2 and current_price >= tp2:
                     closed = True
                     pnl = ((tp2 - entry_price) / entry_price) * 100
                     reason = "TP2 Hit"
-                elif tp1 and current_price >= tp1:  # برخورد با تارگت اول
+                elif tp1 and current_price >= tp1:
                     closed = True
                     pnl = ((tp1 - entry_price) / entry_price) * 100
                     reason = "TP1 Hit"
                     
             elif direction == 'SHORT':
-                if current_price >= stop_loss:  # برخورد با حد ضرر در موقعیت فروش
+                if current_price >= stop_loss:
                     closed = True
                     pnl = ((entry_price - stop_loss) / entry_price) * 100
                     reason = "SL Hit"
-                elif tp2 and current_price <= tp2:  # برخورد با تارگت دوم
+                elif tp2 and current_price <= tp2:
                     closed = True
                     pnl = ((entry_price - tp2) / entry_price) * 100
                     reason = "TP2 Hit"
-                elif tp1 and current_price <= tp1:  # برخورد با تارگت اول
+                elif tp1 and current_price <= tp1:
                     closed = True
                     pnl = ((entry_price - tp1) / entry_price) * 100
                     reason = "TP1 Hit"
             
-            # ۳. اعمال فیزیکی بستن پوزیشن در صورت تاچ شدن سطوح قیمتی
             if closed:
-                # بروزرسانی جدول اصلی سیگنال‌ها
                 cursor.execute("""
                     UPDATE signals 
                     SET status = 'CLOSED', closed_at = ?, pnl_percent = ?
                     WHERE id = ?
                 """, (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), round(pnl, 2), pos_id))
                 
-                # بروزرسانی وضعیت تارگت‌ها در جدول تفکیکی
                 target_status = "HIT" if "TP" in reason else "FAILED"
                 cursor.execute("UPDATE signal_targets SET status = ? WHERE signal_id = ?", (target_status, pos_id))
                 
@@ -122,11 +152,9 @@ def update_open_positions():
         print(f"⚠️ خطا در پردازش متد بروزرسانی پوزیشن‌های باز دیتابیس: {e}")
 
 def is_telegram_locked_8h(symbol, hours_limit=8):
-    """بررسی هوشمند اختلاف زمان آخرین پوزیشن بر پایه UTC جهت جلوگیری از اسپم در بازه زمانی مشخص"""
     db_path = database.DB_NAME
     if not os.path.exists(db_path):
         return False
-        
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -141,59 +169,59 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
                 last_signal_time = datetime.strptime(clean_time_str, '%Y-%m-%d %H:%M:%S')
             except Exception:
                 return False
-                
             time_difference = datetime.utcnow() - last_signal_time
             hours_passed = time_difference.total_seconds() / 3600
-            
-            print(f"⏱️ [Filter Check] برای {symbol}: {hours_passed:.2f} ساعت از آخرین پوزیشن گذشته است.")
-            
             if hours_passed < hours_limit:
-                print(f"🔒 [Locked] ارسال سیگنال تکراری {symbol} به تلگرام مسدود شد.")
                 return True
-                
         return False
-    except Exception as e:
-        print(f"⚠️ خطا در بررسی فیلتر زمانی تلگرام: {e}")
+    except Exception:
         return False
 
 def run_bot():
-    print("🤖 اسکنر هوشمند نسخه v5.0 (مجهز به ساختار داده‌های یادگیری ماشین) فعال شد...")
+    print("🤖 اسکنر هوشمند نسخه v5.5 (مجهز به لایه فیلترینگ یادگیری ماشین پیشرفته) فعال شد...")
     
-    # فراخوانی متدها مستقیماً از نمونه ایمپورت شده سورس داخلی
     database.init_db()
     database.check_filters_lock()
     
-    # بررسی زنده وضعیت کلی ربات از تنظیمات جدول دیتابیس
     bot_mode = str(database.get_setting("bot_status", "ACTIVE")).strip().upper()
     if bot_mode != "ACTIVE":
         print("🛑 ربات از طریق تنظیمات دیتابیس غیرفعال شده است.")
         return
     
-    # ابتدا بررسی پوزیشن‌های باز قدیمی و آپدیت سود و ضررها در دیتابیس برای تغذیه مغز
+    # ابتدا بررسی و بستن پوزیشن‌های قدیمی برای تولید دیتای زنده آموزش مدل
     update_open_positions()
     
+    # 🧠 ترفند طلایی: اجرای خودکار فرآیند یادگیری مجدد مدل هوش مصنوعی بر اساس دیتای جدید دیتابیس
+    train_model.train_ai_model()
+    
     print("\n🔍 شروع فرآیند اسکن بازار و جفت‌ارزهای واچ‌لیست...")
-    # گردش داینامیک روی لیست تحت نظر واچ‌لیست سیستم
     for pair in config.WATCHLIST:
-        symbol = pair.split('/')[0]  # جداسازی کلمه اصلی ارز نظیر BTC
+        symbol = pair.split('/')[0]
         print(f"\n🔄 پردازش تکنیکال و محاسباتی: {pair}...")
         
         df = coinex_client.get_coinex_candles(pair)
         if df is None or df.empty:
-            print(f"❌ دیتایی برای جفت‌ارز {pair} دریافت نشد.")
             continue
             
-        # محاسبه اندیکاتورهای مستقل (ATR, ADX, Volume MA)
         df = indicators.calculate_indicators(df)
-        
-        # بررسی شکست سطوح سوئینگ و تولید خروجی استراتژی
         signal_result = strategy.generate_signal(df, pair)
         
         if signal_result and isinstance(signal_result, dict):
             direction = signal_result['direction']
-            print(f"🎯 استراتژی روی {symbol} سیگنال {direction} صادر کرد.")
             
-            # 🧠 ذخیره‌سازی پیشرفته پوزیشن به همراه تمام ویژگی‌های ریاضی (Features) برای آموزش هوش مصنوعی
+            # 🧠 گام کلیدی: استعلام از دروازه‌بان یادگیری ماشین قبل از هرگونه اقدام عملی
+            ai_approved, win_rate = check_ai_permission(
+                feat_adx=signal_result['feat_adx'],
+                feat_vol_ratio=signal_result['feat_vol_ratio'],
+                feat_atr_percent=signal_result['feat_atr_percent']
+            )
+            
+            if not ai_approved:
+                # اگر مدل بگوید این معامله به احتمال بالا ضررده است، سیگنال ثبت اسکن می‌شود ولی معامله باز نخواهد شد
+                database.log_scan(symbol, f"Blocked by AI (Est Win: {win_rate*100:.1f}%)")
+                continue
+            
+            # ثبت پوزیشن تایید شده توسط هوش مصنوعی در جدول رسمی معاملات
             database.save_signal_advanced(
                 symbol=symbol,
                 direction=direction,
@@ -207,12 +235,11 @@ def run_bot():
                 status="OPEN"
             )
             
-            # اعمال فیلتر زمانی ضد اسپم ۸ ساعته کالیبره شده با UTC سرور برای "ارسال تلگرام"
+            # فیلتر ضد اسپم تلگرام
             if is_telegram_locked_8h(symbol, hours_limit=8):
                 print(f"⏭️ ارسال به تلگرام مسدود شد: فیلتر ۸ ساعته برای {symbol} فعال است.")
                 continue
                 
-            # فرمت‌بندی فارسی و ارسال سیگنال لایو به تلگرام
             telegram_bot.format_and_send_signal(signal_result)
             
         else:
