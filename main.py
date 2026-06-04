@@ -1,5 +1,5 @@
 # main.py
-# فایل اصلی اجرای ربات (نسخه v3.2 - اصلاح‌شده با فیلتر هوشمند UTC و لیست واچ‌لیست پویا)
+# فایل اصلی اجرای ربات (نسخه v3.5 - مجهز به موتور مدیریت پوزیشن‌های باز، محاسبه PnL و فیلتر ضد اسپم UTC)
 
 import os
 import sys
@@ -22,6 +22,103 @@ from src import strategy
 from src import telegram_bot
 from src import indicators
 
+def update_open_positions():
+    """
+    بررسی پوزیشن‌های باز، مقایسه قیمت لایو با تارگت‌ها/استاپ،
+    محاسبه درصد سود یا ضرر واقعی (PnL) و بستن پوزیشن در دیتابیس برای تغذیه مغز سیستم.
+    """
+    db_path = database.DB_NAME
+    if not os.path.exists(db_path):
+        return
+        
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # ۱. دریافت تمام پوزیشن‌های باز (OPEN) از دیتابیس
+        cursor.execute("SELECT id, symbol, direction, entry_price, stop_loss FROM signals WHERE status = 'OPEN'")
+        open_positions = cursor.fetchall()
+        
+        if not open_positions:
+            print("ℹ️ هیچ پوزیشن بازی در حال حاضر برای بروزرسانی وجود ندارد.")
+            conn.close()
+            return
+            
+        print(f"\n🔄 در حال بررسی و مدیریت وضعیت {len(open_positions)} پوزیشن باز در بازار لایو...")
+        
+        for pos in open_positions:
+            pos_id, symbol, direction, entry_price, stop_loss = pos
+            pair = f"{symbol}/USDT"
+            
+            # دریافت کندل لایو از صرافی کوئینکس
+            df = coinex_client.get_coinex_candles(pair)
+            if df is None or df.empty:
+                print(f"⚠️ خطای دریافت قیمت لایو برای جفت‌ارز {pair}")
+                continue
+                
+            current_price = df.iloc[-1]['Close']
+            
+            # دریافت تارگت‌های اختصاصی پوزیشن از جدول signal_targets
+            cursor.execute("SELECT target_number, target_price FROM signal_targets WHERE signal_id = ?", (pos_id,))
+            targets = {row[0]: row[1] for row in cursor.fetchall()}
+            tp1 = targets.get(1)
+            tp2 = targets.get(2)
+            
+            closed = False
+            pnl = 0.0
+            reason = ""
+            
+            # ۲. محاسبات ریاضی خروج و ارزیابی لایو حد سود و حد ضرر
+            if direction == 'LONG':
+                if current_price <= stop_loss:  # برخورد با حد ضرر
+                    closed = True
+                    pnl = ((stop_loss - entry_price) / entry_price) * 100
+                    reason = "SL Hit"
+                elif tp2 and current_price >= tp2:  # برخورد با تارگت دوم (اصلی)
+                    closed = True
+                    pnl = ((tp2 - entry_price) / entry_price) * 100
+                    reason = "TP2 Hit"
+                elif tp1 and current_price >= tp1:  # برخورد با تارگت اول
+                    closed = True
+                    pnl = ((tp1 - entry_price) / entry_price) * 100
+                    reason = "TP1 Hit"
+                    
+            elif direction == 'SHORT':
+                if current_price >= stop_loss:  # برخورد با حد ضرر در موقعیت فروش
+                    closed = True
+                    pnl = ((entry_price - stop_loss) / entry_price) * 100
+                    reason = "SL Hit"
+                elif tp2 and current_price <= tp2:  # برخورد با تارگت دوم
+                    closed = True
+                    pnl = ((entry_price - tp2) / entry_price) * 100
+                    reason = "TP2 Hit"
+                elif tp1 and current_price <= tp1:  # برخورد با تارگت اول
+                    closed = True
+                    pnl = ((entry_price - tp1) / entry_price) * 100
+                    reason = "TP1 Hit"
+            
+            # ۳. اعمال فیزیکی بستن پوزیشن در صورت تاچ شدن سطوح قیمتی
+            if closed:
+                # بروزرسانی جدول اصلی سیگنال‌ها
+                cursor.execute("""
+                    UPDATE signals 
+                    SET status = 'CLOSED', closed_at = ?, pnl_percent = ?
+                    WHERE id = ?
+                """, (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), round(pnl, 2), pos_id))
+                
+                # بروزرسانی وضعیت تارگت‌ها در جدول تفکیکی
+                target_status = "HIT" if "TP" in reason else "FAILED"
+                cursor.execute("UPDATE signal_targets SET status = ? WHERE signal_id = ?", (target_status, pos_id))
+                
+                print(f"🚨 [POSITION CLOSED] ارز {symbol} بسته شد | علت: {reason} | بازدهی: {pnl:.2f}%")
+            else:
+                print(f"📊 ارز {symbol} در پوزیشن {direction} باز است | قیمت ورود: {entry_price} | قیمت فعلی: {current_price}")
+                
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ خطا در پردازش متد بروزرسانی پوزیشن‌های باز دیتابیس: {e}")
+
 def is_telegram_locked_8h(symbol, hours_limit=8):
     """بررسی هوشمند اختلاف زمان آخرین پوزیشن بر پایه UTC جهت جلوگیری از اسپم در بازه زمانی مشخص"""
     db_path = database.DB_NAME
@@ -43,13 +140,11 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
             except Exception:
                 return False
                 
-            # محاسبه دقیق اختلاف زمان جاری سرور با زمان آخرین سیگنال ثبت شده
             time_difference = datetime.utcnow() - last_signal_time
             hours_passed = time_difference.total_seconds() / 3600
             
             print(f"⏱️ [Filter Check] برای {symbol}: {hours_passed:.2f} ساعت از آخرین پوزیشن گذشته است.")
             
-            # اصلاح باگ سرریز منطقی: صرفاً اگر زمان گذشته کمتر از حد مجاز باشد، ارسال قفل است.
             if hours_passed < hours_limit:
                 print(f"🔒 [Locked] ارسال سیگنال تکراری {symbol} به تلگرام مسدود شد.")
                 return True
@@ -60,45 +155,51 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
         return False
 
 def run_bot():
-    print("🤖 اسکنر هوشمند نسخه v3.2 (معماری داده تفکیکی و ضد اسپم UTC) فعال شد...")
+    print("🤖 اسکنر هوشمند نسخه v3.5 (مجهز به بازخورد PnL و ضد اسپم UTC) فعال شد...")
+    
+    # راه‌اندازی و تزریق ساختارهای اولیه دیتابیس در صورت نیاز
     database.init_db()
     database.check_filters_lock()
     
-    # بررسی وضعیت فعال یا غیرفعال بودن ربات از دیتابیس
+    # بررسی زنده وضعیت کلی ربات از تنظیمات جدول دیتابیس
     bot_mode = str(database.get_setting("bot_status", "ACTIVE")).strip().upper()
     if bot_mode != "ACTIVE":
         print("🛑 ربات از طریق تنظیمات دیتابیس غیرفعال شده است.")
         return
     
-    # استفاده مستقیم از واچ‌لیست مرکزی برای گردش در جفت‌ارزها
+    # 🔥 گام طلایی: ابتدا بررسی پوزیشن‌های باز قدیمی و آپدیت سود و ضررها در دیتابیس برای مغز
+    update_open_positions()
+    
+    print("\n🔍 شروع فرآیند اسکن بازار و جفت‌ارزهای واچ‌لیست...")
+    # گردش داینامیک روی لیست تحت نظر واچ‌لیست سیستم
     for pair in config.WATCHLIST:
-        symbol = pair.split('/')[0]  # استخراج نام ارز (مثلاً BTC) برای ثبت تمیز در دیتابیس
-        print(f"\n🔄 اسکنر در حال پردازش و محاسبات تکنیکال: {pair}...")
+        symbol = pair.split('/')[0]  # جداسازی کلمه اصلی ارز نظیر BTC
+        print(f"\n🔄 پردازش تکنیکال و محاسباتی: {pair}...")
         
         df = coinex_client.get_coinex_candles(pair)
         if df is None or df.empty:
             print(f"❌ دیتایی برای جفت‌ارز {pair} دریافت نشد.")
             continue
             
-        # محاسبه اندیکاتورهای شخصی‌سازی شده داخلی
+        # محاسبه اندیکاتورهای مستقل (ATR, ADX, Volume MA)
         df = indicators.calculate_indicators(df)
         
-        # پردازش استراتژی شکست سطوح سوئینگ
+        # بررسی شکست سطوح سوئینگ و تولید خروجی استراتژی
         signal_result = strategy.generate_signal(df, pair)
         
         if signal_result and isinstance(signal_result, dict):
             direction = signal_result['direction']
             print(f"🎯 استراتژی روی {symbol} سیگنال {direction} صادر کرد.")
             
-            # ۱. ثبت در لاگ اسکن دیتابیس
+            # ۱. ثبت لاگ اولیه اسکن در دیتابیس
             database.log_scan(symbol, f"Signal {direction} | Entry: {signal_result['entry_price']}")
             
-            # ۲. بررسی فیلتر ضد اسپم با زمان کالیبره شده UTC
+            # ۲. اعمال فیلتر زمانی ضد اسپم ۸ ساعته کالیبره شده با UTC سرور
             if is_telegram_locked_8h(symbol, hours_limit=8):
                 print(f"⏭️ ارسال به تلگرام مسدود شد: فیلتر ۸ ساعته برای {symbol} فعال است.")
                 continue
                 
-            # ۳. ذخیره‌سازی پیشرفته پوزیشن و تارگت‌ها در جداول تفکیکی دیتابیس
+            # ۳. ذخیره‌سازی داده‌ها در معماری تفکیکی و ۴ جدوله دیتابیس با زمان استاندارد
             database.save_signal_advanced(
                 symbol=symbol,
                 direction=direction,
@@ -109,7 +210,7 @@ def run_bot():
                 status="OPEN"
             )
             
-            # ۴. ارسال خروجی فارسی سازی شده به کانال یا گروه تلگرام
+            # ۴. فرمت‌بندی فارسی و ارسال سیگنال لایو به تلگرام
             telegram_bot.format_and_send_signal(signal_result)
             
         else:
