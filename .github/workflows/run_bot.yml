@@ -1,23 +1,21 @@
-name: Automated Crypto Trading Bot
+name: Run Trading Bot
 
 on:
   schedule:
-    # بازگرداندن زمان‌بندی ۳۰ دقیقه‌ای گیت‌هاب به عنوان لایه پشتیبان (در صورت عدم استفاده از کرون اکسترنال)
-    - cron: '*/30 * * * *'
-  workflow_dispatch: # امکان اجرای دستی از تب Actions یا فراخوانی توسط وب‌هوک اکسترنال
+    - cron: '*/30 * * * *' # اجرای خودکار ربات هر ۳۰ دقیقه
+  workflow_dispatch: # امکان اجرای دستی از تب Actions
 
-# مجوز حیاتی برای اینکه اکشنِ کامیت دیتابیس با خطای عدم دسترسی (Permission Denied) مواجه نشود
 permissions:
-  contents: write
+  contents: write # 🟢 گام اول: باز کردن مجوز نوشتن روی ریپازیتوری برای گیت‌هاب اکشنز
 
 jobs:
-  trade_scanner:
+  run-bot-job:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout Code
+    - name: Checkout Repository
       uses: actions/checkout@v4
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}
+        persist-credentials: true # 🟢 گام دوم: زنده نگه داشتن توکن گیت برای Push بعدی
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -27,7 +25,7 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install requests pandas; fi
+        pip install -r requirements.txt
 
     - name: Execute Trading Engine
       env:
@@ -35,10 +33,13 @@ jobs:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python main.py
 
-    # کامیت هوشمند فایل دیتابیس برای حفظ تاریخچه لاگ‌ها و وضعیت فیلترها
     - name: Auto-Commit & Push Database Modifications
-      uses: stefanzweifel/git-auto-commit-action@v5
-      with:
-        commit_message: "📊 ربات: به‌روزرسانی خودکار دیتابیس و لاگ اسکن‌ها [Skip CI]"
-        file_pattern: 'data/trading_bot.db'
-        branch: main
+      run: |
+        git config --local user.email "actions@github.com"
+        git config --local user.name "GitHub Actions"
+        
+        # مانیتور کردن و اضافه کردن فیزیکی فایل دیتابیس به صف گیت
+        git add data/trading_bot.db
+        
+        # ترفند طلایی ضد ارور: اگر دیتابیس تغییری نکرده بود ارور نده، اگر تغییر کرده بود کامیت و Push کن
+        git diff --quiet && git diff --staged --quiet || (git commit -m "🗄️ دیتابیس: پوزیشن‌ها و لاگ‌های جدید بروزرسانی شدند [Skip CI]" && git push)
