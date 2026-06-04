@@ -2,8 +2,8 @@ name: Daily Bot Status Check
 
 on:
   schedule:
-    - cron: '0 8 * * *' # هر روز ساعت ۱۱:۳۰ صبح به وقت ایران
-  workflow_dispatch: # دکمه اجرای دستی
+    - cron: '0 8 * * *' # هر روز ساعت ۱۱:۳۰ صبح به وقت ایران (۰۸:۰۰ به وقت UTC)
+  workflow_dispatch: # دکمه اجرای دستی از داخل گیت‌هاب
 
 jobs:
   ping_telegram:
