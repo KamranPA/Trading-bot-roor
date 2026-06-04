@@ -1,5 +1,5 @@
 # src/database.py
-# ماژول مدیریت دیتابیس پیشرفته (معماری ۴ جدوله تفکیک‌شده نسخه v3.6)
+# ماژول مدیریت دیتابیس پیشرفته (نسخه کالیبره شده با استاندارد SQLite)
 
 import os
 import sqlite3
@@ -16,14 +16,14 @@ if not os.path.exists(DATA_DIR):
 DB_NAME = os.path.join(DATA_DIR, "trading_bot.db")
 
 def init_db():
-    """🛡️ تابع حیاتی راه‌اندازی و ساخت جداول دیتابیس (رفع خطای AttributeError)"""
+    """🛡️ راه‌اندازی و ساخت جداول دیتابیس با سینتکس استاندارد SQLite"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # ۱. جدول اصلی سیگنال‌ها و پوزیشن‌ها
+    # ۱. جدول اصلی سیگنال‌ها (حذف کلمه AUTO_INCREMENT برای رفع ارور SQLite)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS signals (
-            id INTEGER PRIMARY KEY AUTO_INCREMENT,
+            id INTEGER PRIMARY KEY,
             timestamp TEXT NOT NULL,
             symbol TEXT NOT NULL,
             direction TEXT NOT NULL,
@@ -35,10 +35,10 @@ def init_db():
         )
     """)
     
-    # ۲. جدول تفکیکی تارگت‌ها و حد سودها
+    # ۲. جدول تفکیکی تارگت‌ها
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS signal_targets (
-            id INTEGER PRIMARY KEY AUTO_INCREMENT,
+            id INTEGER PRIMARY KEY,
             signal_id INTEGER NOT NULL,
             target_number INTEGER NOT NULL,
             target_price REAL NOT NULL,
@@ -47,17 +47,17 @@ def init_db():
         )
     """)
     
-    # ۳. جدول لاگ اسکن‌های دوره‌ای بازار برای تغذیه مغز سیستم
+    # ۳. جدول لاگ اسکن‌های دوره‌ای بازار
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS scan_logs (
-            id INTEGER PRIMARY KEY AUTO_INCREMENT,
+            id INTEGER PRIMARY KEY,
             timestamp TEXT NOT NULL,
             symbol TEXT NOT NULL,
             result TEXT NOT NULL
         )
     """)
     
-    # ۴. جدول تنظیمات داینامیک ربات (مانند وضعیت فعال/غیرفعال بودن)
+    # ۴. جدول تنظیمات داینامیک ربات
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS bot_settings (
             setting_key TEXT PRIMARY KEY,
@@ -70,7 +70,7 @@ def init_db():
     
     conn.commit()
     conn.close()
-    print("🗄️ دیتابیس و جداول ۴ گانه با موفقیت راه‌اندازی و هماهنگ شدند.")
+    print("🗄️ دیتابیس و جداول ۴ گانه با موفقیت در محیط SQLite فعال شدند.")
 
 def log_scan(symbol, result):
     """ثبت لاگ دوره‌ای اسکن جفت‌ارزها"""
@@ -138,7 +138,6 @@ def check_filters_lock():
         if len(logs) < 180:
             return False
             
-        # اگر در ۱۸۰ لاگ اخیر همگی وضعیت No Signal داشته باشند، یعنی فیلترها بازار را قفل کرده‌اند
         all_no_signal = all("No Signal" in row[0] for row in logs)
         return all_no_signal
     except Exception:
