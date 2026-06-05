@@ -1,4 +1,4 @@
-# main.py - نسخه مانیتورینگ شده v6.3.1
+# main.py - نسخه نهایی مانیتورینگ شده v6.3.2
 
 import os
 import sys
@@ -20,14 +20,12 @@ def run_bot():
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🚀 شروع چرخه جدید ربات")
     
     # ۱. پایش وضعیت دیتابیس
-    if not os.path.exists(database.DB_NAME):
-        print("⚠️ دیتابیس یافت نشد، در حال ایجاد...")
     database.init_db()
 
     # ۲. مانیتورینگ پوزیشن‌های باز
     update_open_positions()
 
-    # ۳. اسکن بازار با گزارش‌دهی جزئی
+    # ۳. اسکن بازار
     for pair in config.WATCHLIST:
         symbol = pair.split('/')[0]
         print(f"🔍 در حال تحلیل: {symbol}...")
@@ -39,11 +37,16 @@ def run_bot():
                 continue
             
             df = indicators.calculate_indicators(df)
+            
+            # --- بخش مانیتورینگ جدید ---
             signal = strategy.generate_signal(df, pair)
+            if signal:
+                print(f"✅ سیگنال پیدا شد: {signal}")
+            else:
+                print(f"ℹ️ برای {pair} سیگنالی یافت نشد.")
+            # ---------------------------
             
             if signal:
-                print(f"✅ سیگنال برای {symbol} یافت شد. در حال بررسی هوش مصنوعی...")
-                
                 # بررسی قفل ۸ ساعته
                 if is_telegram_locked_8h(symbol):
                     print(f"🔏 محدودیت ۸ ساعته برای {symbol} فعال است.")
@@ -73,7 +76,6 @@ def run_bot():
                 print(f"💾 سیگنال {symbol} با موفقیت در دیتابیس ذخیره شد.")
                 telegram_bot.format_and_send_signal(signal)
             else:
-                # لاگ کردن عدم وجود سیگنال برای پایش وضعیت
                 database.log_scan(symbol, "No Signal")
                 
         except Exception as e:
@@ -81,4 +83,4 @@ def run_bot():
 
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🏁 پایان چرخه.")
 
-# [سایر توابع مانند update_open_positions و is_telegram_locked_8h را طبق نسخه قبلی حفظ کنید]
+# [اطمینان حاصل کنید که توابع check_ai_permission, update_open_positions و is_telegram_locked_8h در ادامه همین فایل قرار دارند]
