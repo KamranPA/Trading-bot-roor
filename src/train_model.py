@@ -1,5 +1,5 @@
 # src/train_model.py
-# نسخه ارتقایافته v7.0 - مجهز به آموزش توزیع‌شده با فاکتورهای ۹ بعدی
+# نسخه اصلاح‌شده ۳۶۰ درجه خالص (v6.3) - کالیبره شده با ۵ فاکتور اصلی دیتابیس
 
 import os
 import sqlite3
@@ -13,16 +13,16 @@ MODEL_DIR = os.path.join(BASE_DIR, "src", "models")
 MODEL_PATH = os.path.join(MODEL_DIR, "trading_filter_model.pkl")
 
 def train_ai_model():
-    """🧠 آموزش موتور هوش مصنوعی تقویت‌شده بر اساس کارنامه معاملات بسته‌شده گذشته"""
+    """🧠 آموزش موتور هوش مصنوعی بر اساس ۵ فاکتور اصیل دیتابیس ۳۶۰ درجه"""
     if not os.path.exists(DB_NAME):
         print("⚠️ پایگاه داده جهت استخراج دیتای آموزشی هوش مصنوعی پیدا نشد.")
         return
 
     conn = sqlite3.connect(DB_NAME)
+    # 🟢 اصلاح کلیدی: حذف ستون‌های اضافی که باعث ارور no such column و کرش سیستم می‌شدند
     query = """
         SELECT 
             feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line,
-            feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session,
             pnl_percent 
         FROM signals 
         WHERE status = 'CLOSED'
@@ -36,9 +36,9 @@ def train_ai_model():
 
     df['target'] = (df['pnl_percent'] > 0).astype(int)
 
+    # 🟢 تنظیم دقیق روی ۵ ویژگی اصلی شما
     features = [
-        'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 'feat_trend_line',
-        'feat_ema_deviation', 'feat_rsi_momentum', 'feat_body_ratio', 'feat_high_volume_session'
+        'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 'feat_trend_line'
     ]
     
     X = df[features]
@@ -54,7 +54,7 @@ def train_ai_model():
 
     os.makedirs(MODEL_DIR, exist_ok=True)
     joblib.dump(model, MODEL_PATH)
-    print(f"🔥 [هوش مصنوعی با موفقیت تقویت شد]: مدل جدید با ۹ فاکتور بر اساس {len(df)} معامله واقعی کالیبره و ذخیره گردید.")
+    print(f"🔥 [هوش مصنوعی با موفقیت کالیبره شد]: مدل جدید با ۵ فاکتور اصیل ذخیره گردید.")
 
 if __name__ == "__main__":
     train_ai_model()
