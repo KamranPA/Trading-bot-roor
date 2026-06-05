@@ -31,8 +31,12 @@ def generate_signal(df, pair):
     current_candle = df.iloc[live_candle_idx]
     symbol = pair.split('/')[0]
     
+    # 🟢 فعال‌سازی لاگ زنده: به محض اسکن، در دیتابیس لاگ می‌زند تا مطمئن شویم ربات زنده است
+    database.log_scan(symbol, "Scanning...")
+
     # فیلتر اولیه تکنیکال بر اساس آستانه قدرت روند
     if current_candle['ADX'] < config.ADX_THRESHOLD:
+        database.log_scan(symbol, "No Signal (Weak Trend)")
         return None
 
     last_swing_high = None
@@ -48,9 +52,10 @@ def generate_signal(df, pair):
             break
 
     if last_swing_high is None or last_swing_low is None:
+        database.log_scan(symbol, "No Signal (Levels Not Found)")
         return None
 
-    # 🧮 استخراج دقیق دقیق ۵ فاکتور ریاضی اصیل ۳۶۰ درجه شما (بدون فاکتور اضافی)
+    # 🧮 استخراج دقیق دقیق ۵ فاکتور ریاضی اصیل ۳۶۰ درجه شما
     entry_est = float(current_candle['Close'])
     atr_val = current_candle['ATR'] if current_candle['ATR'] > 0 else (entry_est * 0.02)
     atr_percent = float((atr_val / entry_est) * 100)
@@ -66,7 +71,7 @@ def generate_signal(df, pair):
         tp1 = entry_est + (risk_dist * config.RISK_REWARD_TP1)
         tp2 = entry_est + (risk_dist * config.RISK_REWARD_TP1 * 2.0)
         
-        database.log_scan(symbol, f"Signal LONG | Entry: {round(entry_est, 4)} | AI Processing")
+        database.log_scan(symbol, f"Signal LONG | Entry: {round(entry_est, 4)}")
         
         return {
             'pair': pair, 'direction': 'LONG', 'entry_price': round(entry_est, 4),
@@ -82,7 +87,7 @@ def generate_signal(df, pair):
         tp1 = entry_est - (risk_dist * config.RISK_REWARD_TP1)
         tp2 = entry_est - (risk_dist * config.RISK_REWARD_TP1 * 2.0)
         
-        database.log_scan(symbol, f"Signal SHORT | Entry: {round(entry_est, 4)} | AI Processing")
+        database.log_scan(symbol, f"Signal SHORT | Entry: {round(entry_est, 4)}")
         
         return {
             'pair': pair, 'direction': 'SHORT', 'entry_price': round(entry_est, 4),
@@ -91,4 +96,5 @@ def generate_signal(df, pair):
             'feat_rsi': round(rsi_val, 2), 'feat_trend_line': trend_line
         }
 
+    database.log_scan(symbol, "No Signal (Conditions Not Met)")
     return None
