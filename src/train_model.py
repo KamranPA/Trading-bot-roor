@@ -1,5 +1,5 @@
 # src/train_model.py
-# بازگشت به نسخه پایدار v6.3 - آموزش موتور هوش مصنوعی بر اساس ۵ فاکتور اصلی
+# نسخه ارتقایافته v7.0 - مجهز به آموزش توزیع‌شده با فاکتورهای ۹ بعدی
 
 import os
 import sqlite3
@@ -13,7 +13,7 @@ MODEL_DIR = os.path.join(BASE_DIR, "src", "models")
 MODEL_PATH = os.path.join(MODEL_DIR, "trading_filter_model.pkl")
 
 def train_ai_model():
-    """🧠 آموزش موتور هوش مصنوعی بر اساس کارنامه معاملات بسته‌شده گذشته"""
+    """🧠 آموزش موتور هوش مصنوعی تقویت‌شده بر اساس کارنامه معاملات بسته‌شده گذشته"""
     if not os.path.exists(DB_NAME):
         print("⚠️ پایگاه داده جهت استخراج دیتای آموزشی هوش مصنوعی پیدا نشد.")
         return
@@ -21,7 +21,9 @@ def train_ai_model():
     conn = sqlite3.connect(DB_NAME)
     query = """
         SELECT 
-            feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, pnl_percent 
+            feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line,
+            feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session,
+            pnl_percent 
         FROM signals 
         WHERE status = 'CLOSED'
     """
@@ -32,18 +34,19 @@ def train_ai_model():
         print(f"ℹ️ حجم تاریخچه معاملات کم است ({len(df)}/50 معامله بسته‌شده). کالیبراسیون هوش مصنوعی تعلیق ماند.")
         return
 
-    # ایجاد ستون برچسب هدف (سودآور = ۱، زیان‌ده = ۰)
     df['target'] = (df['pnl_percent'] > 0).astype(int)
 
-    # لیست جامع ۵ ویژگی اصلی ۳۶۰ درجه
-    features = ['feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 'feat_trend_line']
+    features = [
+        'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 'feat_trend_line',
+        'feat_ema_deviation', 'feat_rsi_momentum', 'feat_body_ratio', 'feat_high_volume_session'
+    ]
     
     X = df[features]
     y = df['target']
 
     model = RandomForestClassifier(
-        n_estimators=100,
-        max_depth=5,
+        n_estimators=100,      
+        max_depth=5,           
         class_weight='balanced',
         random_state=42
     )
@@ -51,7 +54,7 @@ def train_ai_model():
 
     os.makedirs(MODEL_DIR, exist_ok=True)
     joblib.dump(model, MODEL_PATH)
-    print(f"🔥 [هوش مصنوعی با موفقیت تقویت شد]: مدل جدید با ۵ فاکتور بر اساس {len(df)} معامله واقعی کالیبره شد.")
+    print(f"🔥 [هوش مصنوعی با موفقیت تقویت شد]: مدل جدید با ۹ فاکتور بر اساس {len(df)} معامله واقعی کالیبره و ذخیره گردید.")
 
 if __name__ == "__main__":
     train_ai_model()
