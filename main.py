@@ -1,5 +1,5 @@
 # main.py
-# فایل اصلاح شده و نهایی (نسخه v6.2 - رفع باگ ترتیب فیلتر تلگرام و همگام‌سازی دیتابیس)
+# نسخه کاملاً یکپارچه، جامع و بدون نقص v6.3 (اصلاح فیلتر زمان و پایداری کامل سیستم)
 
 import os
 import sys
@@ -8,6 +8,7 @@ import sqlite3
 from datetime import datetime, timedelta
 import joblib
 
+# تنظیم مسیرهای اصلی پروژه جهت بارگذاری بدون مشکل ماژول‌ها
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if CURRENT_DIR not in sys.path:
     sys.path.append(CURRENT_DIR)
@@ -27,9 +28,9 @@ from src import train_model
 MODEL_PATH = os.path.join(CURRENT_DIR, "src", "models", "trading_filter_model.pkl")
 
 def check_ai_permission(feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line):
-    """🧠 دروازه‌بان هوش مصنوعی ۳۶۰ درجه"""
+    """🧠 دروازه‌بان هوش مصنوعی ۳۶۰ درجه برای فیلتر شکست‌های فیک"""
     if not os.path.exists(MODEL_PATH):
-        print("ℹ️ مدل هوش مصنوعی هنوز آموزش ندیده است؛ تایید خودکار.")
+        print("ℹ️ مدل هوش مصنوعی هنوز آموزش ندیده است؛ تایید خودکار سیگنال.")
         return True, 1.0
 
     try:
@@ -50,7 +51,7 @@ def check_ai_permission(feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, fe
         return True, 1.0
 
 def update_open_positions():
-    """🛡️ مکانیزم ریسک‌فری خودکار و خروج تارگت‌ها"""
+    """🛡️ مکانیزم ریسک‌فری خودکار و مدیریت خروج پوزیشن‌های باز"""
     db_path = database.DB_NAME
     if not os.path.exists(db_path):
         return
@@ -115,59 +116,49 @@ def update_open_positions():
         print(f"⚠️ خطا در بروزرسانی معاملات: {e}")
 
 def is_telegram_locked_8h(symbol, hours_limit=8):
-    """🔏 بررسی دقیق قفل هوشمند ۸ ساعته بر اساس زمان ثبت در دیتابیس"""
+    """🔏 بررسی قفل ۸ ساعته بر اساس زمان آخرین سیگنال صادر شده زنده در جدول اصلی"""
     db_path = database.DB_NAME
     if not os.path.exists(db_path):
         return False
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        # کوئری هم زمان روی جدول سیگنال‌ها و لاگ‌ها برای امنیت فیلتر تلگرام
+        
+        # ما فقط زمان ثبت معاملات واقعی در جدول اصلی را چک می‌کنیم، نه لاگ‌های اسکن عادی را
         cursor.execute("SELECT timestamp FROM signals WHERE symbol = ? ORDER BY id DESC LIMIT 1", (symbol,))
-        res1 = cursor.fetchone()
-        cursor.execute("SELECT timestamp FROM scan_logs WHERE symbol = ? AND result LIKE '%Signal%' ORDER BY id DESC LIMIT 1", (symbol,))
-        res2 = cursor.fetchone()
+        res = cursor.fetchone()
         conn.close()
         
-        times = []
-        for r in [res1, res2]:
-            if r and r[0]:
-                t_str = str(r[0]).replace('T', ' ').split('.')[0]
-                times.append(datetime.strptime(t_str, '%Y-%m-%d %H:%M:%S'))
-                
-        if not times:
-            return False
-            
-        last_time = max(times)
-        if (datetime.utcnow() - last_time) < timedelta(hours=hours_limit):
-            return True
+        if res and res[0]:
+            t_str = str(res[0]).replace('T', ' ').split('.')[0]
+            last_time = datetime.strptime(t_str, '%Y-%m-%d %H:%M:%S')
+            if (datetime.utcnow() - last_time) < timedelta(hours=hours_limit):
+                return True
         return False
     except Exception:
         return False
 
 def run_bot():
-    print("🤖 اسکنر هوشمند نسخه v6.2 فعال شد...")
+    print("🤖 اسکنر هوشمند نسخه v6.3 فعال شد...")
     
-    # راه‌اندازی و بررسی ستون‌های دیتابیس
+    # اولویت اول: بررسی ساختار پایگاه داده و ساخت ستون‌ها در صورت عدم وجود
     database.init_db()
     if str(database.get_setting("bot_status", "ACTIVE")).strip().upper() != "ACTIVE":
+        print("🛑 ربات از طریق دیتابیس غیرفعال شده است.")
         return
     
+    # اولویت دوم: مانیتور و ریسک‌فری موقعیت‌های باز
     update_open_positions()
     
-    # اجرای هوش مصنوعی در محیط امن (try/except) جهت جلوگیری از کرش کل سیستم
+    # اولویت سوم: تلاش برای آموزش هوش مصنوعی با بلاک محافظتی try/except برای جلوگیری از کرش کل فرآیند
     try:
         train_model.train_ai_model()
     except Exception as e:
-        print(f"ℹ️ سیستم یادگیری ماشین منتظر دیتای بیشتر: {e}")
+        print(f"ℹ️ موتور هوش مصنوعی منتظر ثبت دیتای بیشتر است: {e}")
     
+    # اولویت چهارم: چرخش روی کل واچ‌لیست بدون قفل زودهنگام فرآیند اسکن
     for pair in config.WATCHLIST:
         symbol = pair.split('/')[0]
-        
-        # 🛡️ قانون طلایی جدید: اولویت اول چک کردن قفل ۸ ساعته تلگرام است
-        if is_telegram_locked_8h(symbol, hours_limit=8):
-            print(f"🔏 ارز {symbol} در قفل زمان‌دار ۸ ساعته است. اسکن لغو شد.")
-            continue
             
         df = coinex_client.get_coinex_candles(pair)
         if df is None or df.empty:
@@ -176,8 +167,16 @@ def run_bot():
         df = indicators.calculate_indicators(df)
         signal_result = strategy.generate_signal(df, pair)
         
+        # اگر استراتژی چارت ۴ ساعته سیگنال قطعی صادر کرد
         if signal_result and isinstance(signal_result, dict):
-            # استعلام سنسورهای هوش مصنوعی
+            
+            # 🛡️ موقعیت فیلتر زمان اصلاح شد: بررسی قفل تلگرام فقط و فقط هنگام پیدا شدن سیگنال واقعی انجام می‌شود
+            if is_telegram_locked_8h(symbol, hours_limit=8):
+                print(f"🔏 سیگنال جدید برای {symbol} یافت شد، اما به علت محدودیت ارسال ۸ ساعته تلگرام، بلاک گردید.")
+                database.log_scan(symbol, "Signal Found (Blocked by 8h Telegram Lock)")
+                continue
+                
+            # ارزیابی توسط سنسورهای هوش مصنوعی
             ai_approved, win_rate = check_ai_permission(
                 feat_adx=signal_result['feat_adx'], feat_vol_ratio=signal_result['feat_vol_ratio'],
                 feat_atr_percent=signal_result['feat_atr_percent'], feat_rsi=signal_result['feat_rsi'],
@@ -188,7 +187,7 @@ def run_bot():
                 database.log_scan(symbol, f"Blocked by AI ({win_rate*100:.1f}%)")
                 continue
             
-            # ذخیره و ارسال آنی سیگنال به تلگرام
+            # ذخیره نهایی پوزیشن در دیتابیس
             database.save_signal_advanced(
                 symbol=symbol, direction=signal_result['direction'],
                 entry_price=signal_result['entry_price'], stop_loss=signal_result['stop_loss'],
@@ -198,8 +197,10 @@ def run_bot():
                 feat_trend_line=signal_result['feat_trend_line'], status="OPEN"
             )
             
+            # ارسال نهایی به کانال تلگرام شما
             telegram_bot.format_and_send_signal(signal_result)
         else:
+            # اسکن‌های معمولی بازار که سیگنال ندارند، بدون هیچ مشکلی فقط لاگ می‌شوند
             database.log_scan(symbol, "No Signal")
 
 if __name__ == "__main__":
