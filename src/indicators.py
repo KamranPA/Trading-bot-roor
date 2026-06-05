@@ -1,5 +1,5 @@
 # src/indicators.py
-# نسخه اصلاح‌شده v7.8 - محاسبه کامل ۹ فاکتور عددی هوش مصنوعی برای رفع خطای KeyError
+# نسخه v7.9 - اصلاح حروف بزرگ ستون‌ها و همگام‌سازی کامل ۹ فاکتور هوش مصنوعی
 
 import pandas as pd
 import numpy as np
@@ -10,11 +10,11 @@ def calculate_indicators(df):
         print(f"⚠️ دیتای کافی برای محاسبات تکنیکال وجود ندارد.")
         return df
 
-    # ۱. محاسبه میانگین متحرک نمایی ۲۰۰ (EMA 200)
+    # ۱. محاسبه میانگین متحرک نمایی ۲۰۰ (EMA 200) با حروف بزرگ
     df['ema_200'] = df['Close'].ewm(span=200, adjust=False).mean()
     df['EMA_200'] = df['ema_200']
     
-    # ۲. محاسبه شاخص قدرت نسبی (RSI 14)
+    # ۲. شاخص قدرت نسبی (RSI 14)
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -23,7 +23,7 @@ def calculate_indicators(df):
     df['feat_rsi'] = df['feat_rsi'].fillna(50.0)
     df['RSI'] = df['feat_rsi']
 
-    # ۳. محاسبه میانگین محدوده واقعی (ATR 14) و درصد آن
+    # ۳. میانگین محدوده واقعی (ATR 14) و درصد آن
     high_low = df['High'] - df['Low']
     high_close = (df['High'] - df['Close'].shift()).abs()
     low_close = (df['Low'] - df['Close'].shift()).abs()
@@ -33,7 +33,7 @@ def calculate_indicators(df):
     df['feat_atr_percent'] = df['feat_atr_percent'].fillna(0.0)
     df['ATR'] = df['atr']
 
-    # ۴. محاسبه شاخص میانگین حرکت جهت‌دار (ADX 14)
+    # ۴. شاخص میانگین حرکت جهت‌دار (ADX 14)
     up_move = df['High'].diff()
     down_move = df['Low'].diff()
     
@@ -48,25 +48,19 @@ def calculate_indicators(df):
     df['feat_adx'] = dx.rolling(window=14).mean().fillna(25.0)
     df['ADX'] = df['feat_adx']
 
-    # ۵. محاسبه نسبت حجم معاملاتی و میانگین متحرک حجم
+    # ۵. نسبت حجم معاملاتی و میانگین متحرک حجم
     df['Volume_MA'] = df['Volume'].rolling(window=20).mean()
     df['feat_vol_ratio'] = (df['Volume'] / (df['Volume_MA'] + 1e-10)).fillna(1.0)
 
     # ۶. تشخیص خط روند داینامیک نسبت به EMA 200
     df['feat_trend_line'] = np.where(df['Close'] > df['ema_200'], 1.0, 0.0)
 
-    # 🔥 اضافه کردن فاکتورهای مفقوده جدید (۹ فاکتوره) جهت همگام‌سازی کامل با استراتژی
-    # ۷. انحراف قیمت از EMA 200
+    # 🔥 محاسبه فاکتورهای تکمیلی ۹ گانه با حروف بزرگ جهت جلوگیری از خطای KeyError در استراتژی
     df['feat_ema_deviation'] = ((df['Close'] - df['ema_200']) / df['ema_200'] * 100).fillna(0.0)
-    
-    # ۸. مومنتوم و شتاب تغییرات RSI (تفاضل با کندل قبل)
     df['feat_rsi_momentum'] = df['feat_rsi'].diff().fillna(0.0)
     
-    # ۹. نسبت اندازه بدنه کندل به کل محدوده نوسان کندل (تناسب خریداران/فروشندگان)
     candle_range = (df['High'] - df['Low'] + 1e-10)
     df['feat_body_ratio'] = (abs(df['Close'] - df['Open']) / candle_range).fillna(0.5)
-    
-    # ۱۰. تشخیص حجم‌های معاملاتی غیرعادی و شدید در این سشن
     df['feat_high_volume_session'] = np.where(df['Volume'] > (df['Volume_MA'] * 1.8), 1.0, 0.0)
 
     return df
