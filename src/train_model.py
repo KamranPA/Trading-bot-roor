@@ -1,5 +1,5 @@
 # src/train_model.py
-# نسخه ارتقایافته v7.0 - مجهز به آموزش توزیع‌شده با فاکتورهای ۹ بعدی
+# موتور هوش مصنوعی ربات (نسخه v5.6 - آموزش مدل یادگیری ماشین ۵ فاکتوره با دید ۳۶۰ درجه)
 
 import os
 import sqlite3
@@ -8,60 +8,49 @@ from sklearn.ensemble import RandomForestClassifier
 import joblib
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_NAME = os.path.join(BASE_DIR, "data", "trading_bot.db")
+DB_PATH = os.path.join(BASE_DIR, "data", "trading_bot.db")
 MODEL_DIR = os.path.join(BASE_DIR, "src", "models")
 MODEL_PATH = os.path.join(MODEL_DIR, "trading_filter_model.pkl")
 
-def train_ai_model():
-    [span_68](start_span)"""🧠[span_68](end_span) آموزش موتور هوش مصنوعی تقویت‌شده بر اساس کارنامه معاملات بسته‌شده گذشته"""
-    if not os.path.exists(DB_NAME):
-        print("⚠️ پایگاه داده جهت استخراج دیتای آموزشی هوش مصنوعی پیدا نشد.")
-        return
+if not os.path.exists(MODEL_DIR):
+    os.makedirs(MODEL_DIR)
 
-    # اتصال به دیتابیس و بارگذاری آرشیو معاملات
-    conn = sqlite3.connect(DB_NAME)
+def load_data_from_db():
+    if not os.path.exists(DB_PATH):
+        print("⚠️ دیتابیس یافت نشد!")
+        return None
+        
+    conn = sqlite3.connect(DB_PATH)
+    # استخراج دیتای هر ۵ متد تکنیکال
     query = """
-        SELECT 
-            [span_69](start_span)feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line,[span_69](end_span)
-            feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session,
-            pnl_percent 
+        SELECT feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, pnl_percent 
         FROM signals 
-        WHERE status = 'CLOSED'
+        WHERE status = 'CLOSED' AND (feat_adx > 0 OR feat_vol_ratio > 0)
     """
     df = pd.read_sql_query(query, conn)
     conn.close()
+    return df
 
-    # مکانیزم پیشگیری از تعمیم ناقص و بیش‌برازش (کنترل کف داده‌های آرشیو)
-    [span_70](start_span)if len(df) < 50:[span_70](end_span)
-        print(f"ℹ️ حجم تاریخچه معاملات کم است ({len(df)}/50 معامله بسته‌شده). کالیبراسیون هوش مصنوعی تعلیق ماند.")
-        return
-
-    # ایجاد ستون برچسب هدف (سودآور = ۱، زیان‌ده = ۰)
-    df['target'] = (df['pnl_percent'] > 0).astype(int)
-
-    # لیست جامع ۹ ویژگی استخراج شده برای ورودی درخت‌های تصمیم‌گیری
-    features = [
-        'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 'feat_trend_line',
-        'feat_ema_deviation', 'feat_rsi_momentum', 'feat_body_ratio', 'feat_high_volume_session'
-    ]
+def train_ai_model():
+    print("🧠 فرآیند کالبدشکافی داده‌ها و آموزش مدل هوش مصنوعی ۳۶۰ درجه آغاز شد...")
+    df = load_data_from_db()
     
-    X = df[features]
-    y = df['target']
+    if df is None or len(df) < 10:
+        print(f"ℹ️ تعداد معاملات بسته شده برای آموزش کافی نیست (فعلاً {len(df) if df is not None else 0} معامله).")
+        return False
 
-    # [span_71](start_span)🦾 بهینه‌سازی پارامترهای مدل:
-    # پارامتر class_weight='balanced' سوگیری مدل را در روندهای فرسایشی خنثی می‌کند.
-    model = RandomForestClassifier(
-        n_estimators=100,      # افزایش شمار درخت‌ها برای کاهش واریانس خطا
-        max_depth=5,           # عمق بهینه جهت کنترل تعادل انحراف و واریانس
-        class_weight='balanced',
-        random_state=42
-    )
+    # تعریف ورودی‌های پنج‌گانه سنسورها
+    X = df[['feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 'feat_trend_line']]
+    y = df['pnl_percent'].apply(lambda x: 1 if x > 0 else 0)
+    
+    print(f"📊 حجم دیتای در دسترس برای یادگیری: {len(df)} معامله.")
+
+    model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
     model.fit(X, y)
-
-    # ذخیره‌سازی نهایی فایل باینری مدل جهت استفاده در هسته اصلی ربات[span_71](end_span)
-    os.makedirs(MODEL_DIR, exist_ok=True)
+    
     joblib.dump(model, MODEL_PATH)
-    print(f"🔥 [هوش مصنوعی با موفقیت تقویت شد]: مدل جدید با ۹ فاکتور بر اساس {len(df)} معامله واقعی کالیبره و ذخیره گردید.")
+    print(f"💾 فایل مغز الکترونیک هوش مصنوعی ۵ فاکتوره با موفقیت ذخیره شد: {MODEL_PATH}")
+    return True
 
 if __name__ == "__main__":
     train_ai_model()
