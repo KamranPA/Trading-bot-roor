@@ -1,5 +1,5 @@
 # src/train_model.py
-# موتور هوش مصنوعی ربات (نسخه v5.6 - آموزش مدل یادگیری ماشین ۵ فاکتوره با دید ۳۶۰ درجه)
+# بازگشت به نسخه پایدار v6.3 - آموزش موتور هوش مصنوعی بر اساس ۵ فاکتور اصلی
 
 import os
 import sqlite3
@@ -8,49 +8,50 @@ from sklearn.ensemble import RandomForestClassifier
 import joblib
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, "data", "trading_bot.db")
+DB_NAME = os.path.join(BASE_DIR, "data", "trading_bot.db")
 MODEL_DIR = os.path.join(BASE_DIR, "src", "models")
 MODEL_PATH = os.path.join(MODEL_DIR, "trading_filter_model.pkl")
 
-if not os.path.exists(MODEL_DIR):
-    os.makedirs(MODEL_DIR)
+def train_ai_model():
+    """🧠 آموزش موتور هوش مصنوعی بر اساس کارنامه معاملات بسته‌شده گذشته"""
+    if not os.path.exists(DB_NAME):
+        print("⚠️ پایگاه داده جهت استخراج دیتای آموزشی هوش مصنوعی پیدا نشد.")
+        return
 
-def load_data_from_db():
-    if not os.path.exists(DB_PATH):
-        print("⚠️ دیتابیس یافت نشد!")
-        return None
-        
-    conn = sqlite3.connect(DB_PATH)
-    # استخراج دیتای هر ۵ متد تکنیکال
+    conn = sqlite3.connect(DB_NAME)
     query = """
-        SELECT feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, pnl_percent 
+        SELECT 
+            feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, pnl_percent 
         FROM signals 
-        WHERE status = 'CLOSED' AND (feat_adx > 0 OR feat_vol_ratio > 0)
+        WHERE status = 'CLOSED'
     """
     df = pd.read_sql_query(query, conn)
     conn.close()
-    return df
 
-def train_ai_model():
-    print("🧠 فرآیند کالبدشکافی داده‌ها و آموزش مدل هوش مصنوعی ۳۶۰ درجه آغاز شد...")
-    df = load_data_from_db()
+    if len(df) < 50:
+        print(f"ℹ️ حجم تاریخچه معاملات کم است ({len(df)}/50 معامله بسته‌شده). کالیبراسیون هوش مصنوعی تعلیق ماند.")
+        return
+
+    # ایجاد ستون برچسب هدف (سودآور = ۱، زیان‌ده = ۰)
+    df['target'] = (df['pnl_percent'] > 0).astype(int)
+
+    # لیست جامع ۵ ویژگی اصلی ۳۶۰ درجه
+    features = ['feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 'feat_trend_line']
     
-    if df is None or len(df) < 10:
-        print(f"ℹ️ تعداد معاملات بسته شده برای آموزش کافی نیست (فعلاً {len(df) if df is not None else 0} معامله).")
-        return False
+    X = df[features]
+    y = df['target']
 
-    # تعریف ورودی‌های پنج‌گانه سنسورها
-    X = df[['feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 'feat_trend_line']]
-    y = df['pnl_percent'].apply(lambda x: 1 if x > 0 else 0)
-    
-    print(f"📊 حجم دیتای در دسترس برای یادگیری: {len(df)} معامله.")
-
-    model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
+    model = RandomForestClassifier(
+        n_estimators=100,
+        max_depth=5,
+        class_weight='balanced',
+        random_state=42
+    )
     model.fit(X, y)
-    
+
+    os.makedirs(MODEL_DIR, exist_ok=True)
     joblib.dump(model, MODEL_PATH)
-    print(f"💾 فایل مغز الکترونیک هوش مصنوعی ۵ فاکتوره با موفقیت ذخیره شد: {MODEL_PATH}")
-    return True
+    print(f"🔥 [هوش مصنوعی با موفقیت تقویت شد]: مدل جدید با ۵ فاکتور بر اساس {len(df)} معامله واقعی کالیبره شد.")
 
 if __name__ == "__main__":
     train_ai_model()
