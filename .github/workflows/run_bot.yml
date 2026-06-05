@@ -33,19 +33,17 @@ jobs:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python main.py
 
-    - name: Auto-Commit & Push Database & AI Models
+    - name: Auto-Commit & Push Database & AI Models (Force Save)
       run: |
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
         
-        # 🟢 اصلاح حیاتی: اضافه کردن دیتابیس و فایل‌های هوش مصنوعی (در صورت وجود) به گیت
-        if [ -f data/trading_bot.db ]; then
-          git add data/trading_bot.db
-        fi
-        
+        # مجبور کردن گیت به شناسایی و ردیابی فایل دیتابیس و مدل‌ها
+        git add -f data/trading_bot.db
         if [ -d src/models ]; then
-          git add src/models/* || echo "هنوز مدلی ساخته نشده است"
+          git add -f src/models/* || echo "هنوز مدلی ساخته نشده است"
         fi
         
-        # اگر تغییراتی در دیتابیس یا مغز مدل وجود داشت، همزمان Push کن
-        git diff --quiet && git diff --staged --quiet || (git commit -m "🗄️ سیستم: بروزرسانی لایو دیتابیس و فایل مدل هوش مصنوعی [Skip CI]" && git push)
+        # فرآیند کامیت و پوش بدون وابستگی به فیلتر git diff
+        git commit -m "🗄️ سیستم: بروزرسانی لایو دیتابیس و فاکتورهای هوش مصنوعی [Skip CI]" || echo "تغییر جدیدی برای ذخیره وجود ندارد"
+        git push origin main
