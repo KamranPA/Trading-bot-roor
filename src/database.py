@@ -1,5 +1,5 @@
 # src/database.py
-# ماژول مدیریت دیتابیس (نسخه v5.6 - مجهز به ذخیره‌سازی ۵ ویژگی عددی دید ۳۶۰ درجه)
+# نسخه ارتقایافته v7.0 - مجهز به فیلدهای ۹ بعدی هوش مصنوعی
 
 import os
 import sqlite3
@@ -14,7 +14,7 @@ if not os.path.exists(DATA_DIR):
 DB_NAME = os.path.join(DATA_DIR, "trading_bot.db")
 
 def init_db():
-    """🛡️ راه‌اندازی دیتابیس با ستون‌های ارتقایافته و دید ۳۶۰ درجه برای هوش مصنوعی"""
+    """🛡️ راه‌اندازی و تزریق خودکار ستون‌های جدید به دیتابیس لایو"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
@@ -33,24 +33,32 @@ def init_db():
             feat_vol_ratio REAL DEFAULT 0.0,
             feat_atr_percent REAL DEFAULT 0.0,
             feat_rsi REAL DEFAULT 50.0,
-            feat_trend_line REAL DEFAULT 0.0
+            feat_trend_line REAL DEFAULT 0.0,
+            feat_ema_deviation REAL DEFAULT 0.0,
+            feat_rsi_momentum REAL DEFAULT 0.0,
+            feat_body_ratio REAL DEFAULT 0.0,
+            feat_high_volume_session REAL DEFAULT 0.0
         )
     """)
     
-    # کنترل و تزریق هوشمند ستون‌ها به دیتابیس لایو سرور
-    new_columns = {
+    # مکانیزم بررسی و تزریق ستون‌های ارتقایافته نسخه جدید
+    columns_to_ensure = {
         "feat_adx": "REAL DEFAULT 0.0",
         "feat_vol_ratio": "REAL DEFAULT 0.0",
         "feat_atr_percent": "REAL DEFAULT 0.0",
         "feat_rsi": "REAL DEFAULT 50.0",
-        "feat_trend_line": "REAL DEFAULT 0.0"
+        "feat_trend_line": "REAL DEFAULT 0.0",
+        "feat_ema_deviation": "REAL DEFAULT 0.0",
+        "feat_rsi_momentum": "REAL DEFAULT 0.0",
+        "feat_body_ratio": "REAL DEFAULT 0.0",
+        "feat_high_volume_session": "REAL DEFAULT 0.0"
     }
     
-    for col_name, col_type in new_columns.items():
+    for col_name, col_type in columns_to_ensure.items():
         try:
             cursor.execute(f"ALTER TABLE signals ADD COLUMN {col_name} {col_type}")
         except sqlite3.OperationalError:
-            pass
+            pass # ستون از قبل وجود دارد
             
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS signal_targets (
@@ -69,7 +77,7 @@ def init_db():
     
     conn.commit()
     conn.close()
-    print("🗄️ دیتابیس با موفقیت به سنسورهای ۳۶۰ درجه RSI و EMA مجهز شد.")
+    print("🗄️ دیتابیس با موفقیت به ساختار ۹ بعدی فاکتورهای هوش مصنوعی متصل شد.")
 
 def log_scan(symbol, result):
     try:
@@ -82,17 +90,27 @@ def log_scan(symbol, result):
     except Exception as e:
         print(f"⚠️ خطا در ثبت لاگ: {e}")
 
-def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, feat_adx=0.0, feat_vol_ratio=0.0, feat_atr_percent=0.0, feat_rsi=50.0, feat_trend_line=0.0, status="OPEN"):
-    """ذخیره‌سازی پیشرفته پوزیشن به همراه متادیتای ۵ ویژگی عددی هوش مصنوعی ۳۶۰ درجه"""
+def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, 
+                         feat_adx=0.0, feat_vol_ratio=0.0, feat_atr_percent=0.0, 
+                         feat_rsi=50.0, feat_trend_line=0.0, feat_ema_deviation=0.0,
+                         feat_rsi_momentum=0.0, feat_body_ratio=0.0, feat_high_volume_session=0.0, 
+                         status="OPEN"):
+    """ذخیره‌سازی پیشرفته پوزیشن به همراه متادیتای ارتقایافته ۹ بعدی هوش مصنوعی"""
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         
         cursor.execute("""
-            INSERT INTO signals (timestamp, symbol, direction, entry_price, stop_loss, feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (current_time, symbol, direction, entry_price, stop_loss, feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, status))
+            INSERT INTO signals (
+                timestamp, symbol, direction, entry_price, stop_loss, 
+                feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line,
+                feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session, status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (current_time, symbol, direction, entry_price, stop_loss, 
+              feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line,
+              feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session, status))
         
         signal_id = cursor.lastrowid
         
@@ -103,7 +121,7 @@ def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, fe
             
         conn.commit()
         conn.close()
-        print(f"💾 پوزیشن {symbol} به همراه دیتای ۳۶۰ درجه هوش مصنوعی در دیتابیس ذخیره شد.")
+        print(f"💾 پوزیشن {symbol} با فاکتورهای پیشرفته هوش مصنوعی در دیتابیس ثبت لایو شد.")
     except Exception as e:
         print(f"⚠️ خطا در ذخیره پوزیشن پیشرفته: {e}")
 
