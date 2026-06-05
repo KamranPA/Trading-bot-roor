@@ -1,5 +1,5 @@
 # src/database.py
-# نسخه v7.3 - اصلاح قطعی مشکل کرش main.py با بازگرداندن توبع بومی سیستم
+# نسخه اصلاح‌شده v7.9 - انطباق کامل ورودی‌ها با دیکشنری ۹ فاکتوره استراتژی
 
 import os
 import sqlite3
@@ -17,7 +17,7 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # جدول سیگنال‌ها
+    # جدول سیگنال‌ها (شامل ۵ ستون فاکتور عددی پایه‌ای هوش مصنوعی)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS signals (
             id INTEGER PRIMARY KEY,
@@ -70,9 +70,9 @@ def log_scan(symbol, result):
         pass
 
 def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, 
-                         feat_adx=0.0, feat_vol_ratio=0.0, feat_atr_percent=0.0, 
-                         feat_rsi=50.0, feat_trend_line=0.0, status="OPEN"):
-    """ذخیره سیگنال صادر شده توسط استراتژی برای انطباق کامل با خروجی main.py"""
+                          feat_adx=0.0, feat_vol_ratio=0.0, feat_atr_percent=0.0, 
+                          feat_rsi=50.0, feat_trend_line=0.0, status="OPEN", **kwargs):
+    """ذخیره سیگنال صادر شده توسط استراتژی و مدیریت آرگومان‌های اضافه هوش مصنوعی (**kwargs)"""
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
@@ -90,18 +90,15 @@ def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2,
         if tp1:
             cursor.execute("INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, ?, ?)", (signal_id, 1, tp1))
         if tp2:
-            cursor.execute("INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, ?, ?)", (signal_id, 2, tp2))
+             cursor.execute("INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, ?, ?)", (signal_id, 2, tp2))
             
         conn.commit()
         conn.close()
     except Exception as e:
         print(f"❌ خطا در ذخیره دیتابیس: {e}")
 
-# =========================================================================
-# 🔥 تابع حیاتی مفقوده که main.py برای بررسی وضعیت به آن نیاز مبرم دارد
-# =========================================================================
 def get_setting(key, default_value):
-    """🔍 خواندن تنظیمات سیستمی از جدول bot_settings برای جلوگیری از کرش main.py"""
+    """🔍 خواندن تنظیمات سیستمی از جدول bot_settings"""
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
