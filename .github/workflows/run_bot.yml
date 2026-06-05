@@ -15,8 +15,7 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        fetch-depth: 0 # 🟢 حیاتی: دانلود کامل تاریخچه برای حفظ فایل دیتابیس قبلی
+        [span_93](start_span)token: ${{ secrets.GITHUB_TOKEN }}[span_93](end_span)
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -25,7 +24,7 @@ jobs:
 
     - name: Install Dependencies
       run: |
-        python -m pip install --upgrade pip
+        [span_94](start_span)python -m pip install --upgrade pip[span_94](end_span)
         pip install -r requirements.txt
 
     - name: Execute Trading Engine
@@ -34,17 +33,23 @@ jobs:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python main.py
 
-    - name: Auto-Commit & Push Database & AI Models (Force Tracking)
+    - name: Auto-Commit & Push Database & AI Models
       run: |
-        git config --local user.email "actions@github.com"
+        [span_95](start_span)git config --local user.email "actions@github.com"[span_95](end_span)
         git config --local user.name "GitHub Actions"
         
-        # مجبور کردن گیت به ردیابی و افزودن دیتابیس
-        git add -f data/trading_bot.db
-        
-        if [ -d src/models ]; then
-          git add -f src/models/* || echo "هنوز مدلی ساخته نشده است"
+        # 🟢 اصلاح حیاتی: اضافه کردن دیتابیس و فایل‌های هوش مصنوعی (در صورت وجود) به گیت
+        if [ -f data/trading_bot.db ];
+        [span_96](start_span)then[span_96](end_span)
+          git add data/trading_bot.db
         fi
         
-        git commit -m "🗄️ سیستم: بروزرسانی لایو دیتابیس و فاکتورهای هوش مصنوعی [Skip CI]" || echo "داده جدیدی برای همگام‌سازی یافت نشد"
-        git push origin main
+        if [ -d src/models ];
+        [span_97](start_span)then[span_97](end_span)
+          git add src/models/* ||
+          [span_98](start_span)echo "هنوز مدلی ساخته نشده است"[span_98](end_span)
+        fi
+        
+        # اگر تغییراتی در دیتابیس یا مغز مدل وجود داشت، همزمان Push کن
+        git diff --quiet && git diff --staged --quiet ||
+        (git commit -m "🗄️ سیستم: بروزرسانی لایو دیتابیس و فایل مدل هوش مصنوعی [Skip CI]" && git push) [span_99](start_span)
