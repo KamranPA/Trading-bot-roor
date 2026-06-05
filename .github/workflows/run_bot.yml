@@ -1,55 +1,50 @@
-name: Run Trading Bot
+name: Monthly AI Self-Correction & Reporting
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # اجرای خودکار ربات هر ۳۰ دقیقه
-  workflow_dispatch: # امکان اجرای دستی
+    - cron: '0 0 1 * *' # اول هر ماه میلادی
+  workflow_dispatch: 
 
 permissions:
-  contents: write # مجوز رسمی برای ذخیره کردن و Push دیتابیس و مدل‌ها
+  contents: write 
 
 jobs:
-  run-bot-job:
+  optimize-and-report:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout Repository
+    - name: Checkout Repository Code
       uses: actions/checkout@v4
       with:
-        [span_93](start_span)token: ${{ secrets.GITHUB_TOKEN }}[span_93](end_span)
+        token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Set up Python
+    - name: Set up Python Environment
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
-    - name: Install Dependencies
+    - name: Install Project Dependencies
       run: |
-        [span_94](start_span)python -m pip install --upgrade pip[span_94](end_span)
+        python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Execute Trading Engine
+    - name: Run AI Engine (Surgical Loss Analysis)
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: python main.py
+      run: python -m src.brain 
 
-    - name: Auto-Commit & Push Database & AI Models
+    - name: Generate & Send Telegram Performance Report
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
-        [span_95](start_span)git config --local user.email "actions@github.com"[span_95](end_span)
+        python -c "from src import telegram_bot; telegram_bot.send_performance_report()"
+
+    - name: Commit and Push Strategy & Database Changes
+      run: |
+        git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
         
-        # 🟢 اصلاح حیاتی: اضافه کردن دیتابیس و فایل‌های هوش مصنوعی (در صورت وجود) به گیت
-        if [ -f data/trading_bot.db ];
-        [span_96](start_span)then[span_96](end_span)
-          git add data/trading_bot.db
-        fi
+        git add data/trading_bot.db config.py
         
-        if [ -d src/models ];
-        [span_97](start_span)then[span_97](end_span)
-          git add src/models/* ||
-          [span_98](start_span)echo "هنوز مدلی ساخته نشده است"[span_98](end_span)
-        fi
-        
-        # اگر تغییراتی در دیتابیس یا مغز مدل وجود داشت، همزمان Push کن
-        git diff --quiet && git diff --staged --quiet ||
-        (git commit -m "🗄️ سیستم: بروزرسانی لایو دیتابیس و فایل مدل هوش مصنوعی [Skip CI]" && git push) [span_99](start_span)
+        git diff --quiet && git diff --staged --quiet || (git commit -m "🧠 هوش مصنوعی: فیلترها بهینه‌سازی و کارنامه ماهانه صادر شد [Skip CI]" && git push)
