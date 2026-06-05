@@ -1,5 +1,5 @@
 # src/train_model.py
-# نسخه اصلاح‌شده v6.3 - کنترل آستانه دیتای ورودی جهت جلوگیری از بیش‌برازش (Overfitting)
+# نسخه اصلاح‌شده و تمیز v6.3 - رفع خطای سینتکس ناخواسته
 
 import os
 import sqlite3
@@ -13,7 +13,7 @@ MODEL_DIR = os.path.join(BASE_DIR, "src", "models")
 MODEL_PATH = os.path.join(MODEL_DIR, "trading_filter_model.pkl")
 
 def train_ai_model():
-    """🧠 آموزش موتور هوش مصنوعی بر اساس دیتای واقعی معاملات بسته شده"""[span_86](end_span)
+    """🧠 آموزش موتور هوش مصنوعی بر اساس دیتای واقعی معاملات بسته شده"""
     if not os.path.exists(DB_NAME):
         return
 
@@ -25,11 +25,11 @@ def train_ai_model():
         WHERE status = 'CLOSED'
     """
     df = pd.read_sql_query(query, conn)
-    [span_87](start_span)conn.close()[span_87](end_span)
+    conn.close() # این خط کاملاً تمیز و اصلاح شد
 
-    # 🛡️ اصلاح مهلک بیش‌برازش: تا زمان ثبت حداقل ۵۰ معامله قطعی، فرآیند آموزش را متوقف می‌کنیم
+    # 🛡️ اصلاح بیش‌برازش: تا زمان ثبت حداقل ۵۰ معامله قطعی، فرآیند آموزش را متوقف می‌کنیم
     if len(df) < 50:
-        [span_88](start_span)print(f"ℹ️ دیتای معاملاتی کافی نیست ({len(df)}/50 معامله بسته شده). آموزش هوش مصنوعی برای جلوگیری از Overfitting تعلیق شد.")[span_88](end_span)
+        print(f"ℹ️ دیتای معاملاتی کافی نیست ({len(df)}/50 معامله بسته شده). آموزش هوش مصنوعی برای جلوگیری از Overfitting تعلیق شد.")
         return
 
     # ایجاد ستون هدف (Target): اگر سود پوزیشن مثبت باشد ۱ (موفق)، در غیر این صورت ۰ (ناموفق)
@@ -41,7 +41,7 @@ def train_ai_model():
     y = df['target']
 
     # تنظیم بهینه عمق درخت‌ها (max_depth) برای کنترل دقیق‌تر منطق ریاضی مدل
-    [span_89](start_span)model = RandomForestClassifier(n_estimators=50, max_depth=4, random_state=42)[span_89](end_span)
+    model = RandomForestClassifier(n_estimators=50, max_depth=4, random_state=42)
     model.fit(X, y)
 
     # ایجاد پوشه مدل در صورت عدم وجود و ذخیره‌سازی نهایی فایل هوش مصنوعی
@@ -51,4 +51,3 @@ def train_ai_model():
 
 if __name__ == "__main__":
     train_ai_model()
-ز
