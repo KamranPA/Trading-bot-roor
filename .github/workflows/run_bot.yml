@@ -6,7 +6,7 @@ on:
   workflow_dispatch: # امکان اجرای دستی
 
 permissions:
-  contents: write # مجوز رسمی برای ذخیره کردن و Push دیتابیس و مدل‌ها
+  contents: write # مجوز رسمی برای ذخیره کردن و Push دیتابیس
 
 jobs:
   run-bot-job:
@@ -33,18 +33,21 @@ jobs:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python main.py
 
-    - name: Auto-Commit & Push Database & AI Models (Force Tracking)
+    - name: Auto-Commit & Push Database (Safe Tracking)
       run: |
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
         
-        # مجبور کردن گیت به ردیابی و افزودن دیتابیس لایو
+        # افزودن مطمئن و اجباری فایل دیتابیس
         git add -f data/trading_bot.db
         
-        if [ -d src/models ]; then
-          git add -f src/models/* || echo "هنوز مدلی ساخته نشده است"
+        # بررسی امن وجود پوشه مدل‌ها برای جلوگیری از ارور fatal گیت
+        if [ -d "src/models" ] && [ "$(ls -A src/models 2>/dev/null)" ]; then
+          git add -f src/models/*
         fi
         
-        # فرآیند کامیت امن و پوش اجباری دیتابیس
-        git commit -m "🗄️ سیستم: بروزرسانی لایو دیتابیس و فاکتورهای هوش مصنوعی [Skip CI]" || echo "داده جدیدی برای همگام‌سازی یافت نشد"
+        # کامیت امن دیتابیس (اگر تغییری نبود ارور نمی‌دهد)
+        git commit -m "🗄️ سیستم: بروزرسانی لایو دیتابیس نسخه ۳۶۰ [Skip CI]" || echo "داده جدیدی برای همگام‌سازی یافت نشد"
+        
+        # پوش کردن تغییرات به سرور اصلی گیت‌هاب
         git push origin main
