@@ -1,5 +1,5 @@
 # src/indicators.py
-# نسخه ارتقایافته v7.0 - مجهز به سنسورهای ۳۶۰ درجه جدید برای هوش مصنوعی
+# نسخه اصلاح‌شده v7.1 - هماهنگی کامل زمانی با سرور ابری گیت‌هاب اکشنز
 
 import pandas as pd
 import numpy as np
@@ -7,7 +7,7 @@ import numpy as np
 def calculate_indicators(df):
     """📊 محاسبه دقیق اندیکاتورهای تکنیکال و فاکتورهای پیشرفته هوش مصنوعی"""
     if df is None or df.empty or len(df) < 200:
-        print(f"⚠️ دیتای کافی برای محاسبات تکنیکال وجود ندارد (تعداد کندل‌ها: {len(df) if df is not None else 0})")
+        print(f"⚠️ دیتای کافی برای محاسبات تکنیکال وجود ندارد.")
         return df
 
     # ۱. محاسبه میانگین متحرک نمایی ۲۰۰ (EMA 200)
@@ -41,7 +41,6 @@ def calculate_indicators(df):
     minus_di = 100 * (pd.Series(minus_dm).rolling(window=14).sum() / (tr_smooth + 1e-10))
     
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)) * 100
-    # ستون موقت برای استفاده در فایل استراتژی
     df['ADX'] = dx.rolling(window=14).mean().fillna(25.0)
     df['feat_adx'] = df['ADX']
 
@@ -52,15 +51,11 @@ def calculate_indicators(df):
     # ۶. تشخیص خط روند داینامیک
     df['feat_trend_line'] = np.where(df['Close'] > df['ema_200'], 1.0, 0.0)
 
-    # =========================================================================
-    # 🔥 ویژگی‌های جدید هوش مصنوعی (AI Advanced Features)
-    # =========================================================================
-    
-    # ۷. انحراف قیمت از EMA 200 (تشخیص بیش‌کشیدگی روند)
+    # ۷. انحراف قیمت از EMA 200
     df['feat_ema_deviation'] = ((df['Close'] - df['ema_200']) / df['ema_200']) * 100
     df['feat_ema_deviation'] = df['feat_ema_deviation'].fillna(0.0)
 
-    # ۸. شتاب تغییرات RSI (تفاوت نسبت به ۲ کندل قبل)
+    # ۸. شتاب تغییرات RSI
     df['feat_rsi_momentum'] = df['feat_rsi'].diff(periods=2).fillna(0.0)
 
     # ۹. پرایس اکشن: نسبت اندازه بدنه کندل به کل محدوده نوسان آن
@@ -68,13 +63,12 @@ def calculate_indicators(df):
     candle_body = (df['Close'] - df['Open']).abs()
     df['feat_body_ratio'] = (candle_body / candle_range).fillna(0.5)
 
-    # ۱۰. ویژگی زمانی: استخراج ساعت UTC و تشخیص سشن پرحجم (۱۲ تا ۲۰ UTC)
-    # اطمینان از تبدیل ستون زمان به ساختار DateTime پایتون
-    df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-    df['feat_hour'] = df['Timestamp'].dt.hour
+    # ۱۰. ویژگی زمانی هماهنگ شده با سرور ابری بر اساس ساختار DateTime
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
+    df['feat_hour'] = df['Timestamp'].dt.hour.fillna(12).astype(float)
     df['feat_high_volume_session'] = np.where((df['feat_hour'] >= 12) & (df['feat_hour'] <= 20), 1.0, 0.0)
 
-    # افزودن ستون‌های کمکی برای سازگاری کامل با کدهای استراتژی قدیمی
+    # ستون‌های آلیاس (Alias) جهت سازگاری معکوس با بخش‌های قدیمی سیستم
     df['RSI'] = df['feat_rsi']
     df['EMA_200'] = df['ema_200']
     df['ATR'] = df['atr']
