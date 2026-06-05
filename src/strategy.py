@@ -1,98 +1,113 @@
 # src/strategy.py
-# ماژول استراتژی (نسخه v5.6 - کالیبره شده برای استخراج فاکتورهای عددی دید ۳۶۰ درجه)
+# نسخه نهایی و کاملاً هماهنگ با موتور هوش مصنوعی و دیتابیس
 
+import os
+import numpy as np
 import pandas as pd
-import config
+import joblib
 from src import database
 
-def check_swing_high(df, index, window):
-    if index < window or index >= len(df) - window:
-        return False
-    current_high = df.loc[index, 'High']
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODEL_PATH = os.path.join(BASE_DIR, "src", "models", "trading_filter_model.pkl")
+
+def evaluate_market_and_trade(df, symbol="BTC/USDT"):
+    """
+    📊 بررسی وضعیت بازار، اعمال استراتژی تکنیکال، فیلترینگ با هوش مصنوعی و ثبت سیگنال
+    """
+    if df is None or len(df) < 2:
+        print(f"⚠️ دیتای کافی برای نماد {symbol} جهت پردازش استراتژی وجود ندارد.")
+        return
+
+    # دریافت آخرین کندل بسته شده بازار
+    current_candle = df.iloc[-1]
     
-    for i in range(1, window + 1):
-        if df.loc[index - i, 'High'] > current_high or df.loc[index + i, 'High'] > current_high:
-            return False
-    return True
-
-def check_swing_low(df, index, window):
-    if index < window or index >= len(df) - window:
-        return False
-    current_low = df.loc[index, 'Low']
-    for i in range(1, window + 1):
-        if df.loc[index - i, 'Low'] < current_low or df.loc[index + i, 'Low'] < current_low:
-            return False
-    return True
-
-def generate_signal(df, pair):
-    if df is None or len(df) < (config.SWING_WINDOW * 2 + 1):
-        return None
-
-    live_candle_idx = len(df) - 1
-    current_candle = df.iloc[live_candle_idx]
-    symbol = pair.split('/')[0]
+    # 🔍 ۱. استخراج و ایمن‌سازی مقادیر اندیکاتورها (هماهنگ با indicators.py)
+    adx_val = float(current_candle['feat_adx']) if 'feat_adx' in current_candle else 25.0
+    vol_ratio = float(current_candle['feat_vol_ratio']) if 'feat_vol_ratio' in current_candle else 1.0
+    atr_percent = float(current_candle['feat_atr_percent']) if 'feat_atr_percent' in current_candle else 0.0
+    rsi_val = float(current_candle['feat_rsi']) if 'feat_rsi' in current_candle else 50.0
+    trend_line = float(current_candle['feat_trend_line']) if 'feat_trend_line' in current_candle else 0.0
     
-    if current_candle['ADX'] < config.ADX_THRESHOLD:
-        return None
+    entry_price = float(current_candle['Close'])
 
-    last_swing_high = None
-    last_swing_low = None
-    search_start_idx = len(df) - 1 - config.SWING_WINDOW
+    # 🛠️ ۲. منطق استراتژی تکنیکال (تحلیل روند و مومنتوم)
+    # سیگنال خرید تکنیکال: روند صعودی باشد و شاخص RSI از منطقه اشباع فروش خارج یا صعودی باشد
+    technical_buy_signal = (trend_line > 0) and (rsi_val > 45) and (vol_ratio > 1.1)
     
-    for idx in range(search_start_idx, config.SWING_WINDOW, -1):
-        if last_swing_high is None and check_swing_high(df, idx, config.SWING_WINDOW):
-            last_swing_high = df.loc[idx, 'High']
-        if last_swing_low is None and check_swing_low(df, idx, config.SWING_WINDOW):
-            last_swing_low = df.loc[idx, 'Low']
-        if last_swing_high is not None and last_swing_low is not None:
-            break
+    if not technical_buy_signal:
+        print(f"❄️ نماد {symbol} در این ردیف شرایط ورود تکنیکال را احراز نکرد.")
+        return
 
-    if last_swing_high is None or last_swing_low is None:
-        return None
+    print(f"🎯 سیگنال تکنیکال برای {symbol} صادر شد. قیمت ورود: {entry_price} | ورود به فاز تایید هوش مصنوعی...")
 
-    # 🧮 محاسبات ۵ فاکتور ریاضی هوش مصنوعی (دید ۳۶۰ درجه)
-    adx_val = float(current_candle['ADX'])
-    vol_ma = current_candle['Volume_MA']
-    vol_ratio = float(current_candle['Volume'] / vol_ma) if vol_ma > 0 else 1.0
+    # 🧠 ۳. فیلترینگ پیشرفته با مدل هوش مصنوعی (Random Forest)
+    ai_approved = False
+    ai_confidence = 1.0  # مقدار پیش‌فرض در صورت عدم وجود مدل
+
+    if os.path.exists(MODEL_PATH):
+        try:
+            # بارگذاری مدل هوش مصنوعی ذخیره شده
+            model = joblib.load(MODEL_PATH)
+            
+            # آماده‌سازی دقیق ویژگی‌ها برای تغذیه به مدل (دقیقاً با همان ترتیب آموزش)
+            features_array = np.array([[adx_val, vol_ratio, atr_percent, rsi_val, trend_line]])
+            
+            # محاسبه احتمال موفقیت پوزیشن (کلاس ۱ یعنی پوزیشن سودده)
+            probabilities = model.predict_proba(features_array)[0]
+            ai_confidence = float(probabilities[1])  # درصد احتمال سوددهی
+            
+            # حد آستانه صلب: اگر احتمال موفقیت بالای ۵۵٪ بود پوزیشن تایید می‌شود
+            if ai_confidence >= 0.55:
+                ai_approved = True
+                print(f"🟢 هوش مصنوعی سیگنال را تایید کرد! درصد اطمینان مدل: {ai_confidence:.2%}")
+            else:
+                print(f"🔴 هوش مصنوعی سیگنال را رد کرد. درصد اطمینان ({ai_confidence:.2%}) کمتر از حد مجاز (55%) است.")
+                return
+        except Exception as e:
+            print(f"⚠️ خطا در بارگذاری یا پیش‌بینی مدل هوش مصنوعی: {e}. سیگنال با فیلتر پیش‌فرض ارسال می‌شود.")
+            ai_approved = True
+    else:
+        # اگر هنوز فایلی ساخته نشده (زیر ۵۰ معامله تاریخی)، پوزیشن بدون فیلتر هوش مصنوعی صادر می‌شود
+        print("ℹ️ مدل هوش مصنوعی هنوز آموزش ندیده است (نیاز به دیتای تاریخی بیشتر). تایید خودکار صادر شد.")
+        ai_approved = True
+
+    # 💰 ۴. محاسبه دقیق سطوح مدیریت سرمایه (تارگت و حد ضرر بر اساس ATR)
+    # اگر ATR در دسترس نبود، از ۲٪ پیش‌فرض استفاده می‌شود
+    risk_factor = atr_percent if atr_percent > 0 else 0.02
     
-    entry_est = float(current_candle['Close'])
-    atr_val = current_candle['ATR'] if current_candle['ATR'] > 0 else (entry_est * 0.02)
-    atr_percent = float((atr_val / entry_est) * 100)
-    
-    # فاکتورهای افزوده شده دید ۳۶۰ درجه
-    rsi_val = float(current_candle['RSI'])
-    trend_line = 1.0 if entry_est > current_candle['EMA_200'] else 0.0
+    stop_loss = entry_price * (1.0 - risk_factor)
+    take_profit = entry_price * (1.0 + (risk_factor * 2.0)) # ریسک به ریوارد ۱ به ۲
 
-    # شرط خرید (LONG)
-    if current_candle['Close'] > last_swing_high and current_candle['Volume'] > current_candle['Volume_MA']:
-        sl = entry_est - (1.5 * atr_val)
-        risk_dist = entry_est - sl
-        tp1 = entry_est + (risk_dist * config.RISK_REWARD_TP1)
-        tp2 = entry_est + (risk_dist * config.RISK_REWARD_TP1 * 2.0)
-        
-        database.log_scan(symbol, f"Signal LONG | Entry: {round(entry_est, 4)} | AI Ready")
-        
-        return {
-            'pair': pair, 'direction': 'LONG', 'entry_price': round(entry_est, 4),
-            'stop_loss': round(sl, 4), 'tp1': round(tp1, 4), 'tp2': round(tp2, 4),
-            'feat_adx': round(adx_val, 2), 'feat_vol_ratio': round(vol_ratio, 2), 'feat_atr_percent': round(atr_percent, 2),
-            'feat_rsi': round(rsi_val, 2), 'feat_trend_line': trend_line
-        }
+    # 💾 ۵. ساختاردهی و ثبت نهایی در دیتابیس پروژه
+    signal_data = {
+        'symbol': symbol,
+        'entry_price': entry_price,
+        'stop_loss': stop_loss,
+        'take_profit': take_profit,
+        'feat_adx': adx_val,
+        'feat_vol_ratio': vol_ratio,
+        'feat_atr_percent': atr_percent,
+        'feat_rsi': rsi_val,
+        'feat_trend_line': trend_line,
+        'ai_confidence': ai_confidence
+    }
 
-    # شرط فروش (SHORT)
-    elif current_candle['Close'] < last_swing_low and current_candle['Volume'] > current_candle['Volume_MA']:
-        sl = entry_est + (1.5 * atr_val)
-        risk_dist = sl - entry_est
-        tp1 = entry_est - (risk_dist * config.RISK_REWARD_TP1)
-        tp2 = entry_est - (risk_dist * config.RISK_REWARD_TP1 * 2.0)
-        
-        database.log_scan(symbol, f"Signal SHORT | Entry: {round(entry_est, 4)} | AI Ready")
-        
-        return {
-            'pair': pair, 'direction': 'SHORT', 'entry_price': round(entry_est, 4),
-            'stop_loss': round(sl, 4), 'tp1': round(tp1, 4), 'tp2': round(tp2, 4),
-            'feat_adx': round(adx_val, 2), 'feat_vol_ratio': round(vol_ratio, 2), 'feat_atr_percent': round(atr_percent, 2),
-            'feat_rsi': round(rsi_val, 2), 'feat_trend_line': trend_line
-        }
+    try:
+        # فراخوانی تابع ذخیره‌سازی از ماژول دیتابیس
+        database.save_signal_advanced(signal_data)
+        print(f"💾 سیگنال {symbol} با موفقیت در دیتابیس ثبت و ذخیره شد.")
+    except Exception as e:
+        print(f"❌ خطا در ثبت سیگنال در دیتابیس: {e}")
 
-    return None
+if __name__ == "__main__":
+    # تست محلی صحت اجرای کدهای فایل استراتژی با دیتای فرضی
+    print("🧪 در حال تست ساختار فایل استراتژی...")
+    mock_data = pd.DataFrame([{
+        'Close': 65000.0,
+        'feat_adx': 28.5,
+        'feat_vol_ratio': 1.5,
+        'feat_atr_percent': 0.025,
+        'feat_rsi': 55.0,
+        'feat_trend_line': 1.0
+    }])
+    evaluate_market_and_trade(mock_data, "BTC/USDT")
