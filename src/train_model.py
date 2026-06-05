@@ -1,5 +1,5 @@
 # src/train_model.py
-# نسخه ارتقایافته v7.0 - مجهز به آموزش توزیع‌شده با فاکتورهای ۹ بعدی
+# نسخه اصلاح‌شده v7.6 - کنترل بیش‌برازش مبتنی بر ۵ فاکتور اصلی دیتابیس
 
 import os
 import sqlite3
@@ -13,55 +13,41 @@ MODEL_DIR = os.path.join(BASE_DIR, "src", "models")
 MODEL_PATH = os.path.join(MODEL_DIR, "trading_filter_model.pkl")
 
 def train_ai_model():
-    """🧠 آموزش موتور هوش مصنوعی تقویت‌شده بر اساس کارنامه معاملات بسته‌شده گذشته"""
+    """🧠 آموزش موتور هوش مصنوعی بر اساس دیتای واقعی معاملات بسته شده تاریخی"""
     if not os.path.exists(DB_NAME):
-        print("⚠️ پایگاه داده جهت استخراج دیتای آموزشی هوش مصنوعی پیدا نشد.")
         return
 
-    # اتصال به دیتابیس و بارگذاری آرشیو معاملات
+    # اتصال به پایگاه داده و استخراج معاملات بسته شده تاریخی
     conn = sqlite3.connect(DB_NAME)
     query = """
-        SELECT 
-            feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line,
-            feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session,
-            pnl_percent 
+        SELECT feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, pnl_percent 
         FROM signals 
         WHERE status = 'CLOSED'
     """
     df = pd.read_sql_query(query, conn)
     conn.close()
 
-    # مکانیزم پیشگیری از تعمیم ناقص و بیش‌برازش (کنترل کف داده‌های آرشیو)
+    # جلوگیری از بیش‌برازش: تا زمان ثبت حداقل ۵۰ معامله قطعی، فرآیند آموزش تعلیق می‌ماند
     if len(df) < 50:
-        print(f"ℹ️ حجم تاریخچه معاملات کم است ({len(df)}/50 معامله بسته‌شده). کالیبراسیون هوش مصنوعی تعلیق ماند.")
+        print(f"ℹ️ دیتای معاملاتی کافی نیست ({len(df)}/50 معامله بسته شده). آموزش هوش مصنوعی تعلیق شد.")
         return
 
-    # ایجاد ستون برچسب هدف (سودآور = ۱، زیان‌ده = ۰)
+    # ایجاد ستون هدف (Target): اگر سود پوزیشن مثبت باشد ۱ (موفق)، در غیر این صورت ۰ (ناموفق)
     df['target'] = (df['pnl_percent'] > 0).astype(int)
 
-    # لیست جامع ۹ ویژگی استخراج شده برای ورودی درخت‌های تصمیم‌گیری
-    features = [
-        'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 'feat_trend_line',
-        'feat_ema_deviation', 'feat_rsi_momentum', 'feat_body_ratio', 'feat_high_volume_session'
-    ]
-    
+    # جداسازی ویژگی‌های فیلترینگ و برچسب نهایی
+    features = ['feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 'feat_trend_line']
     X = df[features]
     y = df['target']
 
-    # 🦾 بهینه‌سازی پارامترهای مدل:
-    # پارامتر class_weight='balanced' سوگیری مدل را در روندهای فرسایشی خنثی می‌کند.
-    model = RandomForestClassifier(
-        n_estimators=100,      # افزایش شمار درخت‌ها برای کاهش واریانس خطا
-        max_depth=5,           # عمق بهینه جهت کنترل تعادل انحراف و واریانس
-        class_weight='balanced',
-        random_state=42
-    )
+    # تنظیم بهینه عمق درخت‌ها برای کنترل دقیق‌تر منطق ریاضی مدل
+    model = RandomForestClassifier(n_estimators=50, max_depth=4, class_weight='balanced', random_state=42)
     model.fit(X, y)
 
-    # ذخیره‌سازی نهایی فایل باینری مدل جهت استفاده در هسته اصلی ربات
+    # ایجاد پوشه مدل در صورت عدم وجود و ذخیره‌سازی نهایی فایل هوش مصنوعی
     os.makedirs(MODEL_DIR, exist_ok=True)
     joblib.dump(model, MODEL_PATH)
-    print(f"🔥 [هوش مصنوعی با موفقیت تقویت شد]: مدل جدید با ۹ فاکتور بر اساس {len(df)} معامله واقعی کالیبره و ذخیره گردید.")
+    print(f"🔥 [هوش مصنوعی آپدیت شد]: مدل جدید با موفقیت کالیبره و ذخیره گردید.")
 
 if __name__ == "__main__":
     train_ai_model()
