@@ -2,11 +2,11 @@ name: Run Trading Bot
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # اجرای خودکار ربات هر ۳۰ دقیقه
+    - cron: '*/30 * * * *' # اجرای خودکار هر ۳۰ دقیقه
   workflow_dispatch: # امکان اجرای دستی
 
 permissions:
-  contents: write # مجوز رسمی برای ذخیره کردن و Push دیتابیس و مدل‌ها
+  contents: write 
 
 jobs:
   run-bot-job:
@@ -15,7 +15,7 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
       with:
-        token: ${{ secrets.GITHUB_TOKEN }} # اصلاح شد (انتقال به همان خط)
+        token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -38,12 +38,16 @@ jobs:
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
         
-        if [ -f data/trading_bot.db ]; then
-          git add data/trading_bot.db
+        # افزودن فایل‌های دیتابیس و مدل‌های تولید شده توسط هوش مصنوعی
+        git add -f data/trading_bot.db
+        if [ -d "src/models" ]; then
+          git add -f src/models/*
         fi
         
-        if [ -d src/models ]; then
-          git add src/models/* || echo "هنوز مدلی ساخته نشده است"
+        # بررسی تغییرات: فقط در صورتی که فایلی تغییر کرده باشد کامیت انجام شود
+        if ! git diff --cached --quiet; then
+          git commit -m "🗄️ سیستم: بروزرسانی لایو دیتابیس و مدل‌های هوش مصنوعی [Skip CI]"
+          git push origin main
+        else
+          echo "هیچ تغییر جدیدی برای کامیت یافت نشد."
         fi
-        
-        git diff --quiet && git diff --staged --quiet || (git commit -m "🗄️ سیستم: بروزرسانی لایو دیتابیس و فایل مدل هوش مصنوعی [Skip CI]" && git push)
