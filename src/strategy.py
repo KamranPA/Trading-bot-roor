@@ -1,6 +1,4 @@
 # src/strategy.py
-# نسخه اصلاح‌شده ۳۶۰ درجه خالص (v6.3) - کاملاً منطبق بر ۵ فاکتور دیتابیس و اندیکاتورها
-
 import pandas as pd
 import config
 from src import database
@@ -31,12 +29,11 @@ def generate_signal(df, pair):
     current_candle = df.iloc[live_candle_idx]
     symbol = pair.split('/')[0]
     
-    # 🟢 فعال‌سازی لاگ زنده: به محض اسکن، در دیتابیس لاگ می‌زند تا مطمئن شویم ربات زنده است
-    database.log_scan(symbol, "Scanning...")
+    # 🟢 ثبت لاگ زنده در هر بار اسکن برای مطمئن شدن از کارکرد صحیح ربات
+    database.log_scan(symbol, "Scanning market...")
 
-    # فیلتر اولیه تکنیکال بر اساس آستانه قدرت روند
     if current_candle['ADX'] < config.ADX_THRESHOLD:
-        database.log_scan(symbol, "No Signal (Weak Trend)")
+        database.log_scan(symbol, f"No Signal (Weak ADX: {round(current_candle['ADX'], 1)})")
         return None
 
     last_swing_high = None
@@ -55,7 +52,7 @@ def generate_signal(df, pair):
         database.log_scan(symbol, "No Signal (Levels Not Found)")
         return None
 
-    # 🧮 استخراج دقیق دقیق ۵ فاکتور ریاضی اصیل ۳۶۰ درجه شما
+    # 🧮 استخراج دقیق همان ۵ فاکتور بومی و اصیل دیتابیس شما
     entry_est = float(current_candle['Close'])
     atr_val = current_candle['ATR'] if current_candle['ATR'] > 0 else (entry_est * 0.02)
     atr_percent = float((atr_val / entry_est) * 100)
@@ -64,14 +61,14 @@ def generate_signal(df, pair):
     rsi_val = float(current_candle['feat_rsi'])
     trend_line = float(current_candle['feat_trend_line'])
 
-    # شرط ورود به معامله خرید (LONG)
+    # شرط خرید (LONG)
     if current_candle['Close'] > last_swing_high and current_candle['Volume'] > current_candle['Volume_MA']:
         sl = entry_est - (1.5 * atr_val)
         risk_dist = entry_est - sl
         tp1 = entry_est + (risk_dist * config.RISK_REWARD_TP1)
         tp2 = entry_est + (risk_dist * config.RISK_REWARD_TP1 * 2.0)
         
-        database.log_scan(symbol, f"Signal LONG | Entry: {round(entry_est, 4)}")
+        database.log_scan(symbol, f"🔥 Signal LONG | Entry: {round(entry_est, 4)}")
         
         return {
             'pair': pair, 'direction': 'LONG', 'entry_price': round(entry_est, 4),
@@ -80,14 +77,14 @@ def generate_signal(df, pair):
             'feat_rsi': round(rsi_val, 2), 'feat_trend_line': trend_line
         }
 
-    # شرط ورود به معامله فروش (SHORT)
+    # شرط فروش (SHORT)
     elif current_candle['Close'] < last_swing_low and current_candle['Volume'] > current_candle['Volume_MA']:
         sl = entry_est + (1.5 * atr_val)
         risk_dist = sl - entry_est
         tp1 = entry_est - (risk_dist * config.RISK_REWARD_TP1)
         tp2 = entry_est - (risk_dist * config.RISK_REWARD_TP1 * 2.0)
         
-        database.log_scan(symbol, f"Signal SHORT | Entry: {round(entry_est, 4)}")
+        database.log_scan(symbol, f"🔥 Signal SHORT | Entry: {round(entry_est, 4)}")
         
         return {
             'pair': pair, 'direction': 'SHORT', 'entry_price': round(entry_est, 4),
