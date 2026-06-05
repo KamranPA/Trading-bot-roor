@@ -33,17 +33,18 @@ jobs:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python main.py
 
-    - name: Auto-Commit & Push Database & AI Models (Force Save)
+    - name: Auto-Commit & Push Database & AI Models (Force Tracking)
       run: |
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
         
-        # مجبور کردن گیت به شناسایی و ردیابی فایل دیتابیس و مدل‌ها
+        # 🟢 اصلاح نهایی و کلیدی: مجبور کردن گیت به ردیابی و افزودن دیتابیس
         git add -f data/trading_bot.db
+        
         if [ -d src/models ]; then
           git add -f src/models/* || echo "هنوز مدلی ساخته نشده است"
         fi
         
-        # فرآیند کامیت و پوش بدون وابستگی به فیلتر git diff
-        git commit -m "🗄️ سیستم: بروزرسانی لایو دیتابیس و فاکتورهای هوش مصنوعی [Skip CI]" || echo "تغییر جدیدی برای ذخیره وجود ندارد"
+        # فرآیند کامیت امن و پوش اجباری دیتابیس بدون وابستگی به باگ git diff
+        git commit -m "🗄️ سیستم: بروزرسانی لایو دیتابیس و فاکتورهای هوش مصنوعی [Skip CI]" || echo "داده جدیدی برای همگام‌سازی یافت نشد"
         git push origin main
