@@ -1,18 +1,18 @@
 # src/indicators.py
-# نسخه نهایی v7.5 - حل قطعی باگ تداخل نام‌گذاری و قفل‌شدگی کندل ساعت ۱۶
+# نسخه نهایی v7.6 - همگام‌سازی فاکتورهای ۳۶۰ درجه هوش مصنوعی
 
 import pandas as pd
 import numpy as np
 
 def calculate_indicators(df):
-    """📊 محاسبه دقیق اندیکاتورهای تکنیکال و سنسورهای هوش مصنوعی با همپوشانی ۱۰۰٪ نام‌ها"""
+    """📊 محاسبه دقیق اندیکاتورهای تکنیکال و سنسورهای هوش مصنوعی"""
     if df is None or df.empty or len(df) < 200:
         print(f"⚠️ دیتای کافی برای محاسبات تکنیکال وجود ندارد.")
         return df
 
     # ۱. محاسبه میانگین متحرک نمایی ۲۰۰ (EMA 200)
     df['ema_200'] = df['Close'].ewm(span=200, adjust=False).mean()
-    df['EMA_200'] = df['ema_200'] # 🟢 همگام‌سازی برای استراتژی قدیمی
+    df['EMA_200'] = df['ema_200'] 
     
     # ۲. محاسبه شاخص قدرت نسبی (RSI 14)
     delta = df['Close'].diff()
@@ -21,7 +21,7 @@ def calculate_indicators(df):
     rs = gain / (loss + 1e-10)
     df['feat_rsi'] = 100 - (100 / (1 + rs))
     df['feat_rsi'] = df['feat_rsi'].fillna(50.0)
-    df['RSI'] = df['feat_rsi'] # 🟢 همگام‌سازی برای استراتژی قدیمی
+    df['RSI'] = df['feat_rsi'] 
 
     # ۳. محاسبه میانگین محدوده واقعی (ATR 14) و درصد آن برای هوش مصنوعی
     high_low = df['High'] - df['Low']
@@ -31,7 +31,7 @@ def calculate_indicators(df):
     df['atr'] = tr.rolling(window=14).mean()
     df['feat_atr_percent'] = (df['atr'] / df['Close']) * 100
     df['feat_atr_percent'] = df['feat_atr_percent'].fillna(0.0)
-    df['ATR'] = df['atr'] # 🟢 همگام‌سازی برای استراتژی قدیمی
+    df['ATR'] = df['atr'] 
 
     # ۴. محاسبه شاخص میانگین حرکت جهت‌دار (ADX 14)
     up_move = df['High'].diff()
@@ -46,10 +46,10 @@ def calculate_indicators(df):
     
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)) * 100
     df['feat_adx'] = dx.rolling(window=14).mean().fillna(25.0)
-    df['ADX'] = df['feat_adx'] # 🟢 همگام‌سازی برای استراتژی قدیمی
+    df['ADX'] = df['feat_adx'] 
 
     # ۵. محاسبه نسبت حجم معاملاتی (Volume Ratio) و میانگین متحرک حجم
-    df['Volume_MA'] = df['Volume'].rolling(window=20).mean() # 🟢 همگام‌سازی برای استراتژی قدیمی
+    df['Volume_MA'] = df['Volume'].rolling(window=20).mean() 
     df['feat_vol_ratio'] = (df['Volume'] / (df['Volume_MA'] + 1e-10)).fillna(1.0)
 
     # ۶. تشخیص خط روند داینامیک نسبت به موقعیت قیمت با EMA 200
