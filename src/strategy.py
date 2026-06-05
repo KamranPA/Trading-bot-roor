@@ -1,4 +1,9 @@
-# src/strategy.py - اصلاح شده
+# src/strategy.py
+# ماژول استراتژی (نسخه v5.6 - کالیبره شده برای استخراج فاکتورهای عددی دید ۳۶۰ درجه)
+
+import pandas as pd
+import config
+from src import database
 
 def check_swing_high(df, index, window):
     if index < window or index >= len(df) - window:
@@ -17,3 +22,76 @@ def check_swing_low(df, index, window):
         if df.loc[index - i, 'Low'] < current_low or df.loc[index + i, 'Low'] < current_low:
             return False
     return True
+
+def generate_signal(df, pair):
+    if df is None or len(df) < (config.SWING_WINDOW * 2 + 1):
+        return None
+
+    live_candle_idx = len(df) - 1
+    current_candle = df.iloc[live_candle_idx]
+    symbol = pair.split('/')[0]
+    
+    if current_candle['ADX'] < config.ADX_THRESHOLD:
+        return None
+
+    last_swing_high = None
+    last_swing_low = None
+    search_start_idx = len(df) - 1 - config.SWING_WINDOW
+    
+    for idx in range(search_start_idx, config.SWING_WINDOW, -1):
+        if last_swing_high is None and check_swing_high(df, idx, config.SWING_WINDOW):
+            last_swing_high = df.loc[idx, 'High']
+        if last_swing_low is None and check_swing_low(df, idx, config.SWING_WINDOW):
+            last_swing_low = df.loc[idx, 'Low']
+        if last_swing_high is not None and last_swing_low is not None:
+            break
+
+    if last_swing_high is None or last_swing_low is None:
+        return None
+
+    # 🧮 محاسبات ۵ فاکتور ریاضی هوش مصنوعی (دید ۳۶۰ درجه)
+    adx_val = float(current_candle['ADX'])
+    vol_ma = current_candle['Volume_MA']
+    vol_ratio = float(current_candle['Volume'] / vol_ma) if vol_ma > 0 else 1.0
+    
+    entry_est = float(current_candle['Close'])
+    atr_val = current_candle['ATR'] if current_candle['ATR'] > 0 else (entry_est * 0.02)
+    atr_percent = float((atr_val / entry_est) * 100)
+    
+    # فاکتورهای افزوده شده دید ۳۶۰ درجه
+    rsi_val = float(current_candle['RSI'])
+    trend_line = 1.0 if entry_est > current_candle['EMA_200'] else 0.0
+
+    # شرط خرید (LONG)
+    if current_candle['Close'] > last_swing_high and current_candle['Volume'] > current_candle['Volume_MA']:
+        sl = entry_est - (1.5 * atr_val)
+        risk_dist = entry_est - sl
+        tp1 = entry_est + (risk_dist * config.RISK_REWARD_TP1)
+        tp2 = entry_est + (risk_dist * config.RISK_REWARD_TP1 * 2.0)
+        
+        database.log_scan(symbol, f"Signal LONG | Entry: {round(entry_est, 4)} | AI Ready")
+        
+        return {
+            'pair': pair, 'direction': 'LONG', 'entry_price': round(entry_est, 4),
+            'stop_loss': round(sl, 4), 'tp1': round(tp1, 4), 'tp2': round(tp2, 4),
+            'feat_adx': round(adx_val, 2), 'feat_vol_ratio': round(vol_ratio, 2), 'feat_atr_percent': round(atr_percent, 2),
+            'feat_rsi': round(rsi_val, 2), 'feat_trend_line': trend_line
+        }
+
+    # شرط فروش (SHORT)
+    elif current_candle['Close'] < last_swing_low and current_candle['Volume'] > current_candle['Volume_MA']:
+        sl = entry_est + (1.5 * atr_val)
+        risk_dist = sl - entry_est
+        tp1 = entry_est - (risk_dist * config.RISK_REWARD_TP1)
+        tp2 = entry_est - (risk_dist * config.RISK_REWARD_TP1 * 2.0)
+        
+        database.log_scan(symbol, f"Signal SHORT | Entry: {round(entry_est, 4)} | AI Ready")
+        
+        return {
+            'pair': pair, 'direction': 'SHORT', 'entry_price': round(entry_est, 4),
+            'stop_loss': round(sl, 4), 'tp1': round(tp1, 4), 'tp2': round(tp2, 4),
+            'feat_adx': round(adx_val, 2), 'feat_vol_ratio': round(vol_ratio, 2), 'feat_atr_percent': round(atr_percent, 2),
+            'feat_rsi': round(rsi_val, 2), 'feat_trend_line': trend_line
+        }
+
+    return None
