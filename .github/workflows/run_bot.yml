@@ -2,11 +2,11 @@ name: Run Trading Bot
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # اجرای خودکار ربات هر ۳۰ دقیقه
-  workflow_dispatch: # امکان اجرای دستی
+    - cron: '*/30 * * * *' # اجرای ربات هر ۳۰ دقیقه
+  workflow_dispatch:
 
 permissions:
-  contents: write # مجوز رسمی برای ذخیره کردن و Push دیتابیس و مدل‌ها
+  contents: write
 
 jobs:
   run-bot-job:
@@ -15,7 +15,7 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
       with:
-        token: ${{ secrets.GITHUB_TOKEN }} # اصلاح شد (انتقال به همان خط)
+        token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -33,17 +33,17 @@ jobs:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python main.py
 
-    - name: Auto-Commit & Push Database & AI Models
+    - name: Auto-Commit & Push Database & AI Models (Force Tracking)
       run: |
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
         
-        if [ -f data/trading_bot.db ]; then
-          git add data/trading_bot.db
-        fi
+        # مجبور کردن گیت به آپلود و ردیابی فایل لایو دیتابیس
+        git add -f data/trading_bot.db
         
         if [ -d src/models ]; then
-          git add src/models/* || echo "هنوز مدلی ساخته نشده است"
+          git add -f src/models/* || echo "مدلی یافت نشد"
         fi
         
-        git diff --quiet && git diff --staged --quiet || (git commit -m "🗄️ سیستم: بروزرسانی لایو دیتابیس و فایل مدل هوش مصنوعی [Skip CI]" && git push)
+        git commit -m "🗄️ سیستم: بروزرسانی لایو دیتابیس و فاکتورهای هوش مصنوعی [Skip CI]" || echo "داده جدیدی یافت نشد"
+        git push origin main
