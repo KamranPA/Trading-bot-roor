@@ -16,6 +16,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0 # 🟢 حیاتی: دانلود کامل تاریخچه برای حفظ فایل دیتابیس قبلی
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -38,13 +39,12 @@ jobs:
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
         
-        # 🟢 اصلاح نهایی و کلیدی: مجبور کردن گیت به ردیابی و افزودن دیتابیس
+        # مجبور کردن گیت به ردیابی و افزودن دیتابیس
         git add -f data/trading_bot.db
         
         if [ -d src/models ]; then
           git add -f src/models/* || echo "هنوز مدلی ساخته نشده است"
         fi
         
-        # فرآیند کامیت امن و پوش اجباری دیتابیس بدون وابستگی به باگ git diff
         git commit -m "🗄️ سیستم: بروزرسانی لایو دیتابیس و فاکتورهای هوش مصنوعی [Skip CI]" || echo "داده جدیدی برای همگام‌سازی یافت نشد"
         git push origin main
