@@ -1,5 +1,5 @@
 # src/database.py
-# نسخه v7.3 - هماهنگ با لایه ۳۶۰ درجه دیتابیس
+# بازگشت به نسخه پایدار v6.3 - مجهز به گزارش خطاهای پنهان
 
 import os
 import sqlite3
@@ -63,13 +63,13 @@ def log_scan(symbol, result):
         cursor.execute("INSERT INTO scan_logs (timestamp, symbol, result) VALUES (?, ?, ?)", (current_time, symbol, result))
         conn.commit()
         conn.close()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"⚠️ خطای ثبت دیتابیس در log_scan: {e}")
 
 def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, 
                           feat_adx=0.0, feat_vol_ratio=0.0, feat_atr_percent=0.0, 
-                          feat_rsi=50.0, feat_trend_line=0.0, status="OPEN", **kwargs):
-    """ذخیره سیگنال صادر شده توسط استراتژی برای انطباق کامل با خروجی main.py"""
+                          feat_rsi=50.0, feat_trend_line=0.0, status="OPEN"):
+    """ذخیره سیگنال صادر شده توسط استراتژی برای انطباق کامل با خروجی کدهای ۳۶۰ درجه"""
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
@@ -91,11 +91,11 @@ def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2,
             
         conn.commit()
         conn.close()
+        print(f"✅ سیگنال {symbol} با موفقیت در دیتابیس ثبت شد.")
     except Exception as e:
-        print(f"❌ خطا در ذخیره دیتابیس: {e}")
+        print(f"❌ خطا در مکتوب کردن سیگنال در دیتابیس: {e}")
 
 def get_setting(key, default_value):
-    """🔍 خواندن تنظیمات سیستمی از جدول bot_settings برای جلوگیری از کرش main.py"""
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
