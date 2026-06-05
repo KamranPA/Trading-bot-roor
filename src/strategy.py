@@ -1,5 +1,5 @@
 # src/strategy.py
-# نسخه ارتقایافته v7.0 - کالیبره شده برای استخراج همزمان ۹ فاکتور عددی هوش مصنوعی
+# نسخه اصیل ۳۶۰ درجه (v6.3) - مجهز به سیستم لاگ لایو واچ‌لیست
 
 import pandas as pd
 import config
@@ -31,8 +31,12 @@ def generate_signal(df, pair):
     current_candle = df.iloc[live_candle_idx]
     symbol = pair.split('/')[0]
     
-    # فیلتر اولیه و سختگیرانه تکنیکال بر اساس آستانه قدرت روند
+    # 🟢 ثبت لاگ زنده پایش بازار در دیتابیس (جهت اطمینان از صحت اجرای اکشنز و تغییر دیتابیس)
+    database.log_scan(symbol, "Scanning Market...")
+
+    # فیلتر اولیه تکنیکال بر اساس آستانه قدرت روند
     if current_candle['ADX'] < config.ADX_THRESHOLD:
+        database.log_scan(symbol, f"No Signal (Weak Trend ADX: {round(current_candle['ADX'], 1)})")
         return None
 
     last_swing_high = None
@@ -48,21 +52,17 @@ def generate_signal(df, pair):
             break
 
     if last_swing_high is None or last_swing_low is None:
+        database.log_scan(symbol, "No Signal (Swing Levels Not Found)")
         return None
 
-    # 🧮 استخراج دقیق ۹ فاکتور ریاضی برای ارسال به دیتابیس و مدل هوش مصنوعی
+    # استخراج ۵ فاکتور ریاضی اصیل ۳۶۰ درجه
     entry_est = float(current_candle['Close'])
     atr_val = current_candle['ATR'] if current_candle['ATR'] > 0 else (entry_est * 0.02)
     atr_percent = float((atr_val / entry_est) * 100)
     vol_ratio = float(current_candle['feat_vol_ratio'])
-    
     adx_val = float(current_candle['feat_adx'])
     rsi_val = float(current_candle['feat_rsi'])
     trend_line = float(current_candle['feat_trend_line'])
-    ema_dev = float(current_candle['feat_ema_deviation'])
-    rsi_mom = float(current_candle['feat_rsi_momentum'])
-    body_rat = float(current_candle['feat_body_ratio'])
-    high_vol_session = float(current_candle['feat_high_volume_session'])
 
     # شرط ورود به معامله خرید (LONG)
     if current_candle['Close'] > last_swing_high and current_candle['Volume'] > current_candle['Volume_MA']:
@@ -71,15 +71,13 @@ def generate_signal(df, pair):
         tp1 = entry_est + (risk_dist * config.RISK_REWARD_TP1)
         tp2 = entry_est + (risk_dist * config.RISK_REWARD_TP1 * 2.0)
         
-        database.log_scan(symbol, f"Signal LONG | Entry: {round(entry_est, 4)} | AI Processing")
+        database.log_scan(symbol, f"🔥 Signal LONG | Entry: {round(entry_est, 4)}")
         
         return {
             'pair': pair, 'direction': 'LONG', 'entry_price': round(entry_est, 4),
             'stop_loss': round(sl, 4), 'tp1': round(tp1, 4), 'tp2': round(tp2, 4),
             'feat_adx': round(adx_val, 2), 'feat_vol_ratio': round(vol_ratio, 2), 'feat_atr_percent': round(atr_percent, 2),
-            'feat_rsi': round(rsi_val, 2), 'feat_trend_line': trend_line,
-            'feat_ema_deviation': round(ema_dev, 2), 'feat_rsi_momentum': round(rsi_mom, 2),
-            'feat_body_ratio': round(body_rat, 2), 'feat_high_volume_session': high_vol_session
+            'feat_rsi': round(rsi_val, 2), 'feat_trend_line': trend_line
         }
 
     # شرط ورود به معامله فروش (SHORT)
@@ -89,15 +87,14 @@ def generate_signal(df, pair):
         tp1 = entry_est - (risk_dist * config.RISK_REWARD_TP1)
         tp2 = entry_est - (risk_dist * config.RISK_REWARD_TP1 * 2.0)
         
-        database.log_scan(symbol, f"Signal SHORT | Entry: {round(entry_est, 4)} | AI Processing")
+        database.log_scan(symbol, f"🔥 Signal SHORT | Entry: {round(entry_est, 4)}")
         
         return {
             'pair': pair, 'direction': 'SHORT', 'entry_price': round(entry_est, 4),
             'stop_loss': round(sl, 4), 'tp1': round(tp1, 4), 'tp2': round(tp2, 4),
             'feat_adx': round(adx_val, 2), 'feat_vol_ratio': round(vol_ratio, 2), 'feat_atr_percent': round(atr_percent, 2),
-            'feat_rsi': round(rsi_val, 2), 'feat_trend_line': trend_line,
-            'feat_ema_deviation': round(ema_dev, 2), 'feat_rsi_momentum': round(rsi_mom, 2),
-            'feat_body_ratio': round(body_rat, 2), 'feat_high_volume_session': high_vol_session
+            'feat_rsi': round(rsi_val, 2), 'feat_trend_line': trend_line
         }
 
+    database.log_scan(symbol, "No Signal (Conditions Not Met)")
     return None
