@@ -1,51 +1,57 @@
 # src/indicators.py
-# ماژول محاسبات اندیکاتورهای تکنیکال (نسخه v5.6 - مجهز به سنسورهای ۳۶۰ درجه)
+# نسخه اصلاح‌شده v6.3 - رفع باگ فرمول ریاضی EMA 200
 
 import pandas as pd
-import config
+import numpy as np
 
 def calculate_indicators(df):
-    """محاسبه مستقل اندیکاتورهای ATR، ADX، Volume_MA، RSI و EMA 200 با بالاترین دقت"""
-    if df is None or df.empty or len(df) < 25:
-        return None
+    """📊 محاسبه دقیق اندیکاتورهای تکنیکال و سنسورهای هوش مصنوعی"""
+    if df is None or df.empty or len(df) < 200:
+        print(f"⚠️ دیتای کافی برای محاسبات تکنیکال وجود ندارد (تعداد کندل‌های موجود: {len(df) if df is not None else 0})")
+        return df
+
+    # ۱. محاسبه میانگین متحرک نمایی ۲۰۰ (EMA 200) - قفل شده روی دوره ۲۰۰ روزه
+    df['ema_200'] = df['Close'].ewm(span=200, adjust=False).mean()
     
-    # --- ۱. محاسبه اندیکاتور ATR ---
+    # ۲. محاسبه شاخص قدرت نسبی (RSI 14)
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / (loss + 1e-10)
+    df['feat_rsi'] = 100 - (100 / (1 + rs))
+    df['feat_rsi'] = df['feat_rsi'].fillna(50.0) # مقداردهی پیش‌فرض برای کندل‌های اولیه
+
+    # ۳. محاسبه میانگین محدوده واقعی (ATR 14) و درصد آن برای هوش مصنوعی
     high_low = df['High'] - df['Low']
-    high_close_prev = (df['High'] - df['Close'].shift(1)).abs()
-    low_close_prev = (df['Low'] - df['Close'].shift(1)).abs()
-    tr = pd.concat([high_low, high_close_prev, low_close_prev], axis=1).max(axis=1)
-    df['ATR'] = tr.rolling(window=config.ATR_PERIOD).mean()
+    high_close = (df['High'] - df['Close'].shift()).abs()
+    low_close = (df['Low'] - df['Close'].shift()).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    df['atr'] = tr.rolling(window=14).mean()
+    df['feat_atr_percent'] = (df['atr'] / df['Close']) * 100
+    df['feat_atr_percent'] = df['feat_atr_percent'].fillna(0.0)
+
+    # ۴. محاسبه شاخص میانگین حرکت جهت‌دار (ADX 14)
+    up_move = df['High'].diff()
+    down_move = df['Low'].diff()
     
-    # --- ۲. محاسبه اندیکاتور ADX ---
-    up_move = df['High'] - df['High'].shift(1)
-    down_move = df['Low'].shift(1) - df['Low']
-    plus_dm = (up_move > down_move) & (up_move > 0)
-    plus_dm = up_move * plus_dm
-    minus_dm = (down_move > up_move) & (down_move > 0)
-    minus_dm = down_move * minus_dm
-    tr_smoothed = tr.rolling(window=config.ADX_PERIOD).sum()
-    plus_di = 100 * (plus_dm.rolling(window=config.ADX_PERIOD).sum() / tr_smoothed)
-    minus_di = 100 * (minus_dm.rolling(window=config.ADX_PERIOD).sum() / tr_smoothed)
-    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
-    df['ADX'] = dx.rolling(window=config.ADX_PERIOD).mean()
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
     
-    # --- ۳. محاسبه میانگین متحرک حجم ---
-    df['Volume_MA'] = df['Volume'].rolling(window=config.VOLUME_MA_PERIOD).mean()
+    tr_smooth = tr.rolling(window=14).sum()
+    plus_di = 100 * (pd.Series(plus_dm).rolling(window=14).sum() / (tr_smooth + 1e-10))
+    minus_di = 100 * (pd.Series(minus_dm).rolling(window=14).sum() / (tr_smooth + 1e-10))
     
-    # --- 📈 ۴. محاسبه اندیکاتور RSI (شاخص قدرت نسبی) ---
-    change = df['Close'].diff()
-    gain = change.mask(change < 0, 0)
-    loss = -change.mask(change > 0, 0)
-    avg_gain = gain.rolling(window=14).mean()
-    avg_loss = loss.rolling(window=14).mean()
-    rs = avg_gain / avg_loss
-    df['RSI'] = 100 - (100 / (1 + rs))
-    
-    # --- 📈 ۵. محاسبه اندیکاتور EMA 200 (خط روند ماژور) ---
-    df['EMA_200'] = df['Close'].ewm(span=len(df), adjust=False).mean()
-    
-    # پر کردن فضاهای خالی اولیه برای جلوگیری از ارور محاسباتی در یادگیری ماشین
-    df.bfill(inplace=True)
-    df.ffill(inplace=True)
-    
+    dx = (abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)) * 100
+    df['feat_adx'] = dx.rolling(window=14).mean()
+    df['feat_adx'] = df['feat_adx'].fillna(25.0)
+
+    # ۵. محاسبه نسبت حجم معاملاتی (Volume Ratio) نسبت به میانگین ۲۰ کندل گذشته
+    volume_ma = df['Volume'].rolling(window=20).mean()
+    df['feat_vol_ratio'] = df['Volume'] / (volume_ma + 1e-10)
+    df['feat_vol_ratio'] = df['feat_vol_ratio'].fillna(1.0)
+
+    # ۶. تشخیص خط روند داینامیک نسبت به موقعیت قیمت با EMA 200
+    # ۱ برای صعودی (قیمت بالای خط)، ۰ برای نزولی (قیمت پایین خط)
+    df['feat_trend_line'] = np.where(df['Close'] > df['ema_200'], 1, 0)
+
     return df
