@@ -1,5 +1,5 @@
 # src/database.py
-# بازگشت به نسخه پایدار v6.3 - همگام با معماری نرمال‌سازی شده دیتابیس بومی
+# نسخه v7.3 - هماهنگ با لایه ۳۶۰ درجه دیتابیس
 
 import os
 import sqlite3
@@ -17,7 +17,6 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # جدول سیگنال‌ها (دارای ۵ فاکتور پایه)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS signals (
             id INTEGER PRIMARY KEY,
@@ -37,7 +36,6 @@ def init_db():
         )
     """)
     
-    # جدول تارگت‌ها
     cursor.execute("""
          CREATE TABLE IF NOT EXISTS signal_targets (
             id INTEGER PRIMARY KEY,
@@ -49,7 +47,6 @@ def init_db():
         )
     """)
     
-    # جدول لاگ‌های اسکن و تنظیمات ربات
     cursor.execute("CREATE TABLE IF NOT EXISTS scan_logs (id INTEGER PRIMARY KEY, timestamp TEXT, symbol TEXT, result TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS bot_settings (setting_key TEXT PRIMARY KEY, setting_value TEXT)")
     cursor.execute("INSERT OR IGNORE INTO bot_settings (setting_key, setting_value) VALUES ('bot_status', 'ACTIVE')")
@@ -71,7 +68,7 @@ def log_scan(symbol, result):
 
 def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, 
                           feat_adx=0.0, feat_vol_ratio=0.0, feat_atr_percent=0.0, 
-                          feat_rsi=50.0, feat_trend_line=0.0, status="OPEN"):
+                          feat_rsi=50.0, feat_trend_line=0.0, status="OPEN", **kwargs):
     """ذخیره سیگنال صادر شده توسط استراتژی برای انطباق کامل با خروجی main.py"""
     try:
         conn = sqlite3.connect(DB_NAME)
@@ -110,7 +107,6 @@ def get_setting(key, default_value):
         return default_value
 
 def check_filters_lock():
-    """بررسی وضعیت سختی فیلترهای استراتژی"""
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
