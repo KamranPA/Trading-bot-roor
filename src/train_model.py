@@ -1,5 +1,5 @@
 # src/train_model.py
-# نسخه اصلاح‌شده و تمیز v6.3 - رفع خطای سینتکس ناخواسته
+# ماژول آموزش مدل یادگیری ماشین الگوریتم Random Forest بر اساس پوزیشن‌های بسته شده
 
 import os
 import sqlite3
@@ -13,41 +13,49 @@ MODEL_DIR = os.path.join(BASE_DIR, "src", "models")
 MODEL_PATH = os.path.join(MODEL_DIR, "trading_filter_model.pkl")
 
 def train_ai_model():
-    """🧠 آموزش موتور هوش مصنوعی بر اساس دیتای واقعی معاملات بسته شده"""
+    """🧠 آموزش موتور هوش مصنوعی بر اساس تاریخچه معاملات بسته‌شده گذشته"""
     if not os.path.exists(DB_NAME):
+        print("⚠️ پایگاه داده پیدا نشد.")
         return
 
-    # اتصال به پایگاه داده و استخراج معاملات بسته شده تاریخی
     conn = sqlite3.connect(DB_NAME)
     query = """
-        SELECT feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, pnl_percent 
+        SELECT 
+            feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line,
+            feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session,
+            pnl_percent 
         FROM signals 
         WHERE status = 'CLOSED'
     """
     df = pd.read_sql_query(query, conn)
-    conn.close() # این خط کاملاً تمیز و اصلاح شد
+    conn.close()
 
-    # 🛡️ اصلاح بیش‌برازش: تا زمان ثبت حداقل ۵۰ معامله قطعی، فرآیند آموزش را متوقف می‌کنیم
+    # حداقل حد آستانه ۵۰ معامله بسته شده جهت جلوگیری از Overfitting
     if len(df) < 50:
-        print(f"ℹ️ دیتای معاملاتی کافی نیست ({len(df)}/50 معامله بسته شده). آموزش هوش مصنوعی برای جلوگیری از Overfitting تعلیق شد.")
+        print(f"ℹ️ حجم معاملات کم است ({len(df)}/50 معامله). کالیبراسیون هوش مصنوعی تعلیق ماند.")
         return
 
-    # ایجاد ستون هدف (Target): اگر سود پوزیشن مثبت باشد ۱ (موفق)، در غیر این صورت ۰ (ناموفق)
     df['target'] = (df['pnl_percent'] > 0).astype(int)
 
-    # جداسازی ویژگی‌های فیلترینگ و برچسب نهایی
-    features = ['feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 'feat_trend_line']
+    features = [
+        'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 'feat_trend_line',
+        'feat_ema_deviation', 'feat_rsi_momentum', 'feat_body_ratio', 'feat_high_volume_session'
+    ]
+    
     X = df[features]
     y = df['target']
 
-    # تنظیم بهینه عمق درخت‌ها (max_depth) برای کنترل دقیق‌تر منطق ریاضی مدل
-    model = RandomForestClassifier(n_estimators=50, max_depth=4, random_state=42)
+    model = RandomForestClassifier(
+        n_estimators=100,
+        max_depth=5,
+        class_weight='balanced',
+        random_state=42
+    )
     model.fit(X, y)
 
-    # ایجاد پوشه مدل در صورت عدم وجود و ذخیره‌سازی نهایی فایل هوش مصنوعی
     os.makedirs(MODEL_DIR, exist_ok=True)
     joblib.dump(model, MODEL_PATH)
-    print(f"🔥 [هوش مصنوعی آپدیت شد]: مدل جدید بر اساس {len(df)} معامله واقعی با موفقیت کالیبره و ذخیره گردید.")
+    print(f"🔥 مدل جدید هوش مصنوعی با موفقیت آموزش دیده و ذخیره شد.")
 
 if __name__ == "__main__":
     train_ai_model()
