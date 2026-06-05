@@ -2,11 +2,11 @@ name: Run Trading Bot
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # اجرای خودکار هر ۳۰ دقیقه
+    - cron: '*/30 * * * *' # اجرای خودکار ربات هر ۳۰ دقیقه
   workflow_dispatch: # امکان اجرای دستی
 
 permissions:
-  contents: write 
+  contents: write # مجوز رسمی برای ذخیره کردن و Push دیتابیس و مدل‌ها
 
 jobs:
   run-bot-job:
@@ -33,21 +33,18 @@ jobs:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python main.py
 
-    - name: Auto-Commit & Push Database & AI Models
+    - name: Auto-Commit & Push Database & AI Models (Force Tracking)
       run: |
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
         
-        # افزودن فایل‌های دیتابیس و مدل‌های تولید شده توسط هوش مصنوعی
+        # مجبور کردن گیت به ردیابی و افزودن دیتابیس لایو
         git add -f data/trading_bot.db
-        if [ -d "src/models" ]; then
-          git add -f src/models/*
+        
+        if [ -d src/models ]; then
+          git add -f src/models/* || echo "هنوز مدلی ساخته نشده است"
         fi
         
-        # بررسی تغییرات: فقط در صورتی که فایلی تغییر کرده باشد کامیت انجام شود
-        if ! git diff --cached --quiet; then
-          git commit -m "🗄️ سیستم: بروزرسانی لایو دیتابیس و مدل‌های هوش مصنوعی [Skip CI]"
-          git push origin main
-        else
-          echo "هیچ تغییر جدیدی برای کامیت یافت نشد."
-        fi
+        # فرآیند کامیت امن و پوش اجباری دیتابیس
+        git commit -m "🗄️ سیستم: بروزرسانی لایو دیتابیس و فاکتورهای هوش مصنوعی [Skip CI]" || echo "داده جدیدی برای همگام‌سازی یافت نشد"
+        git push origin main
