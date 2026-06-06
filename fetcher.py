@@ -10,20 +10,18 @@ def fetch_all_data():
     
     for s in symbols:
         try:
-            print(f"📥 تلاش برای دانلود: {s}")
-            # تأخیر برای اینکه صرافی بلاک نکند
+            print(f"📥 در حال دریافت: {s}")
             time.sleep(5) 
             ohlcv = exchange.fetch_ohlcv(s, timeframe='1h', limit=500)
             
-            if not ohlcv or len(ohlcv) < 10:
-                print(f"⚠️ دیتای {s} ناقص بود. عبور می‌کنیم.")
+            # اگر دیتایی نبود یا ناقص بود، اصلا فایل نساز
+            if not ohlcv or len(ohlcv) < 50:
+                print(f"⚠️ دیتای {s} ناقص است.")
                 continue
                 
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
-            file_path = f"data/historical/{s.replace('/', '_')}_history.csv"
-            df.to_csv(file_path, index=False)
-            print(f"✅ ذخیره شد: {file_path}")
-            
+            df.to_csv(f"data/historical/{s.replace('/', '_')}_history.csv", index=False)
+            print(f"✅ موفقیت: {s}")
         except Exception as e:
             print(f"❌ خطا در {s}: {e}")
 
