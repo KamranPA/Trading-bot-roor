@@ -1,5 +1,5 @@
 # main.py
-# نسخه کاملاً یکپارچه، جامع و بدون نقص v6.3 (اصلاح فیلتر زمان و پایداری کامل سیستم)
+# نسخه کاملاً یکپارچه، جامع و بدون نقص v7.0 (پشتیبانی کامل از ارتقای ۹ فاکتوره هوش مصنوعی)
 
 import os
 import sys
@@ -27,7 +27,7 @@ from src import train_model
 
 MODEL_PATH = os.path.join(CURRENT_DIR, "src", "models", "trading_filter_model.pkl")
 
-def check_ai_permission(feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line):
+def check_ai_permission(features_dict):
     """🧠 دروازه‌بان هوش مصنوعی ۳۶۰ درجه برای فیلتر شکست‌های فیک"""
     if not os.path.exists(MODEL_PATH):
         print("ℹ️ مدل هوش مصنوعی هنوز آموزش ندیده است؛ تایید خودکار سیگنال.")
@@ -35,13 +35,30 @@ def check_ai_permission(feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, fe
 
     try:
         model = joblib.load(MODEL_PATH)
-        input_data = pd.DataFrame([{
-            'feat_adx': feat_adx,
-            'feat_vol_ratio': feat_vol_ratio,
-            'feat_atr_percent': feat_atr_percent,
-            'feat_rsi': feat_rsi,
-            'feat_trend_line': feat_trend_line
-        }])
+        
+        # 🛡️ لایه سازگاری عقب‌رو (Backward Compatibility): 
+        # اگر مدل قدیمی ۵ فاکتوره باشد، فقط ۵ فاکتور اول را می‌فرستد تا سیستم کرش نکند.
+        if hasattr(model, 'n_features_in_') and model.n_features_in_ == 5:
+            input_data = pd.DataFrame([{
+                'feat_adx': features_dict['feat_adx'],
+                'feat_vol_ratio': features_dict['feat_vol_ratio'],
+                'feat_atr_percent': features_dict['feat_atr_percent'],
+                'feat_rsi': features_dict['feat_rsi'],
+                'feat_trend_line': features_dict['feat_trend_line']
+            }])
+        else:
+            # اگر مدل جدید ۹ فاکتوره آموزش دیده باشد، تمام فاکتورها ارسال می‌شوند
+            input_data = pd.DataFrame([{
+                'feat_adx': features_dict['feat_adx'],
+                'feat_vol_ratio': features_dict['feat_vol_ratio'],
+                'feat_atr_percent': features_dict['feat_atr_percent'],
+                'feat_rsi': features_dict['feat_rsi'],
+                'feat_trend_line': features_dict['feat_trend_line'],
+                'feat_ema_deviation': features_dict['feat_ema_deviation'],
+                'feat_rsi_momentum': features_dict['feat_rsi_momentum'],
+                'feat_body_ratio': features_dict['feat_body_ratio'],
+                'feat_high_volume_session': features_dict['feat_high_volume_session']
+            }])
         
         prediction = model.predict(input_data)[0]
         probabilities = model.predict_proba(input_data)[0]
@@ -124,7 +141,6 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
-        # ما فقط زمان ثبت معاملات واقعی در جدول اصلی را چک می‌کنیم، نه لاگ‌های اسکن عادی را
         cursor.execute("SELECT timestamp FROM signals WHERE symbol = ? ORDER BY id DESC LIMIT 1", (symbol,))
         res = cursor.fetchone()
         conn.close()
@@ -139,9 +155,9 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
         return False
 
 def run_bot():
-    print("🤖 اسکنر هوشمند نسخه v6.3 فعال شد...")
+    print("🤖 اسکنر هوشمند نسخه v7.0 فعال شد...")
     
-    # اولویت اول: بررسی ساختار پایگاه داده و ساخت ستون‌ها در صورت عدم وجود
+    # اولویت اول: بررسی ساختار پایگاه داده و ساخت/ارتقای ستون‌ها بدون تخریب دیتا
     database.init_db()
     if str(database.get_setting("bot_status", "ACTIVE")).strip().upper() != "ACTIVE":
         print("🛑 ربات از طریق دیتابیس غیرفعال شده است.")
@@ -150,13 +166,13 @@ def run_bot():
     # اولویت دوم: مانیتور و ریسک‌فری موقعیت‌های باز
     update_open_positions()
     
-    # اولویت سوم: تلاش برای آموزش هوش مصنوعی با بلاک محافظتی try/except برای جلوگیری از کرش کل فرآیند
+    # اولویت سوم: تلاش برای آموزش هوش مصنوعی با بلاک محافظتی try/except
     try:
         train_model.train_ai_model()
     except Exception as e:
         print(f"ℹ️ موتور هوش مصنوعی منتظر ثبت دیتای بیشتر است: {e}")
     
-    # اولویت چهارم: چرخش روی کل واچ‌لیست بدون قفل زودهنگام فرآیند اسکن
+    # اولویت چهارم: چرخش روی کل واچ‌لیست
     for pair in config.WATCHLIST:
         symbol = pair.split('/')[0]
             
@@ -170,37 +186,37 @@ def run_bot():
         # اگر استراتژی چارت ۴ ساعته سیگنال قطعی صادر کرد
         if signal_result and isinstance(signal_result, dict):
             
-            # 🛡️ موقعیت فیلتر زمان اصلاح شد: بررسی قفل تلگرام فقط و فقط هنگام پیدا شدن سیگنال واقعی انجام می‌شود
+            # بررسی قفل تلگرام فقط هنگام پیدا شدن سیگنال واقعی
             if is_telegram_locked_8h(symbol, hours_limit=8):
                 print(f"🔏 سیگنال جدید برای {symbol} یافت شد، اما به علت محدودیت ارسال ۸ ساعته تلگرام، بلاک گردید.")
                 database.log_scan(symbol, "Signal Found (Blocked by 8h Telegram Lock)")
                 continue
                 
-            # ارزیابی توسط سنسورهای هوش مصنوعی
-            ai_approved, win_rate = check_ai_permission(
-                feat_adx=signal_result['feat_adx'], feat_vol_ratio=signal_result['feat_vol_ratio'],
-                feat_atr_percent=signal_result['feat_atr_percent'], feat_rsi=signal_result['feat_rsi'],
-                feat_trend_line=signal_result['feat_trend_line']
-            )
+            # ارزیابی توسط سنسورهای هوش مصنوعی (ارسال کل دیکشنری سیگنال)
+            ai_approved, win_rate = check_ai_permission(signal_result)
             
             if not ai_approved:
                 database.log_scan(symbol, f"Blocked by AI ({win_rate*100:.1f}%)")
                 continue
             
-            # ذخیره نهایی پوزیشن در دیتابیس
+            # ذخیره نهایی پوزیشن در دیتابیس با هر ۹ فاکتور کامل
             database.save_signal_advanced(
                 symbol=symbol, direction=signal_result['direction'],
                 entry_price=signal_result['entry_price'], stop_loss=signal_result['stop_loss'],
                 tp1=signal_result['tp1'], tp2=signal_result['tp2'],
                 feat_adx=signal_result['feat_adx'], feat_vol_ratio=signal_result['feat_vol_ratio'],
                 feat_atr_percent=signal_result['feat_atr_percent'], feat_rsi=signal_result['feat_rsi'],
-                feat_trend_line=signal_result['feat_trend_line'], status="OPEN"
+                feat_trend_line=signal_result['feat_trend_line'],
+                feat_ema_deviation=signal_result['feat_ema_deviation'],
+                feat_rsi_momentum=signal_result['feat_rsi_momentum'],
+                feat_body_ratio=signal_result['feat_body_ratio'],
+                feat_high_volume_session=signal_result['feat_high_volume_session'],
+                status="OPEN"
             )
             
             # ارسال نهایی به کانال تلگرام شما
             telegram_bot.format_and_send_signal(signal_result)
         else:
-            # اسکن‌های معمولی بازار که سیگنال ندارند، بدون هیچ مشکلی فقط لاگ می‌شوند
             database.log_scan(symbol, "No Signal")
 
 if __name__ == "__main__":
