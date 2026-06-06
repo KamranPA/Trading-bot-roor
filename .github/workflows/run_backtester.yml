@@ -1,5 +1,4 @@
 name: Full Backtest Pipeline
-
 on:
   workflow_dispatch:
 
@@ -7,38 +6,27 @@ jobs:
   run-all:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pandas ccxt matplotlib
-
-      - name: 1. Fetch Data
+      - uses: actions/checkout@v4
+      - run: pip install pandas ccxt matplotlib
+      
+      - name: Fetch Data
         run: |
           mkdir -p data/historical
           python fetcher.py
-          # صبر برای اطمینان از کامل شدن عملیات نوشتن فایل روی دیسک مجازی
-          sleep 15
+          ls -l data/historical  # این دستور به ما نشان می‌دهد آیا فایلی ساخته شده یا نه
         
-      - name: 2. Optimize Strategy
+      - name: Optimize
         run: python optimizer.py
         
-      - name: 3. Run Backtester
+      - name: Backtest
         run: python backtester.py
         
       - name: Upload Artifacts
-        if: always() # حتی اگر خطایی رخ داد، فایل‌ها را آپلود کن تا بررسی کنی
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backtest-results
+          name: final-results
           path: |
             *.png
             *.json
-            data/historical/*.csv
+            data/historical/
