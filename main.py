@@ -1,5 +1,5 @@
 # main.py
-# نسخه کاملاً یکپارچه، جامع و بدون نقص v7.0 (پشتیبانی کامل از ارتقای ۹ فاکتوره هوش مصنوعی)
+# نسخه نهایی v7.2 - مجهز به موتور حد ضرر متحرک داینامیک (Trailing Stop بر اساس ATR) و ۹ فاکتور هوش مصنوعی
 
 import os
 import sys
@@ -36,8 +36,6 @@ def check_ai_permission(features_dict):
     try:
         model = joblib.load(MODEL_PATH)
         
-        # 🛡️ لایه سازگاری عقب‌رو (Backward Compatibility): 
-        # اگر مدل قدیمی ۵ فاکتوره باشد، فقط ۵ فاکتور اول را می‌فرستد تا سیستم کرش نکند.
         if hasattr(model, 'n_features_in_') and model.n_features_in_ == 5:
             input_data = pd.DataFrame([{
                 'feat_adx': features_dict['feat_adx'],
@@ -47,7 +45,6 @@ def check_ai_permission(features_dict):
                 'feat_trend_line': features_dict['feat_trend_line']
             }])
         else:
-            # اگر مدل جدید ۹ فاکتوره آموزش دیده باشد، تمام فاکتورها ارسال می‌شوند
             input_data = pd.DataFrame([{
                 'feat_adx': features_dict['feat_adx'],
                 'feat_vol_ratio': features_dict['feat_vol_ratio'],
@@ -68,7 +65,7 @@ def check_ai_permission(features_dict):
         return True, 1.0
 
 def update_open_positions():
-    """🛡️ مکانیزم ریسک‌فری خودکار و مدیریت خروج پوزیشن‌های باز"""
+    """🛡️ موتور مدیریت پوزیشن‌های باز مجهز به لایه حد ضرر متحرک پویا (Trailing Stop) بر اساس ATR"""
     db_path = database.DB_NAME
     if not os.path.exists(db_path):
         return
@@ -85,7 +82,12 @@ def update_open_positions():
             if df is None or df.empty:
                 continue
                 
-            current_price = float(df.iloc[-1]['Close'])
+            # محاسبه مجدد اندیکاتورها برای استخراج ATR لحظه‌ای بازار
+            df = indicators.calculate_indicators(df)
+            current_candle = df.iloc[-1]
+            current_price = float(current_candle['Close'])
+            atr_val = float(current_candle['ATR']) if float(current_candle['ATR']) > 0 else (entry_price * 0.02)
+            
             cursor.execute("SELECT target_number, target_price, status FROM signal_targets WHERE signal_id = ?", (pos_id,))
             targets_data = cursor.fetchall()
             targets = {row[0]: row[1] for row in targets_data}
@@ -94,29 +96,53 @@ def update_open_positions():
             tp1, tp2 = targets.get(1), targets.get(2)
             closed, pnl, reason = False, 0.0, ""
             
+            # 🟢 مکانیسم مدیریت موقعیت خرید (LONG)
             if direction == 'LONG':
+                # الف) مدیریت ریسک‌فری با تاچ TP1
                 if tp1 and current_price >= tp1 and targets_status.get(1) == 'PENDING':
                     cursor.execute("UPDATE signal_targets SET status = 'HIT' WHERE signal_id = ? AND target_number = 1", (pos_id,))
                     cursor.execute("UPDATE signals SET stop_loss = ? WHERE id = ?", (entry_price, pos_id))
                     stop_loss = entry_price
                     telegram_bot.send_telegram_message(f"🛡️ **ریسک‌فری خودکار #{symbol}**\n✅ TP1 لمس شد. استاپ به نقطه ورود ({entry_price}) منتقل شد.")
                 
+                # ب) محاسبه حد ضرر متحرک (Trailing Stop) در صورت حرکت قیمت در سود
+                elif current_price > entry_price:
+                    calculated_trailing_sl = current_price - (1.5 * atr_val)
+                    # استاپ فقط رو به بالا حرکت می‌کند (قفل یک‌طرفه سود)
+                    if calculated_trailing_sl > stop_loss:
+                        stop_loss = round(calculated_trailing_sl, 4)
+                        cursor.execute("UPDATE signals SET stop_loss = ? WHERE id = ?", (stop_loss, pos_id))
+                        print(f"🔄 [Trailing Stop] حد ضرر متحرک پوزیشن LONG #{symbol} به {stop_loss} ارتقا یافت.")
+                
+                # ج) بررسی خروج‌ها
                 if current_price <= stop_loss:
-                    closed, reason = True, "Stop Loss Hit"
+                    closed, reason = True, "Trailing/Stop Loss Hit"
                     pnl = ((stop_loss - entry_price) / entry_price) * 100
                 elif tp2 and current_price >= tp2:
                     closed, reason = True, "TP2 Hit"
                     pnl = ((tp2 - entry_price) / entry_price) * 100
                     
+            # 🔴 مکانیسم مدیریت موقعیت فروش (SHORT)
             elif direction == 'SHORT':
+                # الف) مدیریت ریسک‌فری با تاچ TP1
                 if tp1 and current_price <= tp1 and targets_status.get(1) == 'PENDING':
                     cursor.execute("UPDATE signal_targets SET status = 'HIT' WHERE signal_id = ? AND target_number = 1", (pos_id,))
                     cursor.execute("UPDATE signals SET stop_loss = ? WHERE id = ?", (entry_price, pos_id))
                     stop_loss = entry_price
                     telegram_bot.send_telegram_message(f"🛡️ **ریسک‌فری خودکار #{symbol}**\n✅ TP1 لمس شد. استاپ به نقطه ورود ({entry_price}) منتقل شد.")
                 
+                # ب) محاسبه حد ضرر متحرک (Trailing Stop) در صورت حرکت قیمت در سود
+                elif current_price < entry_price:
+                    calculated_trailing_sl = current_price + (1.5 * atr_val)
+                    # استاپ در پوزیشن شورت فقط رو به پایین حرکت می‌کند
+                    if calculated_trailing_sl < stop_loss:
+                        stop_loss = round(calculated_trailing_sl, 4)
+                        cursor.execute("UPDATE signals SET stop_loss = ? WHERE id = ?", (stop_loss, pos_id))
+                        print(f"🔄 [Trailing Stop] حد ضرر متحرک پوزیشن SHORT #{symbol} به {stop_loss} کاهش یافت.")
+                
+                # ج) بررسی خروج‌ها
                 if current_price >= stop_loss:
-                    closed, reason = True, "Stop Loss Hit"
+                    closed, reason = True, "Trailing/Stop Loss Hit"
                     pnl = ((entry_price - stop_loss) / entry_price) * 100
                 elif tp2 and current_price <= tp2:
                     closed, reason = True, "TP2 Hit"
@@ -125,12 +151,12 @@ def update_open_positions():
             if closed:
                 cursor.execute("UPDATE signals SET status = 'CLOSED', closed_at = ?, pnl_percent = ? WHERE id = ?", 
                                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), round(pnl, 2), pos_id))
-                telegram_bot.send_telegram_message(f"🚪 **خروج پوزیشن #{symbol}**\nعلت: {reason}\nبازدهی: {pnl:.2f}%")
+                telegram_bot.send_telegram_message(f"🚪 **خروج پوزیشن #{symbol}**\nعلت: {reason}\nبازدهی نهایی: {pnl:.2f}%")
                 
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"⚠️ خطا در بروزرسانی معاملات: {e}")
+        print(f"⚠️ خطا در محاسبه و بروزرسانی هوشمند معاملات: {e}")
 
 def is_telegram_locked_8h(symbol, hours_limit=8):
     """🔏 بررسی قفل ۸ ساعته بر اساس زمان آخرین سیگنال صادر شده زنده در جدول اصلی"""
@@ -140,7 +166,6 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        
         cursor.execute("SELECT timestamp FROM signals WHERE symbol = ? ORDER BY id DESC LIMIT 1", (symbol,))
         res = cursor.fetchone()
         conn.close()
@@ -155,24 +180,21 @@ def is_telegram_locked_8h(symbol, hours_limit=8):
         return False
 
 def run_bot():
-    print("🤖 اسکنر هوشمند نسخه v7.0 فعال شد...")
+    print("🤖 اسکنر هوشمند نسخه v7.2 فعال شد...")
     
-    # اولویت اول: بررسی ساختار پایگاه داده و ساخت/ارتقای ستون‌ها بدون تخریب دیتا
     database.init_db()
     if str(database.get_setting("bot_status", "ACTIVE")).strip().upper() != "ACTIVE":
         print("🛑 ربات از طریق دیتابیس غیرفعال شده است.")
         return
     
-    # اولویت دوم: مانیتور و ریسک‌فری موقعیت‌های باز
+    # اجرای موتور بهینه‌سازی و تعقیب قیمت لایو
     update_open_positions()
     
-    # اولویت سوم: تلاش برای آموزش هوش مصنوعی با بلاک محافظتی try/except
     try:
         train_model.train_ai_model()
     except Exception as e:
         print(f"ℹ️ موتور هوش مصنوعی منتظر ثبت دیتای بیشتر است: {e}")
     
-    # اولویت چهارم: چرخش روی کل واچ‌لیست
     for pair in config.WATCHLIST:
         symbol = pair.split('/')[0]
             
@@ -183,23 +205,19 @@ def run_bot():
         df = indicators.calculate_indicators(df)
         signal_result = strategy.generate_signal(df, pair)
         
-        # اگر استراتژی چارت ۴ ساعته سیگنال قطعی صادر کرد
         if signal_result and isinstance(signal_result, dict):
             
-            # بررسی قفل تلگرام فقط هنگام پیدا شدن سیگنال واقعی
             if is_telegram_locked_8h(symbol, hours_limit=8):
                 print(f"🔏 سیگنال جدید برای {symbol} یافت شد، اما به علت محدودیت ارسال ۸ ساعته تلگرام، بلاک گردید.")
                 database.log_scan(symbol, "Signal Found (Blocked by 8h Telegram Lock)")
                 continue
                 
-            # ارزیابی توسط سنسورهای هوش مصنوعی (ارسال کل دیکشنری سیگنال)
             ai_approved, win_rate = check_ai_permission(signal_result)
             
             if not ai_approved:
                 database.log_scan(symbol, f"Blocked by AI ({win_rate*100:.1f}%)")
                 continue
             
-            # ذخیره نهایی پوزیشن در دیتابیس با هر ۹ فاکتور کامل
             database.save_signal_advanced(
                 symbol=symbol, direction=signal_result['direction'],
                 entry_price=signal_result['entry_price'], stop_loss=signal_result['stop_loss'],
@@ -214,7 +232,6 @@ def run_bot():
                 status="OPEN"
             )
             
-            # ارسال نهایی به کانال تلگرام شما
             telegram_bot.format_and_send_signal(signal_result)
         else:
             database.log_scan(symbol, "No Signal")
