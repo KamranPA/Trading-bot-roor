@@ -1,41 +1,46 @@
 # src/coinex_client.py
-# ماژول رسمی اتصال به API صرافی کوئینکس و دریافت کندل‌ها
+# ماژول یکپارچه اتصال به API صرافی کوئینکس (دریافت داده + اجرای پوزیشن)
 
 import ccxt
 import pandas as pd
-import config  # فراخوانی تنظیمات مرکزی برای حفظ ساختار ماژولار
+import config 
 
 def get_coinex_candles(pair):
-    """
-    دریافت ۱۰۰ کندل اخیر ۴ ساعته برای یک جفت‌ارز مشخص از صرافی کوئینکس
-    """
+    """دریافت کندل‌های ۴ ساعته برای تحلیل"""
     try:
-        # اتصال به صرافی کوئینکس به صورت عمومی (بدون نیاز به کلید خصوصی)
-        exchange = ccxt.coinex({
-            'timeout': 15000,
-            'enableRateLimit': True, # احترام به محدودیت تعداد درخواست صرافی برای جلوگیری از بلاک شدن
-        })
+        exchange = ccxt.coinex({'enableRateLimit': True})
+        ohlcv = exchange.fetch_ohlcv(pair, timeframe=config.TIMEFRAME, limit=config.CANDLES_LIMIT)
         
-        # دریافت داده‌های OHLCV (Open, High, Low, Close, Volume)
-        ohlcv = exchange.fetch_ohlcv(
-            symbol=pair, 
-            timeframe=config.TIMEFRAME, 
-            limit=config.CANDLES_LIMIT
-        )
-        
-        if not ohlcv:
-            print(f"⚠️ هیچ دیتایی برای {pair} دریافت نشد.")
-            return None
+        if not ohlcv: return None
             
-        # تبدیل لیست خام به یک جدول منظم (Dataframe)
         columns = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume']
         df = pd.DataFrame(ohlcv, columns=columns)
-        
-        # تبدیل زمان میلی‌ثانیه صرافی به تاریخ و ساعت استاندارد
         df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
-        
         return df
-
     except Exception as e:
-        print(f"❌ خطا در ارتباط با API کوئینکس برای ارز {pair}: {e}")
+        print(f"❌ خطا در دریافت دیتای {pair}: {e}")
+        return None
+
+def open_position(signal_data):
+    """اجرای سفارش خرید یا فروش در صرافی"""
+    try:
+        # اتصال امن با کلیدهای API
+        exchange = ccxt.coinex({
+            'apiKey': config.API_KEY,
+            'secret': config.SECRET_KEY,
+            'enableRateLimit': True,
+        })
+        
+        symbol = signal_data['pair']
+        # محاسبه جهت سفارش
+        side = 'buy' if signal_data['direction'] == 'LONG' else 'sell'
+        amount = signal_data['position_size']
+        
+        # ثبت سفارش در مارکت
+        order = exchange.create_market_order(symbol, side, amount)
+        print(f"✅ پوزیشن {side} برای {symbol} ثبت شد. ID: {order['id']}")
+        return order
+        
+    except Exception as e:
+        print(f"❌ خطا در باز کردن پوزیشن در صرافی: {e}")
         return None
