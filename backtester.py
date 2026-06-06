@@ -5,7 +5,8 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
-from src import indicators, strategy
+import ccxt
+from src import indicators, strategy # فرض بر این است که این فایل‌ها را دارید
 
 class Backtester:
     def __init__(self, initial_capital=1000.0, fee=0.001, slippage=0.0005):
@@ -15,19 +16,17 @@ class Backtester:
         self.slippage = slippage
         self.history = []
 
-    def run(self, df):
-        # محاسبه اندیکاتورها
+    def run(self, df, symbol):
         df = indicators.calculate_indicators(df.copy())
         position = None
         
-        # شبیه‌سازی بازار
         for i in range(200, len(df)):
+            row = df.iloc[i]
             if position is None:
-                signal = strategy.generate_signal(df.iloc[:i+1], "BTC/USDT")
-                if signal:
-                    position = signal
+                signal = strategy.generate_signal(df.iloc[:i+1], symbol)
+                if signal: position = signal
             else:
-                price = df.iloc[i]['Close']
+                price = row['Close']
                 # منطق خروج
                 if (position['direction'] == 'LONG' and (price >= position['tp2'] or price <= position['stop_loss'])) or \
                    (position['direction'] == 'SHORT' and (price <= position['tp2'] or price >= position['stop_loss'])):
@@ -37,44 +36,36 @@ class Backtester:
                     
                     net_pnl = pnl - ((self.fee + self.slippage) * 100)
                     self.capital += (self.capital * (net_pnl / 100))
-                    self.history.append({'pnl': net_pnl, 'is_win': net_pnl > 0})
+                    self.history.append(net_pnl)
                     position = None
         
-        self.generate_report()
+        print(f"✅ بک‌تست {symbol} تمام شد. سرمایه نهایی: {self.capital:.2f} USDT")
 
-    def generate_report(self):
-        if not self.history:
-            print("⚠️ هیچ معامله‌ای در بک‌تست انجام نشد.")
-            return
-
-        df_hist = pd.DataFrame(self.history)
-        win_rate = (df_hist['is_win'].sum() / len(df_hist)) * 100
-        
-        # رسم نمودار رشد سرمایه
-        equity_curve = [self.initial_capital]
-        for pnl in df_hist['pnl']:
-            equity_curve.append(equity_curve[-1] * (1 + pnl/100))
+    def save_report(self):
+        if not self.history: return
+        equity = [self.initial_capital]
+        for pnl in self.history: equity.append(equity[-1] * (1 + pnl/100))
         
         plt.figure(figsize=(10, 5))
-        plt.plot(equity_curve, label='Capital', color='blue', linewidth=2)
-        plt.title('Equity Curve (نمودار رشد سرمایه)')
-        plt.xlabel('تعداد معاملات')
-        plt.ylabel('سرمایه (USDT)')
-        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.plot(equity)
+        plt.title('Equity Curve')
         plt.savefig('backtest_result.png')
         plt.close()
-        
-        print(f"\n--- 📊 گزارش نهایی بک‌تست ---")
-        print(f"سرمایه نهایی: {self.capital:.2f} USDT")
-        print(f"تعداد معاملات: {len(df_hist)}")
-        print(f"نرخ برد (Win Rate): {win_rate:.2f}%")
-        print(f"✅ نمودار در فایل backtest_result.png ذخیره شد.")
+        print("📊 نمودار نهایی در backtest_result.png ذخیره شد.")
+
+def fetch_data(symbols):
+    exchange = ccxt.coinex()
+    for s in symbols:
+        ohlcv = exchange.fetch_ohlcv(f"{s}/USDT", '1h', limit=500)
+        df = pd.DataFrame(ohlcv, columns=['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
+        df.to_csv(f'{s}_data.csv', index=False)
 
 if __name__ == "__main__":
-    file_path = os.path.join("data", "historical", "BTC_history.csv")
-    if os.path.exists(file_path):
-        df_data = pd.read_csv(file_path)
-        bt = Backtester()
-        bt.run(df_data)
-    else:
-        print(f"❌ فایل دیتا در مسیر {file_path} یافت نشد.")
+    symbols = ["BTC", "ETH", "SOL", "SUI", "LINK", "AVAX"]
+    fetch_data(symbols) # دریافت خودکار دیتا
+    
+    bt = Backtester()
+    for s in symbols:
+        df = pd.read_csv(f'{s}_data.csv')
+        bt.run(df, s)
+    bt.save_report()
