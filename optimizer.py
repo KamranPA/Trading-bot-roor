@@ -16,22 +16,26 @@ def optimize():
     best_config = {"tp": 0.02, "sl": 0.01}
     max_capital = -1
     
+    print("🚀 شروع بهینه‌سازی ایمن...")
+    
     for tp, sl in itertools.product([0.01, 0.03, 0.05], [0.01, 0.02]):
         total = 0
+        valid_files = 0
         for s in symbols:
             path = f"data/historical/{s}_history.csv"
-            # چک کردن سلامت فایل
+            # چک کردن سلامت فایل: وجود داشتن و خالی نبودن
             if os.path.exists(path) and os.path.getsize(path) > 100:
                 df = pd.read_csv(path)
                 total += calculate_profit(df, tp, sl)
+                valid_files += 1
         
-        if total > max_capital:
+        if valid_files > 0 and total > max_capital:
             max_capital = total
             best_config = {"tp": tp, "sl": sl}
             
     with open('best_params.json', 'w') as f:
         json.dump(best_config, f)
-    print(f"✨ بهینه‌سازی کامل شد: {best_config}")
+    print(f"✨ بهینه‌سازی کامل شد. بهترین تنظیمات: {best_config}")
 
 if __name__ == "__main__":
     optimize()
