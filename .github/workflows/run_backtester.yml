@@ -14,11 +14,12 @@ jobs:
           python optimizer.py
           python backtester.py
         
-      - name: Upload Everything
+      # این بخش حیاتی است: فایل‌ها را از حافظه موقت برمی‌دارد و به Artifact تبدیل می‌کند
+      - name: Upload Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: final-files
+          name: my-backtest-files
           path: |
             data/historical/
             best_params.json
