@@ -1,6 +1,7 @@
 import ccxt
 import pandas as pd
 import os
+import time
 
 def fetch_all_data():
     symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "SUI/USDT", "LINK/USDT", "AVAX/USDT"]
@@ -9,20 +10,22 @@ def fetch_all_data():
     
     for s in symbols:
         try:
-            print(f"📥 تلاش برای دانلود: {s}")
+            print(f"📥 شروع دانلود {s}...")
+            # اضافه کردن تأخیر برای جلوگیری از مسدود شدن توسط صرافی
+            time.sleep(2) 
             ohlcv = exchange.fetch_ohlcv(s, timeframe='1h', limit=500)
-            df = pd.DataFrame(ohlcv, columns=['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
             
-            # چک کردن اینکه آیا دیتا دانلود شده یا نه
-            if df.empty:
-                print(f"⚠️ هشدار: دیتای {s} خالی است!")
+            if not ohlcv:
+                print(f"⚠️ دیتای {s} خالی دریافت شد!")
                 continue
                 
+            df = pd.DataFrame(ohlcv, columns=['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
             file_path = f"data/historical/{s.replace('/', '_')}_history.csv"
             df.to_csv(file_path, index=False)
-            print(f"✅ موفقیت: {file_path} با {len(df)} ردیف ذخیره شد.")
+            print(f"✅ با موفقیت ذخیره شد: {file_path}")
+            
         except Exception as e:
-            print(f"❌ خطا در دانلود {s}: {e}")
+            print(f"❌ خطا در دریافت {s}: {e}")
 
 if __name__ == "__main__":
     fetch_all_data()
