@@ -1,34 +1,35 @@
-name: Run Backtester
+name: Run Trading System
 
 on:
-  workflow_dispatch: # برای اجرای دستی در تب Actions
+  workflow_dispatch:
 
 jobs:
-  backtest:
+  run-all:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          # نصب کتابخانه‌های مورد نیاز
-          pip install pandas numpy matplotlib ccxt
-          
-      - name: Run Backtester
-        # اضافه کردن مسیر جاری به PYTHONPATH برای شناسایی پوشه src
-        run: |
-          export PYTHONPATH=$PYTHONPATH:.
-          python backtester.py
+        with: {python-version: '3.11'}
+      - name: Install
+        run: pip install pandas numpy matplotlib ccxt
+      
+      # گام ۱: دریافت دیتای جدید
+      - name: Fetch Data
+        run: python fetcher.py
         
-      - name: Upload Result
+      # گام ۲: پیدا کردن بهترین استراتژی توسط دستیار
+      - name: Optimize Strategy
+        run: python optimizer.py
+        
+      # گام ۳: اجرای بک‌تستر با تنظیمات بهینه
+      - name: Run Backtester
+        run: python backtester.py
+        
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: backtest-report
-          path: backtest_result.png # این فایل خروجی تصویر نمودار شماست
+          name: results
+          path: |
+            backtest_result.png
+            best_params.json
