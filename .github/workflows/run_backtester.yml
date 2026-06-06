@@ -1,4 +1,4 @@
-name: Run Trading System
+name: Full Backtest Pipeline
 
 on:
   workflow_dispatch:
@@ -7,29 +7,35 @@ jobs:
   run-all:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
-        with: {python-version: '3.11'}
-      - name: Install
-        run: pip install pandas numpy matplotlib ccxt
-      
-      # گام ۱: دریافت دیتای جدید
-      - name: Fetch Data
-        run: python fetcher.py
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas ccxt matplotlib
+
+      - name: 1. Fetch Data
+        run: |
+          mkdir -p data/historical
+          python fetcher.py
         
-      # گام ۲: پیدا کردن بهترین استراتژی توسط دستیار
-      - name: Optimize Strategy
+      - name: 2. Optimize Strategy
         run: python optimizer.py
         
-      # گام ۳: اجرای بک‌تستر با تنظیمات بهینه
-      - name: Run Backtester
+      - name: 3. Run Backtester
         run: python backtester.py
         
-      - name: Upload Artifact
+      - name: Upload Results
         uses: actions/upload-artifact@v4
         with:
-          name: results
+          name: backtest-artifacts
           path: |
             backtest_result.png
             best_params.json
+            data/historical/*.csv
