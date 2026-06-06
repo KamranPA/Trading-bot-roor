@@ -3,61 +3,64 @@
 # ---------------------------------------------------------
 
 import pandas as pd
+import numpy as np
 import os
 from src import indicators, strategy
 
-def run_backtest(csv_file_path, initial_capital=1000.0):
-    """
-    موتور شبیه‌ساز و بک‌تستر استراتژی‌های ربات
-    """
-    # بررسی وجود فایل
-    if not os.path.exists(csv_file_path):
-        print(f"❌ خطا: فایل دیتا در مسیر {csv_file_path} یافت نشد.")
-        return
+class Backtester:
+    def __init__(self, initial_capital=1000.0, fee=0.001, slippage=0.0005):
+        self.capital = initial_capital
+        self.fee = fee
+        self.slippage = slippage
+        self.history = []
 
-    # ۱. خواندن داده‌های تاریخی
-    df = pd.read_csv(csv_file_path)
-    df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-    df = df.sort_values('Timestamp')
-    
-    # ۲. محاسبه اندیکاتورها (استفاده از کتابخانه src.indicators)
-    df = indicators.calculate_indicators(df)
-    
-    capital = initial_capital
-    position = None 
-    
-    print(f"🚀 شروع بک‌تست روی {len(df)} کندل...")
-
-    # ۳. حلقه شبیه‌سازی
-    for i in range(200, len(df)):
-        current_data = df.iloc[:i+1]
+    def run(self, df):
+        df = indicators.calculate_indicators(df.copy())
+        position = None
         
-        # اگر پوزیشن نداریم، سیگنال چک می‌کنیم
-        if position is None:
-            signal = strategy.generate_signal(current_data, "BTC/USDT")
-            if signal:
-                position = signal
-                print(f"💰 ورود به معامله در قیمت: {signal['entry_price']}")
-        
-        # اگر پوزیشن داریم، خروج را چک می‌کنیم
-        else:
-            current_price = df.iloc[i]['Close']
+        for i in range(200, len(df)):
+            row = df.iloc[i]
             
-            # منطق خروج (مطابق با استراتژی لایو)
-            if (position['direction'] == 'LONG' and (current_price >= position['tp2'] or current_price <= position['stop_loss'])) or \
-               (position['direction'] == 'SHORT' and (current_price <= position['tp2'] or current_price >= position['stop_loss'])):
-                
-                # محاسبه PnL
-                pnl_percent = ((current_price - position['entry_price']) / position['entry_price']) * 100 if position['direction'] == 'LONG' \
-                              else ((position['entry_price'] - current_price) / position['entry_price']) * 100
-                
-                capital += (capital * (pnl_percent / 100))
-                print(f"🚪 خروج! سود/زیان: {pnl_percent:.2f}% | سرمایه جدید: {capital:.2f}")
-                position = None
+            if position is None:
+                # استفاده از منطق استراتژی شما
+                signal = strategy.generate_signal(df.iloc[:i+1], "BTC/USDT")
+                if signal:
+                    position = signal
+            else:
+                # بررسی خروج
+                price = row['Close']
+                if (position['direction'] == 'LONG' and (price >= position['tp2'] or price <= position['stop_loss'])) or \
+                   (position['direction'] == 'SHORT' and (price <= position['tp2'] or price >= position['stop_loss'])):
+                    
+                    # محاسبه سود/زیان خالص
+                    pnl = ((price - position['entry_price']) / position['entry_price']) * 100 if position['direction'] == 'LONG' \
+                          else ((position['entry_price'] - price) / position['entry_price']) * 100
+                    
+                    net_pnl = pnl - ((self.fee + self.slippage) * 100)
+                    self.capital += (self.capital * (net_pnl / 100))
+                    
+                    self.history.append({'pnl': net_pnl, 'is_win': net_pnl > 0})
+                    position = None
+        
+        self.print_report()
 
-    print(f"🏁 پایان بک‌تست. سرمایه نهایی: {capital:.2f}")
+    def print_report(self):
+        df_hist = pd.DataFrame(self.history)
+        if not df_hist.empty:
+            win_rate = (df_hist['is_win'].sum() / len(df_hist)) * 100
+            print(f"\n--- 📊 گزارش نهایی بک‌تست ---")
+            print(f"سرمایه نهایی: {self.capital:.2f} USDT")
+            print(f"تعداد معاملات: {len(df_hist)}")
+            print(f"نرخ برد (Win Rate): {win_rate:.2f}%")
+        else:
+            print("⚠️ هیچ معامله‌ای انجام نشد.")
 
 if __name__ == "__main__":
-    # مسیر فایل: data/historical/BTC_history.csv
     file_path = os.path.join("data", "historical", "BTC_history.csv")
-    run_backtest(file_path)
+    if os.path.exists(file_path):
+        df_data = pd.read_csv(file_path)
+        bt = Backtester()
+        bt.run(df_data)
+    else:
+        print("❌ فایل دیتا یافت نشد.")
+ع
