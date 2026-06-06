@@ -1,5 +1,5 @@
 # src/database.py
-# بازگشت به نسخه پایدار v6.3 - مجهز به گزارش خطاهای پنهان
+# بازگشت به نسخه پایدار v7.0 - مجهز به لایه جراحی امن دیتابیس و پشتیبانی از ۹ فاکتور هوش مصنوعی
 
 import os
 import sqlite3
@@ -13,10 +13,11 @@ if not os.path.exists(DATA_DIR):
 DB_NAME = os.path.join(DATA_DIR, "trading_bot.db")
 
 def init_db():
-    """🛡️ راه‌اندازی و بررسی ساختار جداول دیتابیس بومی نسخه 6.3"""
+    """🛡️ راه‌اندازی، بررسی و ارتقای ساختار جداول دیتابیس بومی نسخه 7.0 (بدون تخریب دیتا)"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
+    # ۱. ساخت جدول سیگنال‌ها با ۵ فاکتور اولیه (در صورت عدم وجود)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS signals (
             id INTEGER PRIMARY KEY,
@@ -36,6 +37,27 @@ def init_db():
         )
     """)
     
+    # 🟢 مکانیزم جراحی امن: اضافه کردن ۴ فاکتور پیشرفته جدید به جدول بدون آسیب به پوزیشن‌های گذشته
+    new_features = [
+        ('feat_ema_deviation', 'REAL DEFAULT 0.0'),
+        ('feat_rsi_momentum', 'REAL DEFAULT 0.0'),
+        ('feat_body_ratio', 'REAL DEFAULT 0.5'),
+        ('feat_high_volume_session', 'REAL DEFAULT 0.0')
+    ]
+    
+    # استخراج ستون‌های فعلی دیتابیس برای جلوگیری از خطای Duplicate Column
+    cursor.execute("PRAGMA table_info(signals)")
+    existing_columns = [column[1] for column in cursor.fetchall()]
+    
+    for col_name, col_type in new_features:
+        if col_name not in existing_columns:
+            try:
+                cursor.execute(f"ALTER TABLE signals ADD COLUMN {col_name} {col_type}")
+                print(f"✅ ستون جدید {col_name} با موفقیت و به صورت امن به دیتابیس لایو اضافه شد.")
+            except Exception as e:
+                print(f"⚠️ خطای غیرمنتظره در افزودن ستون {col_name}: {e}")
+
+    # ۲. ساخت سایر جداول فرعی پروژه
     cursor.execute("""
          CREATE TABLE IF NOT EXISTS signal_targets (
             id INTEGER PRIMARY KEY,
@@ -68,19 +90,25 @@ def log_scan(symbol, result):
 
 def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, 
                           feat_adx=0.0, feat_vol_ratio=0.0, feat_atr_percent=0.0, 
-                          feat_rsi=50.0, feat_trend_line=0.0, status="OPEN"):
-    """ذخیره سیگنال صادر شده توسط استراتژی برای انطباق کامل با خروجی کدهای ۳۶۰ درجه"""
+                          feat_rsi=50.0, feat_trend_line=0.0, 
+                          feat_ema_deviation=0.0, feat_rsi_momentum=0.0, 
+                          feat_body_ratio=0.5, feat_high_volume_session=0.0, status="OPEN"):
+    """ذخیره سیگنال صادر شده توسط استراتژی برای انطباق کامل با خروجی کدهای ۹ بعدی ربات ۳۶۰ درجه"""
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         
         cursor.execute("""
-            INSERT INTO signals (timestamp, symbol, direction, entry_price, stop_loss, 
-                                feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO signals (
+                timestamp, symbol, direction, entry_price, stop_loss, 
+                feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line,
+                feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session, status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (current_time, symbol, direction, entry_price, stop_loss, 
-              feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, status))
+              feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line,
+              feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session, status))
         
         signal_id = cursor.lastrowid
         
@@ -91,7 +119,7 @@ def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2,
             
         conn.commit()
         conn.close()
-        print(f"✅ سیگنال {symbol} با موفقیت در دیتابیس ثبت شد.")
+        print(f"✅ سیگنال {symbol} با هر ۹ فاکتور هوش مصنوعی در دیتابیس ثبت شد.")
     except Exception as e:
         print(f"❌ خطا در مکتوب کردن سیگنال در دیتابیس: {e}")
 
