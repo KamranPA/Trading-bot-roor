@@ -1,5 +1,6 @@
 name: Full Backtest Pipeline
-on: workflow_dispatch
+on:
+  workflow_dispatch:
 
 jobs:
   run-all:
@@ -9,18 +10,21 @@ jobs:
       - run: pip install pandas ccxt matplotlib
       
       - name: Fetch Data
-        run: python fetcher.py
-        
+        run: |
+          python fetcher.py
+          sleep 10  # تأخیر برای اطمینان از ذخیره شدن فایل‌ها
+      
       - name: Optimize
         run: python optimizer.py
         
       - name: Backtest
         run: python backtester.py
         
-      - name: Upload
+      - name: Upload Results
         uses: actions/upload-artifact@v4
         with:
-          name: results
+          name: backtest-results
           path: |
-            backtest_result.png
-            best_params.json
+            *.png
+            *.json
+            data/historical/*.csv
