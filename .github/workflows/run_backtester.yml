@@ -6,26 +6,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install
-        run: pip install pandas ccxt matplotlib
-        
+      - run: pip install pandas ccxt matplotlib
+      
       - name: Fetch Data
-        run: |
-          python fetcher.py
-          echo "لیست فایل‌های موجود:"
-          ls -R data/historical/
-          
+        run: python fetcher.py
+        
       - name: Optimize
         run: python optimizer.py
         
-      - name: Run Backtester
+      - name: Backtest
         run: python backtester.py
         
-      - name: Upload Artifacts
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: all-results
+          name: results
           path: |
-            *.png
-            *.json
-            data/historical/*.csv
+            backtest_result.png
+            best_params.json
