@@ -7,6 +7,7 @@ DB_NAME = "data/trading_bot.db"
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    # جدول سیگنال‌ها
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -17,18 +18,33 @@ def init_db():
             feat_body_ratio REAL, feat_high_volume_session INTEGER, pnl_percent REAL
         )
     """)
+    # جدول لاگ‌ها
     cursor.execute("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY, msg TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP)")
     conn.commit()
     conn.close()
 
 def log_scan(symbol, message):
-    # 🛑 فیلتر هوشمند: پیام‌های "Scanning" را ذخیره نکن تا دیتابیس تمیز بماند
+    # فیلتر: فقط پیام‌های غیر از اسکن ذخیره می‌شوند
     if "Scanning" in message:
         return
-        
     conn = sqlite3.connect(DB_NAME)
     conn.execute("INSERT INTO logs (msg) VALUES (?)", (f"{symbol}: {message}",))
     conn.commit()
     conn.close()
-    
-# ... سایر توابع (save_signal_advanced و غیره)
+
+def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, feat_adx, 
+                         feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, 
+                         feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, 
+                         feat_high_volume_session, status):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO signals (symbol, direction, entry_price, stop_loss, tp1, tp2, 
+        feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, 
+        feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session, status)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (symbol, direction, entry_price, stop_loss, tp1, tp2, feat_adx, feat_vol_ratio, 
+          feat_atr_percent, feat_rsi, feat_trend_line, feat_ema_deviation, feat_rsi_momentum, 
+          feat_body_ratio, feat_high_volume_session, status))
+    conn.commit()
+    conn.close()
