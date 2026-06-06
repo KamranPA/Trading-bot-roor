@@ -10,19 +10,19 @@ def fetch_all_data():
     
     for s in symbols:
         try:
-            print(f"📥 شروع دانلود {s}...")
-            # اضافه کردن تأخیر برای جلوگیری از مسدود شدن توسط صرافی
-            time.sleep(2) 
+            print(f"📥 در حال دانلود: {s}")
+            time.sleep(3) # مکث برای جلوگیری از مسدود شدن IP
             ohlcv = exchange.fetch_ohlcv(s, timeframe='1h', limit=500)
             
+            # اگر دیتایی نیامد، فایل خالی نساز
             if not ohlcv:
-                print(f"⚠️ دیتای {s} خالی دریافت شد!")
+                print(f"⚠️ هشدار: دیتای {s} دریافت نشد.")
                 continue
                 
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
             file_path = f"data/historical/{s.replace('/', '_')}_history.csv"
             df.to_csv(file_path, index=False)
-            print(f"✅ با موفقیت ذخیره شد: {file_path}")
+            print(f"✅ ذخیره شد: {file_path} با {len(df)} ردیف")
             
         except Exception as e:
             print(f"❌ خطا در دریافت {s}: {e}")
