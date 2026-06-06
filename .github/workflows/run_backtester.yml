@@ -1,32 +1,24 @@
 name: Full Backtest Pipeline
-on:
-  workflow_dispatch:
+on: workflow_dispatch
 
 jobs:
-  run-all:
+  run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: pip install pandas ccxt matplotlib
+      - run: pip install pandas ccxt
       
-      - name: Fetch Data
+      - name: Fetch and Run
         run: |
-          mkdir -p data/historical
           python fetcher.py
-          ls -l data/historical  # این دستور به ما نشان می‌دهد آیا فایلی ساخته شده یا نه
+          python optimizer.py
+          python backtester.py
         
-      - name: Optimize
-        run: python optimizer.py
-        
-      - name: Backtest
-        run: python backtester.py
-        
-      - name: Upload Artifacts
+      - name: Upload Everything
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: final-results
+          name: final-files
           path: |
-            *.png
-            *.json
             data/historical/
+            best_params.json
