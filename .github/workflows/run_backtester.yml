@@ -6,22 +6,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
       - name: Install dependencies
         run: pip install pandas ccxt matplotlib
-
-      - name: Fetch and Run
+      
+      - name: Fetch and Run Pipeline
         run: |
-          # اجرای اسکریپت‌ها به ترتیب
           python fetcher.py
           python optimizer.py
           python backtester.py
         
-      - name: Upload Artifacts
-        if: always() # حتی اگر خطایی رخ داد، فایل‌ها آپلود شوند
+      - name: Upload All Results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: final-results
+          name: final-backtest-results
           path: |
             *.png
             *.json
+            *.txt
             data/historical/*.csv
