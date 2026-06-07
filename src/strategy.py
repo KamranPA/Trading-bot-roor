@@ -5,7 +5,7 @@ import config
 from src import database, strategy_utils # فرض بر این است که توابع swing در utils هستند
 
 def generate_signal(df, pair):
-    if df is None or len(df) < (config.SWING_WINDOW * 2 + 1):
+    if df is None or len(df) < 500:
         return None
 
     idx = len(df) - 1
