@@ -1,15 +1,13 @@
 # .github/workflows/monthly_brain.yml
-# زنجیره متصل بکتست، تغذیه دیتابیس، بازآموزی مدل ۱۰‌بعدی هوش مصنوعی و گزارش تلگرام
-
 name: Monthly AI Self-Correction & Reporting
 
 on:
   schedule:
-    - cron: '0 0 1 * *' # اجرای خودکار در اول هر ماه میلادی
-  workflow_dispatch: # امکان اجرای دستی در هر زمان با زدن دکمه Run workflow
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
 
 permissions:
-  contents: write # مجوز ویرایش و کامیت دیتابیس و مدل روی ریپازیتوری
+  contents: write
 
 jobs:
   optimize-and-report:
@@ -30,18 +28,24 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # ۱. اجرای بکتست برای تولید داده‌های تاریخی و تزریق ۱۲۰ معامله به دیتابیس در همین سرور
+    # ⚡ گام طلایی و مفقوده: دانلود داده‌های تاریخی صرافی و ساخت فایل‌های CSV
+    - name: Fetch Historical Market Data (CSV Generator)
+      run: |
+        # اگر نام اسکریپت دانلود دیتای شما چیزی غیر از fetcher.py است، نام آن را اینجا اصلاح کنید
+        if [ -f "src/fetcher.py" ]; then python src/fetcher.py; elif [ -f "fetcher.py" ]; then python fetcher.py; fi
+
+    # ۲. اجرای بکتست روی فایل‌های CSV دانلود شده در گام قبل
     - name: Run Backtest Engine & Populate Database
       run: python backtester.py
 
-    # ۲. تغذیه مستقیم هوش مصنوعی از دیتابیس پر شده در گام قبل
+    # ۳. تغذیه هوش مصنوعی از دیتابیس پر شده
     - name: Run AI Engine (Surgical Loss Analysis & Retraining)
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python src/train_model.py
 
-    # ۳. ارسال کارنامه نهایی پر شده به تلگرام
+    # ۴. ارسال کارنامه نهایی به تلگرام
     - name: Generate & Send Telegram Performance Report
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -49,18 +53,12 @@ jobs:
       run: |
         python -c "from src import telegram_bot; telegram_bot.send_performance_report()"
 
-    # ۴. کامیت و ذخیره دیتابیس و مغز الکترونیکی هوش مصنوعی روی گیت‌هاب شما
+    # ۵. کامیت و آپدیت تغییرات در گیت‌هاب
     - name: Commit and Push Strategy, Model & Database Changes
       run: |
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
-        
-        # ایجاد پوشه مدل در صورت عدم وجود
-        mkdir -p src/models
-        
-        # اضافه کردن فایل دیتابیس پر شده و مدل هوش مصنوعی pkl به گیت
+        mkdir -p src/models data
         git add data/trading_bot.db config.py
         if [ -f "src/models/trading_filter_model.pkl" ]; then git add src/models/trading_filter_model.pkl; fi
-        
-        # ثبت تغییرات در صورتی که فایل جدیدی تولید شده باشد
-        git diff --quiet && git diff --staged --quiet || (git commit -m "🧠 هوش مصنوعی: مدل ۱۰‌بعدی بر اساس ۱۲۰ معامله بکتست بازآموزی و کامیت شد [Skip CI]" && git push)
+        git diff --quiet && git diff --staged --quiet || (git commit -m "🧠 هوش مصنوعی: فیلترها و مدل با موفقیت آپدیت شدند [Skip CI]" && git push)
