@@ -18,7 +18,7 @@ def init_db():
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
         
-        # جدول اصلی سیگنال‌ها
+        # جدول اصلی سیگنال‌ها (شامل فاکتور دهم: feat_vol_confirm)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY,
@@ -69,9 +69,18 @@ def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, **
             vals = [datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), symbol, direction, entry_price, stop_loss, "OPEN"] + list(features.values())
             cursor.execute(f"INSERT INTO signals ({cols}) VALUES ({','.join(['?']*len(vals))})", vals)
             signal_id = cursor.lastrowid
+            
             for i, tp in enumerate([tp1, tp2], 1):
-                if tp: cursor.execute("INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, ?, ?)", (signal_id, i, tp))
+                if tp: 
+                    cursor.execute("INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, ?, ?)", (signal_id, i, tp))
     except Exception as e:
         print(f"❌ خطا در ثبت سیگنال: {e}")
 
-# (سایر توابع log_scan و check_filters_lock را در صورت نیاز به همین شکل با context manager تغییر دهید)
+def log_scan(symbol, result):
+    """ثبت لاگ هر اسکن چرخشی"""
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            conn.execute("INSERT INTO scan_logs (timestamp, symbol, result) VALUES (?, ?, ?)",
+                         (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), symbol, result))
+    except Exception as e:
+        print(f"⚠️ خطا در ثبت لاگ اسکن: {e}")
