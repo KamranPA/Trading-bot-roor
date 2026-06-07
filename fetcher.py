@@ -15,7 +15,7 @@ def fetch_all_data():
     
     for s in symbols:
         try:
-            ohlcv = exchange.fetch_ohlcv(s, timeframe='1h', limit=500)
+            ohlcv = exchange.fetch_ohlcv(s, timeframe='4h', limit=500)
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
             # ذخیره با مسیر کامل
             file_path = os.path.join(data_dir, f"{s.replace('/', '_')}_history.csv")
