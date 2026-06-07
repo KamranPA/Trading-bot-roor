@@ -1,66 +1,49 @@
-# src/telegram_bot.py
-# نسخه نهایی v7.1 - مجهز به لایه بصری نمایش مدیریت سرمایه پویا و حجم‌گذاری ۳۶۰ درجه
-
+# ---------------------------------------------------------
+# FILE PATH: /src/telegram_bot.py
+# ---------------------------------------------------------
 import requests
 import config
+import os
 
 def send_telegram_message(text):
-    """ارسال پیام متنی ساده به تلگرام با فعال بودن لایه توکن‌های امنیتی سیستم"""
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", config.TELEGRAM_BOT_TOKEN)
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", config.TELEGRAM_CHAT_ID)
+    # استفاده از مقادیر ایمن
+    token = os.environ.get("TELEGRAM_BOT_TOKEN") or getattr(config, 'TELEGRAM_BOT_TOKEN', None)
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID") or getattr(config, 'TELEGRAM_CHAT_ID', None)
     
     if not token or not chat_id:
-        print("⚠️ توکن تلگرام یا چت‌آیدی تنظیم نشده است. ارسال پیام لغو شد.")
         return
         
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "Markdown"
-    }
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
     try:
-        response = requests.post(url, json=payload, timeout=10)
-        if response.status_code != 200:
-            print(f"❌ خطا در ارسال تلگرام: {response.text}")
+        requests.post(url, json=payload, timeout=10)
     except Exception as e:
-        print(f"❌ خطای ارتباطی تلگرام: {e}")
+        print(f"❌ خطای تلگرام: {e}")
 
 def format_and_send_signal(signal_data):
-    """💎 قالب‌بندی پیشرفته و ارسال سیگنال لایو همراه با پارامترهای مدیریت سرمایه پویا"""
-    pair = signal_data['pair']
-    symbol = pair.split('/')[0]
-    direction = signal_data['direction']
-    entry = signal_data['entry_price']
-    sl = signal_data['stop_loss']
-    tp1 = signal_data['tp1']
-    tp2 = signal_data['tp2']
+    """💎 نمایش ۱۰‌بعدی سیگنال: اضافه شدنِ نمایشِ تاییدیه حجم (Volume Confirmation)"""
+    # استخراج داده‌ها
+    d = signal_data
     
-    # 💰 استخراج پارامترهای جدید مدیریت سرمایه پویا
-    position_size = signal_data.get('position_size', 0.0)
-    sl_percent = signal_data.get('sl_percent', 0.0)
+    # 🧠 تعیین وضعیت تاییدیه حجم برای نمایش بصری
+    vol_status = "✅ تایید شد" if float(d.get('feat_vol_confirm', 0)) == 1.0 else "⚠️ ضعیف"
     
-    # انتخاب ایموجی بر اساس جهت بازار
-    icon = "🟢 #LONG" if direction == "LONG" else "🔴 #SHORT"
-    target_icon = "🏹" if direction == "LONG" else "🎯"
+    icon = "🟢 #LONG" if d['direction'] == "LONG" else "🔴 #SHORT"
     
-    # ساختاربندی پیام با رعایت خوانایی بالا و اعمال بولدینگ‌های استراتژیک
     message = (
-        f"{icon} **سیگنال جدید دستیار هوشمند ۳۶۰ درجه**\n"
+        f"{icon} **سیگنال مدیریت‌شده ۱۰‌بعدی**\n"
         f"━━━━━━━━━━━━━━━\n"
-        f"🪙 **جفت ارز:** `{pair}`\n"
-        f"🔮 **جهت ورود:** {direction}\n\n"
-        f"💵 **نقطه ورود (Entry):** `{entry}`\n"
-        f"🛡️ **حد ضرر (Stop Loss):** `{sl}` (Risk: {sl_percent}%)\n\n"
-        f"{target_icon} **تارگت اول (TP1):** `{tp1}`\n"
-        f"{target_icon} **تارگت دوم (TP2):** `{tp2}`\n"
+        f"🪙 **جفت ارز:** `{d['pair']}`\n"
+        f"🔮 **جهت:** `{d['direction']}`\n\n"
+        f"💵 **ورود:** `{d['entry_price']}`\n"
+        f"🛡️ **استاپ:** `{d['stop_loss']}`\n"
+        f"🎯 **تارگت ۱:** `{d['tp1']}` | 🎯 **تارگت ۲:** `{d['tp2']}`\n"
         f"━━━━━━━━━━━━━━━\n"
-        f"💰 **لایه مدیریت سرمایه پویا (Money Management):**\n"
-        f"📊 **حجم پیشنهادی ورود:** `{position_size} USDT`\n"
-        f"⚠️ **حداکثر خسارت در صورت استاپ:** `۱٪ از کل سرمایه`\n"
+        f"💰 **حجم ورود:** `{d['position_size']} USDT`\n"
+        f"📊 **تاییدیه حجم (Vol Conf):** {vol_status}\n"
+        f"📈 **قدرت روند (ADX):** `{round(d.get('feat_adx', 0), 1)}`\n"
         f"━━━━━━━━━━━━━━━\n"
-        f"📡 تایم‌فریم اسکن: {config.TIMEFRAME} | ربات نسخه v7.1"
+        f"📡 `نسخه سیستم: v7.1`"
     )
     
     send_telegram_message(message)
-    print(f"🚀 سیگنال مدیریت‌شده‌ی {symbol} با موفقیت به تلگرام مخابره شد.")
