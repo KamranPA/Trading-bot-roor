@@ -1,15 +1,15 @@
 # .github/workflows/monthly_brain.yml
-# سیستم خودکار جراحی معاملات، بهینه‌سازی فیلترهای استراتژی و ارسال گزارش عملکرد ماهانه به تلگرام
+# زنجیره متصل بکتست، تغذیه دیتابیس، بازآموزی مدل ۱۰‌بعدی هوش مصنوعی و گزارش تلگرام
 
 name: Monthly AI Self-Correction & Reporting
 
 on:
   schedule:
-    - cron: '0 0 1 * *' # اجرای خودکار دقیقاً در ساعت ۰۰:۰۰ اول هر ماه میلادی
-  workflow_dispatch: # امکان اجرای دستی در هر زمان با زدن دکمه Run workflow از داخل گیت‌هاب
+    - cron: '0 0 1 * *' # اجرای خودکار در اول هر ماه میلادی
+  workflow_dispatch: # امکان اجرای دستی در هر زمان با زدن دکمه Run workflow
 
 permissions:
-  contents: write # مجوز حیاتی برای ذخیره و Push کردن تغییرات کانفیگ و دیتابیس روی ریپازیتوری
+  contents: write # مجوز ویرایش و کامیت دیتابیس و مدل روی ریپازیتوری
 
 jobs:
   optimize-and-report:
@@ -30,29 +30,37 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Run AI Engine (Surgical Loss Analysis)
+    # ۱. اجرای بکتست برای تولید داده‌های تاریخی و تزریق ۱۲۰ معامله به دیتابیس در همین سرور
+    - name: Run Backtest Engine & Populate Database
+      run: python backtester.py
+
+    # ۲. تغذیه مستقیم هوش مصنوعی از دیتابیس پر شده در گام قبل
+    - name: Run AI Engine (Surgical Loss Analysis & Retraining)
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      # ⚡ اصلاح مسیر: تغییر موتور تحلیل از src.brain به اسکریپت اصلی مدل فیلتر شما
       run: python src/train_model.py
 
+    # ۳. ارسال کارنامه نهایی پر شده به تلگرام
     - name: Generate & Send Telegram Performance Report
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
-        # فراخوانی متد گزارش‌دهی جدید از طریق مفسر خط فرمان پایتون
         python -c "from src import telegram_bot; telegram_bot.send_performance_report()"
 
-    - name: Commit and Push Strategy & Database Changes
+    # ۴. کامیت و ذخیره دیتابیس و مغز الکترونیکی هوش مصنوعی روی گیت‌هاب شما
+    - name: Commit and Push Strategy, Model & Database Changes
       run: |
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
         
-        # اضافه کردن دیتابیس، مدل فشرده pkl و فایل تنظیمات به محیط گیت جهت ذخیره‌سازی ابدی
-        git add data/trading_bot.db config.py
-        if [ -d "src/models" ]; then git add src/models/*.pkl; fi
+        # ایجاد پوشه مدل در صورت عدم وجود
+        mkdir -p src/models
         
-        # بررسی اینکه آیا هوش مصنوعی تغییری در فیلترها اعمال کرده است یا خیر؛ در صورت وجود تغییر، آن را Push می‌کند
-        git diff --quiet && git diff --staged --quiet || (git commit -m "🧠 هوش مصنوعی: فیلترها بهینه‌سازی و کارنامه ماهانه صادر شد [Skip CI]" && git push)
+        # اضافه کردن فایل دیتابیس پر شده و مدل هوش مصنوعی pkl به گیت
+        git add data/trading_bot.db config.py
+        if [ -f "src/models/trading_filter_model.pkl" ]; then git add src/models/trading_filter_model.pkl; fi
+        
+        # ثبت تغییرات در صورتی که فایل جدیدی تولید شده باشد
+        git diff --quiet && git diff --staged --quiet || (git commit -m "🧠 هوش مصنوعی: مدل ۱۰‌بعدی بر اساس ۱۲۰ معامله بکتست بازآموزی و کامیت شد [Skip CI]" && git push)
