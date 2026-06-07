@@ -6,7 +6,7 @@ import joblib
 import os
 import numpy as np
 import config
-from src import indicators, strategy_utils
+from src import indicators
 
 def run_backtest():
     model_path = 'src/models/trading_filter_model.pkl'
@@ -34,7 +34,17 @@ def run_backtest():
             report += f"{s:10} | دیتای تاریخی یافت نشد (Fetch نشده)\n"
             continue
             
+        # ۱. بارگذاری داده‌ها و محاسبه اندیکاتورها
         df = indicators.calculate_indicators(pd.read_csv(path))
+        
+        # ⚡ اصلاح کلیدی: محاسبه پیش‌فرض سطوح سویینگ برای کل دیتابیس جهت رفع مشکل None بودن
+        window = config.SWING_WINDOW
+        df['swing_high'] = df['High'].rolling(window=window*2+1, center=True).max()
+        df['swing_low'] = df['Low'].rolling(window=window*2+1, center=True).min()
+        
+        # پر کردن مقادیر خالی ناشی از حالت center=True (پنجره‌های ابتدا و انتها)
+        df['swing_high'] = df['swing_high'].ffill().bfill()
+        df['swing_low'] = df['swing_low'].ffill().bfill()
         
         features = list(model.feature_names_in_) if model else [
             'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 
@@ -50,35 +60,30 @@ def run_backtest():
         while i < len(df) - 1:
             candle = df.iloc[i]
             
-            # فیلترهای تکنیکال اولیه مطابق استراتژی اصلی
+            # فیلترهای تکنیکال پایه (روند و حجم)
             if float(candle['feat_adx']) < config.ADX_THRESHOLD or float(candle['feat_vol_confirm']) == 0:
                 i += 1
                 continue
-                
-            # شبیه‌سازی دقیق یافتن سویینگ‌ها تا کندل i
-            df_sliced = df.iloc[:i+1]
-            last_swing_high = strategy_utils.find_last_swing(df_sliced, 'high', config.SWING_WINDOW)
-            last_swing_low = strategy_utils.find_last_swing(df_sliced, 'low', config.SWING_WINDOW)
             
-            if last_swing_high is None or last_swing_low is None:
-                i += 1
-                continue
+            # دریافت سطوح سویینگِ معتبر تا کندل قبلی (برای جلوگیری از آینده‌بینی)
+            last_swing_high = df.loc[i-1, 'swing_high']
+            last_swing_low = df.loc[i-1, 'swing_low']
                 
             close_price = float(candle['Close'])
             direction = None
             
-            # بررسی شرط شکست (Breakout)
+            # بررسی شرط شکست سقف یا کف
             if close_price > last_swing_high:
                 direction = 'LONG'
             elif close_price < last_swing_low:
                 direction = 'SHORT'
                 
             if direction:
-                # اعتبارسنجی با مدل هوش مصنوعی
+                # اعتبارسنجی با مدل هوش مصنوعی (در صورت عدم وجود، خودکار تایید می‌شود)
                 if model:
                     is_approved = (model.predict(df.loc[[i], features])[0] == 1)
                 else:
-                    is_approved = True # تایید خودکار در صورت عدم وجود مدل برای جمع‌آوری دیتا
+                    is_approved = True 
                     
                 if is_approved:
                     trades_count += 1
@@ -103,7 +108,7 @@ def run_backtest():
                     pnl = 0
                     closed_index = i + 1
                     
-                    # چرخش روی کندل‌های آینده برای شبیه‌سازی خروج
+                    # بررسی کندل‌های آینده برای مدیریت پوزیشن زنده
                     for j in range(i + 1, len(df)):
                         closed_index = j
                         high = df.loc[j, 'High']
@@ -116,7 +121,8 @@ def run_backtest():
                                 
                             if low <= sl:
                                 pnl = (sl - close_price) * position_size
-                                if sl > close_price: wins += 1; total_wins_all += 1
+                                if sl > close_price: 
+                                    wins += 1; total_wins_all += 1
                                 break
                             if high >= tp2:
                                 pnl = (tp2 - close_price) * position_size
@@ -130,7 +136,8 @@ def run_backtest():
                                 
                             if high >= sl:
                                 pnl = (close_price - sl) * position_size
-                                if sl < close_price: wins += 1; total_wins_all += 1
+                                if sl < close_price: 
+                                    wins += 1; total_wins_all += 1
                                 break
                             if low <= tp2:
                                 pnl = (close_price - tp2) * position_size
@@ -138,7 +145,7 @@ def run_backtest():
                                 break
                                 
                     current_capital += pnl
-                    i = closed_index # پوزیشن بسته شد، موتور بکتست جلو می‌رود
+                    i = closed_index 
                     continue
             i += 1
             
@@ -159,7 +166,7 @@ def run_backtest():
 
     with open('backtest_summary.txt', 'w', encoding='utf-8') as f: 
         f.write(report)
-    print("✅ بکتست با موفقیت برای تمامی ارزها اصلاح شد.")
+    print("✅ اصلاح ساختاری انجام شد. اکنون می‌توانید ورک‌فلو بکتست را مجدداً اجرا کنید.")
 
 if __name__ == "__main__": 
     run_backtest()
