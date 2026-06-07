@@ -7,13 +7,17 @@ import joblib
 import os
 import numpy as np
 from src import indicators, strategy
+import config  # وارد کردن کانفیگ اصلی برای خواندن واچ‌لیست ۱۵ تایی
 
 def run_backtest():
     model_path = 'src/models/trading_filter_model.pkl'
     model = joblib.load(model_path) if os.path.exists(model_path) else None
     
-    symbols = ["BTC_USDT", "ETH_USDT", "SOL_USDT", "SUI_USDT", "LINK_USDT", "AVAX_USDT"]
+    # 🔄 اصلاح کلیدی: خواندن داینامیک ۱۵ ارز از واچ‌لیست اصلی سیستم به جای لیست دستی ۶ تایی
+    symbols = config.WATCHLIST
+    
     report = "--- گزارش بکتست هوشمند و واقعی ۱۰‌بعدی (v7.1) ---\n"
+    report += f"تعداد ارزهای بررسی شده: {len(symbols)} ارز اصلی واچ‌لیست\n"
     report += "مبنای خروج: استراتژی واقعی صرافی (TP1, TP2, SL & Risk-Free)\n"
     report += "--------------------------------------------------\n"
     
@@ -21,9 +25,18 @@ def run_backtest():
     TOTAL_CAPITAL = 1000.0
     RISK_PER_TRADE = 0.001 # 0.1% ریسک روی سرمایه
     
+    total_trades_all = 0
+    total_wins_all = 0
+    final_combined_capital = TOTAL_CAPITAL
+    
     for s in symbols:
-        path = f"data/historical/{s.replace('/', '_')}_history.csv"
+        # تبدیل فرمت جفت ارز از BTC/USDT به BTC_USDT برای پیدا کردن فایل تاریخچه
+        file_name = f"{s.replace('/', '_')}_history.csv"
+        path = f"data/historical/{file_name}"
+        
         if not os.path.exists(path): 
+            # لاگ هشدار در صورتی که دیتای تاریخی ارزی هنوز واکشی (Fetch) نشده باشد
+            print(f"⚠️ فایل دیتای تاریخی برای {s} در مسیر {path} یافت نشد. از این ارز صرف‌نظر شد.")
             continue
             
         # ۱. محاسبه اندیکاتورها روی کل دیتای تاریخی
@@ -66,13 +79,13 @@ def run_backtest():
                 # اگر هوش مصنوعی تایید کرد، وارد پوزیشن واقعی می‌شویم
                 if is_approved:
                     trades_count += 1
+                    total_trades_all += 1
                     
                     # محاسبه حجم معامله بر اساس فرمول مدیریت ریسک سیستم
                     risk_amount = current_capital * RISK_PER_TRADE
                     risk_per_unit = abs(entry_price - sl)
                     position_size = risk_amount / risk_per_unit if risk_per_unit > 0 else 0
                     
-                    # شبیه‌سازی مدیریت پوزیشن در کندل‌های آینده
                     is_risk_free = False
                     position_closed = False
                     pnl = 0
@@ -81,7 +94,6 @@ def run_backtest():
                     for j in range(i + 1, len(df)):
                         high = df.loc[j, 'High']
                         low = df.loc[j, 'Low']
-                        close = df.loc[j, 'Close']
                         
                         if direction == 'LONG':
                             # بررسی ریسک‌فری (تاچ شدن TP1)
@@ -93,13 +105,16 @@ def run_backtest():
                             if low <= sl:
                                 pnl = (sl - entry_price) * position_size
                                 position_closed = True
-                                if sl > entry_price: wins += 1 # اگر در سود جزئی یا ریسک فری بسته شد
+                                if sl > entry_price: 
+                                    wins += 1
+                                    total_wins_all += 1
                                 break
                                 
                             # بررسی برخورد به حد سود نهایی (TP2)
                             if high >= tp2:
                                 pnl = (tp2 - entry_price) * position_size
                                 wins += 1
+                                total_wins_all += 1
                                 position_closed = True
                                 break
                                 
@@ -113,21 +128,23 @@ def run_backtest():
                             if high >= sl:
                                 pnl = (entry_price - sl) * position_size
                                 position_closed = True
-                                if sl < entry_price: wins += 1
+                                if sl < entry_price: 
+                                    wins += 1
+                                    total_wins_all += 1
                                 break
                                 
                             # بررسی برخورد به حد سود نهایی (TP2)
                             if low <= tp2:
                                 pnl = (entry_price - tp2) * position_size
                                 wins += 1
+                                total_wins_all += 1
                                 position_closed = True
                                 break
                     
-                    # اعمال سود/زیان به سرمایه کل بکتست
+                    # اعمال سود/زیان به سرمایه
                     current_capital += pnl
                     
-                    # جلو بردن موتور بکتست تا جایی که پوزیشن بسته شده است 
-                    # تا ربات همزمان دو پوزیشن روی یک ارز باز نکند (قفل منطقی)
+                    # جلو بردن موتور بکتست تا زمان بسته شدن پوزیشن
                     if position_closed:
                         i = j
                         continue
@@ -135,14 +152,25 @@ def run_backtest():
             
         win_rate = (wins / trades_count * 100) if trades_count > 0 else 0
         profit_percent = ((current_capital - TOTAL_CAPITAL) / TOTAL_CAPITAL) * 100
+        final_combined_capital += (current_capital - TOTAL_CAPITAL)
         
-        report += f"{s:10} | معاملات: {trades_count:3} | نرخ برد واقعی: {win_rate:5.1f}% | سرمایه نهایی: {current_capital:.2f}$ ({profit_percent:+.2f}%)\n"
+        report += f"{s:10} | معاملات: {trades_count:3} | نرخ برد: {win_rate:5.1f}% | سرمایه: {current_capital:.2f}$ ({profit_percent:+.2f}%)\n"
             
+    # محاسبه آمار کل سبد (Portfolio)
+    total_win_rate = (total_wins_all / total_trades_all * 100) if total_trades_all > 0 else 0
+    total_profit_percent = ((final_combined_capital - TOTAL_CAPITAL) / TOTAL_CAPITAL) * 100
+    
+    report += "--------------------------------------------------\n"
+    report += f"📊 خلاصه کل سبد (۱۵ ارز):\n"
+    report += f"مجموع کل معاملات: {total_trades_all}\n"
+    report += f"نرخ برد میانگین: {total_win_rate:.1f}%\n"
+    report += f"سرمایه نهایی کل سیستم: {final_combined_capital:.2f}$ ({total_profit_percent:+.2f}%)\n"
+
     with open('backtest_summary.txt', 'w', encoding='utf-8') as f: 
         f.write(report)
         
     print(report)
-    print("✅ بکتست استراتژیک و ۱۰‌بعدی کاملاً تکمیل شد. نتایج ذخیره شدند.")
+    print("✅ بکتست استراتژیک برای تمام ۱۵ ارز واچ‌لیست تکمیل و نتایج ذخیره شد.")
 
 if __name__ == "__main__": 
     run_backtest()
