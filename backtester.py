@@ -50,4 +50,3 @@ def run_backtest():
     print("✅ بک‌تستر با منطقِ کاملِ دوطرفه (Long & Short) بازنویسی شد.")
 
 if __name__ == "__main__": run_backtest()
-‌اینو بهینه کن
