@@ -7,7 +7,7 @@ jobs:
   run-bot:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # اجازه نوشتن در مخزن برای کامیت
+      contents: write # برای اجازه کامیت و پوش
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
@@ -20,7 +20,7 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pandas requests ccxt
+        pip install pandas requests
 
     - name: Fetch Data
       run: |
@@ -29,19 +29,18 @@ jobs:
         echo "Running fetcher.py..."
         python fetcher.py
         
-        # بررسی دقیق: آیا فایل‌های CSV در مسیر درست ساخته شدند؟
+        # بررسی حیاتی: آیا فایل‌ها ساخته شدند؟
         echo "Listing files in data/historical:"
         ls -la data/historical
-        
-        # اگر لیست فایل‌ها خالی باشد، ربات متوقف می‌شود تا گزارش اشتباه تولید نشود
         if [ -z "$(ls -A data/historical)" ]; then
-          echo "❌ خطا: هیچ دیتایی دانلود نشد!"
+          echo "❌ خطا: هیچ فایلی دانلود نشد!"
           exit 1
         fi
 
     - name: Backtest
       run: |
         python backtester.py
+        # بررسی اینکه گزارش تولید شده باشد
         if [ ! -f "backtest_summary.txt" ]; then
           echo "❌ خطا: گزارش بکتست تولید نشد!"
           exit 1
@@ -51,8 +50,8 @@ jobs:
       run: |
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
-        # استفاده از -f برای عبور از .gitignore در صورتی که فایل‌ها قبلاً نادیده گرفته شده بودند
+        # استفاده از -f برای عبور از .gitignore در صورتی که فایل‌ها نادیده گرفته شده بودند
         git add -f data/trading_bot.db backtest_summary.txt
-        # اگر تغییری وجود داشت کامیت کن، در غیر این صورت ادامه بده
+        # کامیت تغییرات (اگر تغییری نبود، عملیات متوقف نمی‌شود)
         git commit -m "🧠 AI Update: DB & Report Refined" || echo "No changes to commit"
         git push
