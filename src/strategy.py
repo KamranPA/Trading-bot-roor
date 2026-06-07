@@ -2,18 +2,23 @@
 # FILE PATH: /src/strategy.py
 # ---------------------------------------------------------
 import config
-from src import database, strategy_utils # فرض بر این است که توابع swing در utils هستند
+from src import database, strategy_utils
 
 def generate_signal(df, pair):
+    # بررسی کفایت داده‌ها برای محاسبه اندیکاتورها و سویینگ‌ها
     if df is None or len(df) < 500:
+        return None
+
+    # بررسی وجود ستون‌های حیاتی برای جلوگیری از خطای ساختاری
+    if 'ATR' not in df.columns or 'Close' not in df.columns:
         return None
 
     idx = len(df) - 1
     candle = df.iloc[idx]
     symbol = pair.split('/')[0]
     
-    # ۱. فیلتر مدیریت ریسک
-    if get_open_positions_count() >= config.MAX_OPEN_POSITIONS:
+    # ۱. فیلتر مدیریت ریسک (اصلاح خطای عدم تعریف تابع)
+    if database.get_open_positions_count() >= config.MAX_OPEN_POSITIONS:
         database.log_scan(symbol, "No Signal (Max Positions)")
         return None
 
@@ -25,6 +30,10 @@ def generate_signal(df, pair):
     # ۳. شناسایی سطوح Swing (اصلاحی)
     last_swing_high = strategy_utils.find_last_swing(df, 'high', config.SWING_WINDOW)
     last_swing_low = strategy_utils.find_last_swing(df, 'low', config.SWING_WINDOW)
+
+    # لایه محافظتی: اگر سطوح سویینگ به هر دلیلی یافت نشدند، از ایجاد موقعیت صرف‌نظر کن
+    if last_swing_high is None or last_swing_low is None:
+        return None
 
     # ۴. آماده‌سازی ویژگی‌های هوش مصنوعی (۱۰ فاکتور دقیق)
     features = {
@@ -43,24 +52,35 @@ def generate_signal(df, pair):
     # ۵. مدیریت سرمایه و ورود
     risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0)
     sl_dist = 1.5 * float(candle['ATR'])
-    sl_percent = (sl_dist / float(candle['Close'])) * 100
-    position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL)
+    
+    # لایه محافظتی برای جلوگیری از تقسیم بر صفر در صورتی که قیمت صفر باشد
+    close_price = float(candle['Close'])
+    if close_price <= 0:
+        return None
+        
+    sl_percent = (sl_dist / close_price) * 100
+    
+    if sl_percent > 0:
+        position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL)
+    else:
+        position_size = 0
 
-    if candle['Close'] > last_swing_high:
+    # ۶. بررسی شکست سطوح (Breakout) و تولید سیگنال
+    if close_price > last_swing_high:
         return {
-            'pair': pair, 'direction': 'LONG', 'entry_price': round(float(candle['Close']), 4),
-            'stop_loss': round(float(candle['Close']) - sl_dist, 4), 
-            'tp1': round(float(candle['Close']) + sl_dist, 4),
-            'tp2': round(float(candle['Close']) + (sl_dist * 2), 4),
+            'pair': pair, 'direction': 'LONG', 'entry_price': round(close_price, 4),
+            'stop_loss': round(close_price - sl_dist, 4), 
+            'tp1': round(close_price + sl_dist, 4),
+            'tp2': round(close_price + (sl_dist * 2), 4),
             'position_size': round(position_size, 2), **features
         }
     
-    elif candle['Close'] < last_swing_low:
+    elif close_price < last_swing_low:
         return {
-            'pair': pair, 'direction': 'SHORT', 'entry_price': round(float(candle['Close']), 4),
-            'stop_loss': round(float(candle['Close']) + sl_dist, 4), 
-            'tp1': round(float(candle['Close']) - sl_dist, 4),
-            'tp2': round(float(candle['Close']) - (sl_dist * 2), 4),
+            'pair': pair, 'direction': 'SHORT', 'entry_price': round(close_price, 4),
+            'stop_loss': round(close_price + sl_dist, 4), 
+            'tp1': round(close_price - sl_dist, 4),
+            'tp2': round(close_price - (sl_dist * 2), 4),
             'position_size': round(position_size, 2), **features
         }
 
