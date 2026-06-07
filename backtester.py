@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: /backtester.py (نسخه اصلاح‌شده و هماهنگ با جدول signals)
+# FILE PATH: /backtester.py (نسخه اصلاحی هماهنگ‌سازی مسیر دیتابیس)
 # ---------------------------------------------------------
 import pandas as pd
 import joblib
@@ -11,27 +11,31 @@ import config
 from src import indicators, database
 
 def run_backtest():
-    # ۱. پاکسازی دیتابیس قدیمی بکتست برای جلوگیری از تداخل داده‌ها
-    if os.path.exists('data/trading_bot.db'):
+    # ⚡ اصلاح کلیدی: مطمئن می‌شویم پوشه data وجود دارد تا دیتابیس در مسیر درست ساخته شود
+    os.makedirs('data', exist_ok=True)
+    
+    db_path = database.DB_NAME # خواندن مسیر دقیق از سورس پروژه (data/trading_bot.db)
+    
+    # پاکسازی دیتابیس قدیمی بکتست برای جلوگیری از تداخل داده‌ها
+    if os.path.exists(db_path):
         try:
-            os.remove('data/trading_bot.db')
+            os.remove(db_path)
         except Exception:
             pass
         
-    database.init_db() # ایجاد جدول‌های تمیز بر اساس ساختار اصلی پروژه
+    database.init_db() # ایجاد جدول‌های تمیز با ساختار اصلی پروژه signals
     
     model_path = 'src/models/trading_filter_model.pkl'
     model = joblib.load(model_path) if os.path.exists(model_path) else None
     symbols = config.WATCHLIST
     
-    # لیست ۱۰ فاکتور هوش مصنوعی طبق استاندارد v7.1 پروژه شما
     features_list = [
         'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 
         'feat_trend_line', 'feat_ema_deviation', 'feat_rsi_momentum', 
         'feat_body_ratio', 'feat_high_volume_session', 'feat_vol_confirm'
     ]
     
-    print("⏳ در حال اجرای بکتست و استخراج الگوها برای دیتابیس...")
+    print(f"⏳ در حال اجرای بکتست و تزریق الگوها به دیتابیس در مسیر: {db_path}")
     
     total_trades_all = 0
     total_wins_all = 0
@@ -75,7 +79,6 @@ def run_backtest():
                 closed_index = i + 1
                 is_win = 0
                 
-                # شبیه‌سازی گام‌های آینده معامله
                 for j in range(i + 1, len(df)):
                     closed_index = j
                     high = df.loc[j, 'High']
@@ -97,17 +100,14 @@ def run_backtest():
                 if is_win == 1:
                     wins += 1
                 
-                # ⚡ ساخت دیکشنری فاکتورها جهت ذخیره‌سازی استاندارد در دیتابیس
-                # با توجه به ساختار داینامیک یا ستونی، مقادیر فاکتورها را استخراج می‌کنیم
                 feats_dict = {f: float(candle[f]) for f in features_list}
                 
-                # 📥 ثبت مستقیم در جدول signals (اصلاح نام جدول از positions به signals)
-                # فاکتورها به صورت ستون‌های مجزا طبق دیتابیس v7.1 شما پر می‌شوند
-                conn = sqlite3.connect(database.DB_NAME)
+                # 📥 اتصال مستقیم به فایل اصلی دیتابیس پروژه
+                conn = sqlite3.connect(db_path)
                 cursor = conn.cursor()
                 
-                pnl_val = 1.5 if is_win == 1 else -1.0 # درصد سود فرضی براساس ریسک به ریوارد
-                timestamp_now = pd.to_datetime(candle['timestamp']).strftime("%Y-%m-%d %H:%M:%S") if 'timestamp' in df.columns else "2026-01-01 00:00:00"
+                pnl_val = 1.5 if is_win == 1 else -1.0
+                timestamp_now = pd.to_datetime(candle['Timestamp']).strftime("%Y-%m-%d %H:%M:%S") if 'Timestamp' in df.columns else "2026-01-01 00:00:00"
                 
                 cursor.execute("""
                     INSERT INTO signals (
@@ -143,7 +143,7 @@ def run_backtest():
     with open('backtest_summary.txt', 'w') as f: 
         f.write(report)
         
-    print("✅ تمام معاملات بکتست درون جدول اصلی دیتابیس (signals) تزریق شدند!")
+    print(f"✅ تعداد {total_trades_all} معامله با موفقیت در دیتابیس استاندارد ذخیره شدند.")
 
 if __name__ == "__main__": 
     run_backtest()
