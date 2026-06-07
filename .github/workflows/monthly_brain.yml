@@ -27,20 +27,17 @@ jobs:
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-    # ⚡ ۱. دانلود هوشمند دیتا (با تضمین ساخت پوشه‌ها)
+    # ۱. تولید و دانلود دیتای تاریخی (کارخانه‌ی تولید دیتا)
     - name: Fetch Historical Market Data
       run: |
         mkdir -p data/historical
         if [ -f "src/fetcher.py" ]; then python src/fetcher.py; elif [ -f "fetcher.py" ]; then python fetcher.py; fi
 
-    # ۲. اجرای بکتست و تضمین خروجی گزارش
+    # ۲. اجرای بکتست و تولید دیتابیس و گزارش
     - name: Run Backtest Engine
-      run: |
-        python backtester.py
-        # بررسی اینکه آیا فایل خروجی تولید شده است یا خیر
-        if [ ! -f "backtest_summary.txt" ]; then echo "⚠️ هشدار: گزارش بکتست تولید نشد!"; fi
+      run: python backtester.py
 
-    # ۳. تغذیه هوش مصنوعی
+    # ۳. بازآموزی مدل هوش مصنوعی
     - name: Run AI Engine (Model Retraining)
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -55,7 +52,7 @@ jobs:
       run: |
         python -c "from src import telegram_bot; telegram_bot.send_performance_report()"
 
-    # ۵. آپلود گزارش و مدل به عنوان Artifact (برای دسترسی دستی شما)
+    # ۵. آپلود گزارش و مدل در بخش Artifacts برای بررسی دستی
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -64,7 +61,7 @@ jobs:
           backtest_summary.txt
           src/models/trading_filter_model.pkl
 
-    # ۶. کامیت و پوش نهایی تغییرات
+    # ۶. کامیت و پوش نهایی تغییرات (برای ذخیره دیتابیس و مدل در ریپازیتوری)
     - name: Commit and Push Results
       run: |
         git config --local user.email "actions@github.com"
