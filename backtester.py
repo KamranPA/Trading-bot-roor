@@ -6,7 +6,6 @@ from pathlib import Path
 from src import indicators
 
 def run_backtest():
-    # استفاده از Pathlib برای مدیریت مسیرها
     base_dir = Path.cwd()
     data_dir = base_dir / "data"
     history_dir = data_dir / "historical"
@@ -14,29 +13,19 @@ def run_backtest():
     
     data_dir.mkdir(exist_ok=True)
     
-    # اتصال به دیتابیس
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
+    cursor.execute("DROP TABLE IF EXISTS signals")
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS signals (
+        CREATE TABLE signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, symbol TEXT, direction TEXT, 
-            entry_price REAL, stop_loss REAL, status TEXT, pnl_percent REAL, 
-            feat_adx REAL, feat_trend_line REAL, feat_vol_confirm REAL
+            entry_price REAL, pnl_percent REAL, feat_adx REAL
         )
     """)
-    cursor.execute("DELETE FROM signals;") 
-    conn.commit()
-
-    # بررسی وجود پوشه دیتا
-    if not history_dir.exists():
-        print(f"❌ خطا: پوشه {history_dir} یافت نشد.")
-        return
-
+    
     csv_files = list(history_dir.glob("*_history.csv"))
     all_trades = [] 
     summary_data = {}
-
-    print(f"🚀 شروع بکتست روی {len(csv_files)} فایل...")
 
     for file_path in csv_files:
         symbol = file_path.name.replace('_history.csv', '')
@@ -45,61 +34,47 @@ def run_backtest():
             df.columns = [c.capitalize() for c in df.columns]
             df = indicators.calculate_indicators(df)
             
-            # فیلتر کردن و محاسبه معاملات
-            trades_count = 0
-            wins_count = 0
+            # بهینه‌سازی سرعت: استفاده از فیلتر برداری به جای حلقه FOR
+            # تعیین شرایط ورود
+            mask = (df['Feat_adx'] > 25) & (df['Feat_vol_confirm'] == 1.0)
+            trades_df = df[mask].copy()
             
-            for i in range(200, len(df) - 5):
-                candle = df.iloc[i]
-                adx = float(candle.get('Feat_adx', 0))
-                vol_confirm = float(candle.get('Feat_vol_confirm', 0))
-                trend = float(candle.get('Feat_trend_line', 0))
-
-                if adx > 25 and vol_confirm == 1.0:
-                    direction = "LONG" if trend == 1.0 else "SHORT"
-                    entry = float(candle['Close'])
-                    future_price = float(df.iloc[i+5]['Close'])
-                    pnl = ((future_price - entry) / entry) * 100 * (1 if direction == "LONG" else -1)
-                    
-                    all_trades.append((candle['Timestamp'], symbol, direction, entry, entry * 0.98, 'CLOSED', pnl, adx, trend, vol_confirm))
-                    
-                    trades_count += 1
-                    if pnl > 0: wins_count += 1
-            
-            summary_data[symbol] = (trades_count, wins_count)
+            if not trades_df.empty:
+                # محاسبه PnL به صورت برداری (سریع‌تر)
+                trades_df['Direction'] = trades_df['Feat_trend_line'].apply(lambda x: 'LONG' if x == 1.0 else 'SHORT')
+                
+                # برای محاسبه PnL قیمت ۵ کندل بعد را می‌خواهیم (استفاده از shift)
+                future_close = df['Close'].shift(-5)
+                trades_df['Pnl'] = ((future_close - trades_df['Close']) / trades_df['Close']) * 100
+                trades_df['Pnl'] = trades_df.apply(lambda x: x['Pnl'] if x['Direction'] == 'LONG' else -x['Pnl'], axis=1)
+                
+                # ذخیره معاملات
+                for _, row in trades_df.iterrows():
+                    all_trades.append((row['Timestamp'], symbol, row['Direction'], row['Close'], row['Pnl'], row['Feat_adx']))
+                
+                summary_data[symbol] = (len(trades_df), len(trades_df[trades_df['Pnl'] > 0]))
+            else:
+                summary_data[symbol] = (0, 0)
             
         except Exception as e:
             print(f"⚠️ خطا در پردازش {symbol}: {e}")
 
-    # درج دسته‌ای در دیتابیس
+    # درج سریع در دیتابیس
     if all_trades:
-        cursor.executemany("""
-            INSERT INTO signals (timestamp, symbol, direction, entry_price, stop_loss, status, pnl_percent, feat_adx, feat_trend_line, feat_vol_confirm)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, all_trades)
+        cursor.executemany("INSERT INTO signals (timestamp, symbol, direction, entry_price, pnl_percent, feat_adx) VALUES (?, ?, ?, ?, ?, ?)", all_trades)
     
     conn.commit()
     conn.close()
     
-    # کپی دیتابیس برای دسترسی‌های بعدی
-    shutil.copyfile(db_path, base_dir / "trading_bot.db")
-    
-    # تولید گزارش متنی استاندارد
+    # تولید گزارش متنی
     with open('backtest_summary.txt', 'w', encoding='utf-8') as f:
         for s, (trades, wins) in summary_data.items():
-            if trades == 0:
-                f.write(f"{s} | داده‌ها موجود است اما معامله‌ای یافت نشد\n")
-            else:
-                win_rate = (wins / trades) * 100
-                f.write(f"{s} | معاملات: {trades} | نرخ برد: {win_rate:.1f}%\n")
+            win_rate = (wins / trades * 100) if trades > 0 else 0
+            f.write(f"{s} | معاملات: {trades} | نرخ برد: {win_rate:.1f}%\n")
         
-        f.write("-" * 35 + "\n")
         total_trades = len(all_trades)
-        total_wins = sum(1 for t in all_trades if t[6] > 0)
-        total_win_rate = (total_wins / total_trades) * 100 if total_trades > 0 else 0
-        f.write(f"📊 خلاصه کل سبد:\nمجموع معاملات: {total_trades}\nنرخ برد میانگین: {total_win_rate:.1f}%\n")
-    
-    print(f"✅ بکتست پایان یافت. مجموع معاملات: {len(all_trades)}")
+        total_wins = sum(1 for t in all_trades if t[4] > 0)
+        f.write(f"📊 خلاصه کل: {total_trades} معامله | نرخ برد: {(total_wins/total_trades*100 if total_trades else 0):.1f}%\n")
 
 if __name__ == "__main__": 
     run_backtest()
