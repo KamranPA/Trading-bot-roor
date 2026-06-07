@@ -7,7 +7,7 @@ import config
 
 def calculate_indicators(df):
     """📊 محاسبه ۱۰ فاکتور هوش مصنوعی برای سیستم ۱۰‌بعدی"""
-    if df is None or df.empty or len(df) < 200:
+    if df is None or df.empty or len(df) = 500:
         return df
 
     # ۱. محاسبات پایه
