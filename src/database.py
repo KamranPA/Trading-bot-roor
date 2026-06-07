@@ -5,7 +5,13 @@ import os
 import sqlite3
 from datetime import datetime
 
-# ... (کدهای اولیه BASE_DIR و DB_NAME ثابت باقی می‌ماند)
+# تعریف مسیرها و نام دیتابیس در سطح ماژول (برای در دسترس بودن در همه توابع)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
+
+DB_NAME = os.path.join(DATA_DIR, "trading_bot.db")
 
 def init_db():
     """🛡️ ارتقای امن دیتابیس به سیستم ۱۰‌بعدی"""
@@ -36,9 +42,12 @@ def init_db():
     
     if 'feat_vol_confirm' not in columns:
         cursor.execute("ALTER TABLE signals ADD COLUMN feat_vol_confirm REAL DEFAULT 0.0")
-        print("✅ ستون 'feat_vol_confirm' (فاکتور ۱۰) به صورت امن اضافه شد.")
+        print("✅ ستون 'feat_vol_confirm' به صورت امن اضافه شد.")
 
-    # ... (کدهای ساخت سایر جداول ثابت باقی می‌ماند)
+    # سایر جداول ضروری
+    cursor.execute("CREATE TABLE IF NOT EXISTS signal_targets (id INTEGER PRIMARY KEY, signal_id INTEGER, target_number INTEGER, target_price REAL, status TEXT DEFAULT 'PENDING')")
+    cursor.execute("CREATE TABLE IF NOT EXISTS scan_logs (id INTEGER PRIMARY KEY, timestamp TEXT, symbol TEXT, result TEXT)")
+    
     conn.commit()
     conn.close()
 
@@ -49,7 +58,6 @@ def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, **
         cursor = conn.cursor()
         current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         
-        # استخراج فاکتورها از دیکشنری (با مقادیر پیش‌فرض)
         cols = "timestamp, symbol, direction, entry_price, stop_loss, status, " + ", ".join(features.keys())
         vals = [current_time, symbol, direction, entry_price, stop_loss, "OPEN"] + list(features.values())
         placeholders = ", ".join(["?"] * len(vals))
@@ -57,7 +65,6 @@ def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, **
         cursor.execute(f"INSERT INTO signals ({cols}) VALUES ({placeholders})", vals)
         signal_id = cursor.lastrowid
         
-        # ذخیره تارگت‌ها
         for i, tp in enumerate([tp1, tp2], 1):
             if tp:
                 cursor.execute("INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, ?, ?)", (signal_id, i, tp))
@@ -65,4 +72,4 @@ def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, **
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"❌ خطا در ثبت سیگنال ۱۰‌بعدی: {e}")
+        print(f"❌ خطا در ثبت سیگنال: {e}")
