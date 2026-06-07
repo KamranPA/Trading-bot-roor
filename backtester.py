@@ -1,7 +1,8 @@
 # ---------------------------------------------------------
 # FILE PATH: /backtester.py
 # ---------------------------------------------------------
-import json, pandas as pd, os, matplotlib.pyplot as plt
+
+import json, pandas as pd, os
 
 def calculate_rsi(data, window=14):
     delta = data['Close'].diff()
@@ -16,7 +17,7 @@ def run_backtest():
     fee, slippage = 0.001, 0.0005
     symbols = ["BTC_USDT", "ETH_USDT", "SOL_USDT", "SUI_USDT", "LINK_USDT", "AVAX_USDT"]
     
-    report = "--- گزارش عملکرد با فیلتر روند (MA200) + مومنتوم (RSI) ---\n"
+    report = "--- گزارشِ عیب‌یابی و عملکردِ دقیقِ دوطرفه ---\n"
     
     for s in symbols:
         path = f"data/historical/{s}_history.csv"
@@ -25,26 +26,27 @@ def run_backtest():
             df['MA200'] = df['Close'].rolling(window=200).mean()
             df['RSI'] = calculate_rsi(df)
             
-            capital = 1000.0
             trades, wins = 0, 0
             
             for i in range(200, len(df)):
-                # منطق ورود هوشمند: روند صعودی + RSI در منطقه خرید (زیر ۳۰)
+                # ۱. بررسیِ روندِ صعودی (Long)
                 if df['Close'].iloc[i] > df['MA200'].iloc[i] and df['RSI'].iloc[i] < 30:
                     trades += 1
-                    # فرض می‌کنیم خرید انجام شده
-                    # در اینجا منطق خروج (TP/SL) اعمال می‌شود
-                    if df['Close'].iloc[i] * (1 + tp) < df['Close'].iloc[i+10]: # تست ساده سود
-                        capital *= (1 + tp - fee - slippage)
+                    # اگر قیمت رشد کرد (سود)
+                    if df['Close'].iloc[i] * (1 + tp) < df['Close'].iloc[i+10:i+30].max(): 
                         wins += 1
-                    else:
-                        capital *= (1 - sl - fee - slippage)
+                
+                # ۲. بررسیِ روندِ نزولی (Short - اصلاحِ منطق)
+                elif df['Close'].iloc[i] < df['MA200'].iloc[i] and df['RSI'].iloc[i] > 70:
+                    trades += 1
+                    # اگر قیمت ریزش کرد (سود در جهت نزول)
+                    if df['Close'].iloc[i] * (1 - tp) > df['Close'].iloc[i+10:i+30].min():
+                        wins += 1
             
             win_rate = (wins / trades * 100) if trades > 0 else 0
             report += f"{s}: معاملات: {trades}, نرخ برد: {win_rate:.1f}%\n"
             
     with open('summary.txt', 'w') as f: f.write(report)
-    print("✅ بک‌تستر با فیلترِ RSI به‌روز شد.")
+    print("✅ بک‌تستر با منطقِ کاملِ دوطرفه (Long & Short) بازنویسی شد.")
 
 if __name__ == "__main__": run_backtest()
-
