@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: /backtester.py (تغذیه مستقیم دیتابیس برای آموزش هوش مصنوعی)
+# FILE PATH: /backtester.py (نسخه اصلاح‌شده و هماهنگ با جدول signals)
 # ---------------------------------------------------------
 import pandas as pd
 import joblib
@@ -12,17 +12,17 @@ from src import indicators, database
 
 def run_backtest():
     # ۱. پاکسازی دیتابیس قدیمی بکتست برای جلوگیری از تداخل داده‌ها
-    if os.path.exists('trading_bot.db'):
-        os.remove('trading_bot.db')
+    if os.path.exists('data/trading_bot.db'):
+        try:
+            os.remove('data/trading_bot.db')
+        except Exception:
+            pass
         
     database.init_db() # ایجاد جدول‌های تمیز بر اساس ساختار اصلی پروژه
     
     model_path = 'src/models/trading_filter_model.pkl'
     model = joblib.load(model_path) if os.path.exists(model_path) else None
     symbols = config.WATCHLIST
-    
-    TOTAL_CAPITAL = 1000.0
-    RISK_PER_TRADE = 0.001 
     
     # لیست ۱۰ فاکتور هوش مصنوعی طبق استاندارد v7.1 پروژه شما
     features_list = [
@@ -32,6 +32,10 @@ def run_backtest():
     ]
     
     print("⏳ در حال اجرای بکتست و استخراج الگوها برای دیتابیس...")
+    
+    total_trades_all = 0
+    total_wins_all = 0
+    report = "--- گزارش بکتست هوشمند ۱۰‌بعدی (v7.1) ---\n"
     
     for s in symbols:
         safe_name = s.replace('/', '_')
@@ -45,8 +49,9 @@ def run_backtest():
         df['swing_high_level'] = df['local_high'].ffill().bfill()
         df['swing_low_level'] = df['local_low'].ffill().bfill()
         
+        trades, wins = 0, 0
         i = 200
-        while i < len(df) - 1:
+        while i < len(df) - 5:
             candle = df.iloc[i]
             adx_ok = float(candle['feat_adx']) >= config.ADX_THRESHOLD
             vol_ok = float(candle['feat_vol_confirm']) == 1.0 or float(candle['Volume']) > float(candle['Volume_MA'])
@@ -88,21 +93,37 @@ def run_backtest():
                             break
                         if low <= tp2: is_win = 1; break
                 
-                # ⚡ ساخت دیکشنری فاکتورها جهت ذخیره‌سازی استاندارد JSON در دیتابیس
-                feats_dict = {f: float(candle[f]) for f in features_list}
-                feats_json = json.dumps(feats_dict)
+                trades += 1
+                if is_win == 1:
+                    wins += 1
                 
-                # 📥 ذخیره مستقیم در جدول با اتصال مستقیم SQLite برای پایداری در بکتست
-                conn = sqlite3.connect('trading_bot.db')
+                # ⚡ ساخت دیکشنری فاکتورها جهت ذخیره‌سازی استاندارد در دیتابیس
+                # با توجه به ساختار داینامیک یا ستونی، مقادیر فاکتورها را استخراج می‌کنیم
+                feats_dict = {f: float(candle[f]) for f in features_list}
+                
+                # 📥 ثبت مستقیم در جدول signals (اصلاح نام جدول از positions به signals)
+                # فاکتورها به صورت ستون‌های مجزا طبق دیتابیس v7.1 شما پر می‌شوند
+                conn = sqlite3.connect(database.DB_NAME)
                 cursor = conn.cursor()
                 
-                # ثبت پوزیشن با وضعیت CLOSED و نتیجه مالی (سود = ۱، ضرر = ۰)
-                pnl_val = 0.05 if is_win == 1 else -0.02
+                pnl_val = 1.5 if is_win == 1 else -1.0 # درصد سود فرضی براساس ریسک به ریوارد
+                timestamp_now = pd.to_datetime(candle['timestamp']).strftime("%Y-%m-%d %H:%M:%S") if 'timestamp' in df.columns else "2026-01-01 00:00:00"
                 
                 cursor.execute("""
-                    INSERT INTO positions (pair, direction, entry_price, stop_loss, status, pnl, features)
-                    VALUES (?, ?, ?, ?, 'CLOSED', ?, ?)
-                """, (s, direction, close_price, sl, pnl_val, feats_json))
+                    INSERT INTO signals (
+                        timestamp, symbol, direction, entry_price, stop_loss, status, pnl_percent,
+                        feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, 
+                        feat_trend_line, feat_ema_deviation, feat_rsi_momentum, 
+                        feat_body_ratio, feat_high_volume_session, feat_vol_confirm
+                    )
+                    VALUES (?, ?, ?, ?, ?, 'CLOSED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    timestamp_now, s.split('/')[0], direction, close_price, sl, pnl_val,
+                    feats_dict['feat_adx'], feats_dict['feat_vol_ratio'], feats_dict['feat_atr_percent'],
+                    feats_dict['feat_rsi'], feats_dict['feat_trend_line'], feats_dict['feat_ema_deviation'],
+                    feats_dict['feat_rsi_momentum'], feats_dict['feat_body_ratio'], feats_dict['feat_high_volume_session'],
+                    feats_dict['feat_vol_confirm']
+                ))
                 
                 conn.commit()
                 conn.close()
@@ -111,7 +132,18 @@ def run_backtest():
                 continue
             i += 1
             
-    print("✅ تمام معاملات بکتست درون دیتابیس (trading_bot.db) با موفقیت تزریق شدند!")
+        rate = (wins / trades * 100) if trades > 0 else 0
+        report += f"{s}: تعداد معاملات: {trades}, نرخ برد: {rate:.1f}%\n"
+        total_trades_all += trades
+        total_wins_all += wins
+        
+    final_rate = (total_wins_all / total_trades_all * 100) if total_trades_all > 0 else 0
+    report += f"\nخلاصه کل سبد:\nمجموع کل معاملات: {total_trades_all}\nنرخ برد میانگین: {final_rate:.1f}%\n"
+    
+    with open('backtest_summary.txt', 'w') as f: 
+        f.write(report)
+        
+    print("✅ تمام معاملات بکتست درون جدول اصلی دیتابیس (signals) تزریق شدند!")
 
 if __name__ == "__main__": 
     run_backtest()
