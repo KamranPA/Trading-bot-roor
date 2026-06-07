@@ -1,0 +1,66 @@
+name: Monthly AI 
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  optimize-and-report:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Repository Code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up Python Environment
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Dependencies
+      run: |
+        pip install pandas requests
+
+    # ۱. تولید دیتا با تضمین خروجی (خطاها را فورا گزارش می‌دهد)
+    - name: Fetch Historical Market Data
+      run: |
+        set -e
+        echo "Creating data directory..."
+        mkdir -p data/historical
+        echo "Running fetcher script..."
+        python src/fetcher.py
+        echo "Verifying downloaded files:"
+        ls -la data/historical
+        # اگر پوشه بعد از اسکریپت هنوز خالی بود، توقف کن
+        if [ -z "$(ls -A data/historical)" ]; then
+           echo "❌ Error: No files were generated in data/historical"
+           exit 1
+        fi
+
+    # ۲. بکتست (فقط در صورتی که دیتایی موجود باشد اجرا می‌شود)
+    - name: Run Backtest Engine
+      run: python backtester.py
+
+    # ۳. بازآموزی مدل
+    - name: Run AI Engine
+      run: python src/train_model.py
+
+    # ۴. آپلود گزارش برای بررسی دستی شما
+    - name: Upload Report Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: backtest-report
+        path: backtest_summary.txt
+
+    # ۵. نهایی‌سازی و ذخیره دیتابیس
+    - name: Commit and Push
+      run: |
+        git config --local user.email "actions@github.com"
+        git config --local user.name "GitHub Actions"
+        git add data/trading_bot.db
+        git diff --quiet && git diff --staged --quiet || (git commit -m "🧠 AI Update: DB & Model Refined" && git push)
