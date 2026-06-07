@@ -1,41 +1,50 @@
-# src/coinex_client.py
-# ماژول رسمی اتصال به API صرافی کوئینکس و دریافت کندل‌ها
+# ---------------------------------------------------------
+# FILE PATH: /src/coinex_client.py
+# ---------------------------------------------------------
 
 import ccxt
 import pandas as pd
-import config  # فراخوانی تنظیمات مرکزی برای حفظ ساختار ماژولار
+import time
+import config
 
 def get_coinex_candles(pair):
     """
-    دریافت ۱۰۰ کندل اخیر ۴ ساعته برای یک جفت‌ارز مشخص از صرافی کوئینکس
+    دریافت کندل‌ها با مدیریت نرخ درخواست برای جلوگیری از بلاک شدن در واچ‌لیست ۱۵ تایی
     """
     try:
-        # اتصال به صرافی کوئینکس به صورت عمومی (بدون نیاز به کلید خصوصی)
+        # تنظیمات بهینه برای ارتباط پایدار با کوین‌اکس
         exchange = ccxt.coinex({
-            'timeout': 15000,
-            'enableRateLimit': True, # احترام به محدودیت تعداد درخواست صرافی برای جلوگیری از بلاک شدن
+            'timeout': 20000,
+            'enableRateLimit': True,
+            'options': {
+                'defaultType': 'spot',
+            }
         })
         
-        # دریافت داده‌های OHLCV (Open, High, Low, Close, Volume)
+        # وقفه کوچک برای جلوگیری از فشار همزمان روی API صرافی (بسیار مهم برای ۱۵ ارز)
+        time.sleep(0.6) 
+        
         ohlcv = exchange.fetch_ohlcv(
             symbol=pair, 
             timeframe=config.TIMEFRAME, 
             limit=config.CANDLES_LIMIT
         )
         
-        if not ohlcv:
-            print(f"⚠️ هیچ دیتایی برای {pair} دریافت نشد.")
+        if not ohlcv or len(ohlcv) < config.CANDLES_LIMIT:
+            print(f"⚠️ داده‌های ناقص برای {pair} دریافت شد.")
             return None
             
-        # تبدیل لیست خام به یک جدول منظم (Dataframe)
         columns = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume']
         df = pd.DataFrame(ohlcv, columns=columns)
         
-        # تبدیل زمان میلی‌ثانیه صرافی به تاریخ و ساعت استاندارد
+        # تبدیل تمامی ستون‌های عددی به float برای محاسبات ریاضی دقیق در سیستم ۱۰‌بعدی
+        numeric_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+        df[numeric_cols] = df[numeric_cols].astype(float)
+        
         df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
         
         return df
 
     except Exception as e:
-        print(f"❌ خطا در ارتباط با API کوئینکس برای ارز {pair}: {e}")
+        print(f"❌ خطای ارتباط با API کوئینکس برای ارز {pair}: {e}")
         return None
