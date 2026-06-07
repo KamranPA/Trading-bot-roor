@@ -1,19 +1,17 @@
 # ---------------------------------------------------------
 # FILE PATH: /backtester.py
 # ---------------------------------------------------------
-
 import pandas as pd
 import joblib
 import os
 import numpy as np
-from src import indicators, strategy
-import config  # وارد کردن کانفیگ اصلی برای خواندن واچ‌لیست ۱۵ تایی
+import config
+from src import indicators, strategy_utils
 
 def run_backtest():
     model_path = 'src/models/trading_filter_model.pkl'
     model = joblib.load(model_path) if os.path.exists(model_path) else None
     
-    # 🔄 اصلاح کلیدی: خواندن داینامیک ۱۵ ارز از واچ‌لیست اصلی سیستم به جای لیست دستی ۶ تایی
     symbols = config.WATCHLIST
     
     report = "--- گزارش بکتست هوشمند و واقعی ۱۰‌بعدی (v7.1) ---\n"
@@ -21,29 +19,23 @@ def run_backtest():
     report += "مبنای خروج: استراتژی واقعی صرافی (TP1, TP2, SL & Risk-Free)\n"
     report += "--------------------------------------------------\n"
     
-    # تنظیمات مدیریت سرمایه منطبق با سیستم اصلی
     TOTAL_CAPITAL = 1000.0
-    RISK_PER_TRADE = 0.001 # 0.1% ریسک روی سرمایه
+    RISK_PER_TRADE = 0.001 
     
     total_trades_all = 0
     total_wins_all = 0
     final_combined_capital = TOTAL_CAPITAL
     
     for s in symbols:
-        # تبدیل فرمت جفت ارز از BTC/USDT به BTC_USDT برای پیدا کردن فایل تاریخچه
-        file_name = f"{s.replace('/', '_')}_history.csv"
-        path = f"data/historical/{file_name}"
+        safe_name = s.replace('/', '_')
+        path = f"data/historical/{safe_name}_history.csv"
         
         if not os.path.exists(path): 
-            # لاگ هشدار در صورتی که دیتای تاریخی ارزی هنوز واکشی (Fetch) نشده باشد
-            print(f"⚠️ فایل دیتای تاریخی برای {s} در مسیر {path} یافت نشد. از این ارز صرف‌نظر شد.")
+            report += f"{s:10} | دیتای تاریخی یافت نشد (Fetch نشده)\n"
             continue
             
-        # ۱. محاسبه اندیکاتورها روی کل دیتای تاریخی
-        raw_df = pd.read_csv(path)
-        df = indicators.calculate_indicators(raw_df)
+        df = indicators.calculate_indicators(pd.read_csv(path))
         
-        # شناسایی خودکار ویژگی‌های هوش مصنوعی
         features = list(model.feature_names_in_) if model else [
             'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 
             'feat_trend_line', 'feat_ema_deviation', 'feat_rsi_momentum', 
@@ -54,100 +46,100 @@ def run_backtest():
         wins = 0
         current_capital = TOTAL_CAPITAL
         
-        # شروع بکتست از کندل ۲۰۰ برای پر شدن اندیکاتورها (مانند EMA200)
         i = 200
-        while i < len(df):
-            # ایجاد برشی از داده‌ها تا کندل فعلی (شبیه‌سازی محیط زنده ربات)
-            df_sliced = df.iloc[:i+1].copy()
+        while i < len(df) - 1:
+            candle = df.iloc[i]
             
-            # بررسی صادر شدن سیگنال توسط استراتژی اصلی (شکست سویینگ‌ها)
-            signal_data = strategy.generate_signal(df_sliced, s)
-            
-            if signal_data and signal_data.get('signal') in ['LONG', 'SHORT']:
-                direction = signal_data['signal']
-                entry_price = signal_data['entry']
-                sl = signal_data['sl']
-                tp1 = signal_data['tp1']
-                tp2 = signal_data['tp2']
+            # فیلترهای تکنیکال اولیه مطابق استراتژی اصلی
+            if float(candle['feat_adx']) < config.ADX_THRESHOLD or float(candle['feat_vol_confirm']) == 0:
+                i += 1
+                continue
                 
-                # ۲. اعتبارسنجی سیگنال توسط هوش مصنوعی فیلتر ۱۰ بعدی
+            # شبیه‌سازی دقیق یافتن سویینگ‌ها تا کندل i
+            df_sliced = df.iloc[:i+1]
+            last_swing_high = strategy_utils.find_last_swing(df_sliced, 'high', config.SWING_WINDOW)
+            last_swing_low = strategy_utils.find_last_swing(df_sliced, 'low', config.SWING_WINDOW)
+            
+            if last_swing_high is None or last_swing_low is None:
+                i += 1
+                continue
+                
+            close_price = float(candle['Close'])
+            direction = None
+            
+            # بررسی شرط شکست (Breakout)
+            if close_price > last_swing_high:
+                direction = 'LONG'
+            elif close_price < last_swing_low:
+                direction = 'SHORT'
+                
+            if direction:
+                # اعتبارسنجی با مدل هوش مصنوعی
                 if model:
                     is_approved = (model.predict(df.loc[[i], features])[0] == 1)
                 else:
-                    is_approved = (df.loc[i, 'feat_adx'] > 25) and (df.loc[i, 'feat_vol_confirm'] == 1.0)
-                
-                # اگر هوش مصنوعی تایید کرد، وارد پوزیشن واقعی می‌شویم
+                    is_approved = True # تایید خودکار در صورت عدم وجود مدل برای جمع‌آوری دیتا
+                    
                 if is_approved:
                     trades_count += 1
                     total_trades_all += 1
                     
-                    # محاسبه حجم معامله بر اساس فرمول مدیریت ریسک سیستم
+                    sl_dist = 1.5 * float(candle['ATR'])
+                    
+                    if direction == 'LONG':
+                        sl = close_price - sl_dist
+                        tp1 = close_price + sl_dist
+                        tp2 = close_price + (sl_dist * 2)
+                    else:
+                        sl = close_price + sl_dist
+                        tp1 = close_price - sl_dist
+                        tp2 = close_price - (sl_dist * 2)
+                        
                     risk_amount = current_capital * RISK_PER_TRADE
-                    risk_per_unit = abs(entry_price - sl)
+                    risk_per_unit = abs(close_price - sl)
                     position_size = risk_amount / risk_per_unit if risk_per_unit > 0 else 0
                     
                     is_risk_free = False
-                    position_closed = False
                     pnl = 0
+                    closed_index = i + 1
                     
-                    # پایش کندل به کندل بازار بعد از ورود
+                    # چرخش روی کندل‌های آینده برای شبیه‌سازی خروج
                     for j in range(i + 1, len(df)):
+                        closed_index = j
                         high = df.loc[j, 'High']
                         low = df.loc[j, 'Low']
                         
                         if direction == 'LONG':
-                            # بررسی ریسک‌فری (تاچ شدن TP1)
                             if not is_risk_free and high >= tp1:
                                 is_risk_free = True
-                                sl = entry_price # انتقال حد ضرر به نقطه ورود
+                                sl = close_price 
                                 
-                            # بررسی برخورد به حد ضرر (یا نقطه ورود در صورت ریسک‌فری بودن)
                             if low <= sl:
-                                pnl = (sl - entry_price) * position_size
-                                position_closed = True
-                                if sl > entry_price: 
-                                    wins += 1
-                                    total_wins_all += 1
+                                pnl = (sl - close_price) * position_size
+                                if sl > close_price: wins += 1; total_wins_all += 1
                                 break
-                                
-                            # بررسی برخورد به حد سود نهایی (TP2)
                             if high >= tp2:
-                                pnl = (tp2 - entry_price) * position_size
-                                wins += 1
-                                total_wins_all += 1
-                                position_closed = True
+                                pnl = (tp2 - close_price) * position_size
+                                wins += 1; total_wins_all += 1
                                 break
                                 
                         elif direction == 'SHORT':
-                            # بررسی ریسک‌فری (تاچ شدن TP1)
                             if not is_risk_free and low <= tp1:
                                 is_risk_free = True
-                                sl = entry_price
+                                sl = close_price
                                 
-                            # بررسی برخورد به حد ضرر
                             if high >= sl:
-                                pnl = (entry_price - sl) * position_size
-                                position_closed = True
-                                if sl < entry_price: 
-                                    wins += 1
-                                    total_wins_all += 1
+                                pnl = (close_price - sl) * position_size
+                                if sl < close_price: wins += 1; total_wins_all += 1
+                                break
+                            if low <= tp2:
+                                pnl = (close_price - tp2) * position_size
+                                wins += 1; total_wins_all += 1
                                 break
                                 
-                            # بررسی برخورد به حد سود نهایی (TP2)
-                            if low <= tp2:
-                                pnl = (entry_price - tp2) * position_size
-                                wins += 1
-                                total_wins_all += 1
-                                position_closed = True
-                                break
-                    
-                    # اعمال سود/زیان به سرمایه
                     current_capital += pnl
-                    
-                    # جلو بردن موتور بکتست تا زمان بسته شدن پوزیشن
-                    if position_closed:
-                        i = j
-                        continue
+                    i = closed_index # پوزیشن بسته شد، موتور بکتست جلو می‌رود
+                    continue
             i += 1
             
         win_rate = (wins / trades_count * 100) if trades_count > 0 else 0
@@ -156,7 +148,6 @@ def run_backtest():
         
         report += f"{s:10} | معاملات: {trades_count:3} | نرخ برد: {win_rate:5.1f}% | سرمایه: {current_capital:.2f}$ ({profit_percent:+.2f}%)\n"
             
-    # محاسبه آمار کل سبد (Portfolio)
     total_win_rate = (total_wins_all / total_trades_all * 100) if total_trades_all > 0 else 0
     total_profit_percent = ((final_combined_capital - TOTAL_CAPITAL) / TOTAL_CAPITAL) * 100
     
@@ -168,9 +159,7 @@ def run_backtest():
 
     with open('backtest_summary.txt', 'w', encoding='utf-8') as f: 
         f.write(report)
-        
-    print(report)
-    print("✅ بکتست استراتژیک برای تمام ۱۵ ارز واچ‌لیست تکمیل و نتایج ذخیره شد.")
+    print("✅ بکتست با موفقیت برای تمامی ارزها اصلاح شد.")
 
 if __name__ == "__main__": 
     run_backtest()
