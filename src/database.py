@@ -18,7 +18,7 @@ def init_db():
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
         
-        # جدول اصلی سیگنال‌ها (شامل فاکتور دهم: feat_vol_confirm)
+        # جدول اصلی سیگنال‌ها
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY,
@@ -48,7 +48,7 @@ def get_open_positions_count():
     try:
         with sqlite3.connect(DB_NAME) as conn:
             return conn.execute("SELECT COUNT(*) FROM signals WHERE status = 'OPEN'").fetchone()[0]
-    except:
+    except Exception:
         return 0
 
 def get_setting(key, default_value):
@@ -57,30 +57,58 @@ def get_setting(key, default_value):
         with sqlite3.connect(DB_NAME) as conn:
             row = conn.execute("SELECT setting_value FROM bot_settings WHERE setting_key = ?", (key,)).fetchone()
             return row[0] if row else default_value
-    except:
+    except Exception:
         return default_value
 
 def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, **features):
-    """ذخیره سیگنال ۱۰‌بعدی"""
+    """ذخیره سیگنال ۱۰‌بعدی با تصحیح باگ ساختار کوئری داینامیک"""
     try:
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
-            cols = "timestamp, symbol, direction, entry_price, stop_loss, status, " + ", ".join(features.keys())
-            vals = [datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), symbol, direction, entry_price, stop_loss, "OPEN"] + list(features.values())
-            cursor.execute(f"INSERT INTO signals ({cols}) VALUES ({','.join(['?']*len(vals))})", vals)
+            
+            # اصلاحیه: ستون status و مقدار آن 'OPEN' به صورت کاملاً هماهنگ در ساختار داینامیک قرار گرفتند
+            base_cols = "timestamp, symbol, direction, entry_price, stop_loss, status"
+            vals = [
+                datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), 
+                symbol, 
+                direction, 
+                entry_price, 
+                stop_loss, 
+                "OPEN"
+            ]
+            
+            # اضافه کردن فیچرهای هوش مصنوعی به انتهای ستون‌ها و مقادیر
+            if features:
+                cols = base_cols + ", " + ", ".join(features.keys())
+                vals.extend(features.values())
+            else:
+                cols = base_cols
+                
+            # ساخت علامت‌های سوال (?) برای واکشی امن متغیرها جهت جلوگیری از SQL Injection
+            placeholders = ", ".join(["?"] * len(vals))
+            
+            query = f"INSERT INTO signals ({cols}) VALUES ({placeholders})"
+            cursor.execute(query, vals)
+            
             signal_id = cursor.lastrowid
             
+            # ثبت تارگت‌ها در جدول مجزا
             for i, tp in enumerate([tp1, tp2], 1):
                 if tp: 
-                    cursor.execute("INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, ?, ?)", (signal_id, i, tp))
+                    cursor.execute(
+                        "INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, ?, ?)", 
+                        (signal_id, i, tp)
+                    )
     except Exception as e:
         print(f"❌ خطا در ثبت سیگنال: {e}")
 
 def log_scan(symbol, result):
-    """ثبت لاگ هر اسکن چرخشی"""
+    """ثبت لاگ اسکن جفت ارزها"""
     try:
         with sqlite3.connect(DB_NAME) as conn:
-            conn.execute("INSERT INTO scan_logs (timestamp, symbol, result) VALUES (?, ?, ?)",
-                         (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), symbol, result))
+            conn.execute(
+                "INSERT INTO scan_logs (timestamp, symbol, result) VALUES (?, ?, ?)",
+                (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), symbol, result)
+            )
     except Exception as e:
-        print(f"⚠️ خطا در ثبت لاگ اسکن: {e}")
+        print(f"❌ خطا در ثبت لاگ اسکن: {e}")
