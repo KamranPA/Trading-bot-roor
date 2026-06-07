@@ -1,4 +1,3 @@
-# .github/workflows/monthly_brain.yml
 name: Monthly AI Self-Correction & Reporting
 
 on:
@@ -26,39 +25,50 @@ jobs:
     - name: Install Project Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-    # ⚡ گام طلایی و مفقوده: دانلود داده‌های تاریخی صرافی و ساخت فایل‌های CSV
-    - name: Fetch Historical Market Data (CSV Generator)
+    # ⚡ ۱. دانلود هوشمند دیتا (با تضمین ساخت پوشه‌ها)
+    - name: Fetch Historical Market Data
       run: |
-        # اگر نام اسکریپت دانلود دیتای شما چیزی غیر از fetcher.py است، نام آن را اینجا اصلاح کنید
+        mkdir -p data/historical
         if [ -f "src/fetcher.py" ]; then python src/fetcher.py; elif [ -f "fetcher.py" ]; then python fetcher.py; fi
 
-    # ۲. اجرای بکتست روی فایل‌های CSV دانلود شده در گام قبل
-    - name: Run Backtest Engine & Populate Database
-      run: python backtester.py
+    # ۲. اجرای بکتست و تضمین خروجی گزارش
+    - name: Run Backtest Engine
+      run: |
+        python backtester.py
+        # بررسی اینکه آیا فایل خروجی تولید شده است یا خیر
+        if [ ! -f "backtest_summary.txt" ]; then echo "⚠️ هشدار: گزارش بکتست تولید نشد!"; fi
 
-    # ۳. تغذیه هوش مصنوعی از دیتابیس پر شده
-    - name: Run AI Engine (Surgical Loss Analysis & Retraining)
+    # ۳. تغذیه هوش مصنوعی
+    - name: Run AI Engine (Model Retraining)
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python src/train_model.py
 
-    # ۴. ارسال کارنامه نهایی به تلگرام
-    - name: Generate & Send Telegram Performance Report
+    # ۴. ارسال کارنامه به تلگرام
+    - name: Generate & Send Telegram Report
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
         python -c "from src import telegram_bot; telegram_bot.send_performance_report()"
 
-    # ۵. کامیت و آپدیت تغییرات در گیت‌هاب
-    - name: Commit and Push Strategy, Model & Database Changes
+    # ۵. آپلود گزارش و مدل به عنوان Artifact (برای دسترسی دستی شما)
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ai-performance-report
+        path: |
+          backtest_summary.txt
+          src/models/trading_filter_model.pkl
+
+    # ۶. کامیت و پوش نهایی تغییرات
+    - name: Commit and Push Results
       run: |
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
-        mkdir -p src/models data
-        git add data/trading_bot.db config.py
+        git add data/trading_bot.db
         if [ -f "src/models/trading_filter_model.pkl" ]; then git add src/models/trading_filter_model.pkl; fi
-        git diff --quiet && git diff --staged --quiet || (git commit -m "🧠 هوش مصنوعی: فیلترها و مدل با موفقیت آپدیت شدند [Skip CI]" && git push)
+        git diff --quiet && git diff --staged --quiet || (git commit -m "🧠 AI Update: Model & DB Refined [Skip CI]" && git push)
