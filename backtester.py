@@ -2,51 +2,61 @@
 # FILE PATH: /backtester.py
 # ---------------------------------------------------------
 
-import json, pandas as pd, os
-
-def calculate_rsi(data, window=14):
-    delta = data['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
+import pandas as pd
+import numpy as np
+import joblib
+import os
+import json
+from src import indicators
 
 def run_backtest():
-    with open('best_params.json', 'r') as f: params = json.load(f)
-    tp, sl = params['tp'], params['sl']
-    fee, slippage = 0.001, 0.0005
-    symbols = ["BTC_USDT", "ETH_USDT", "SOL_USDT", "SUI_USDT", "LINK_USDT", "AVAX_USDT"]
+    # ۱. بارگذاری مدل هوش مصنوعی
+    model_path = 'src/models/trading_filter_model.pkl'
+    if not os.path.exists(model_path):
+        print("❌ مدل هوش مصنوعی یافت نشد. ابتدا باید آموزش داده شود.")
+        return
+    model = joblib.load(model_path)
     
-    report = "--- گزارشِ عیب‌یابی و عملکردِ دقیقِ دوطرفه ---\n"
+    # ۲. تنظیمات اولیه
+    symbols = ["BTC_USDT", "ETH_USDT", "SOL_USDT", "SUI_USDT", "LINK_USDT", "AVAX_USDT"]
+    report = "--- گزارش عملکرد هوشمند با فیلتر هوش مصنوعی ---\n"
     
     for s in symbols:
-        path = f"data/historical/{s}_history.csv"
-        if os.path.exists(path):
-            df = pd.read_csv(path)
-            df['MA200'] = df['Close'].rolling(window=200).mean()
-            df['RSI'] = calculate_rsi(df)
+        path = f"data/historical/{s.replace('/', '_')}_history.csv"
+        if not os.path.exists(path):
+            continue
             
-            trades, wins = 0, 0
-            
-            for i in range(200, len(df)):
-                # ۱. بررسیِ روندِ صعودی (Long)
-                if df['Close'].iloc[i] > df['MA200'].iloc[i] and df['RSI'].iloc[i] < 30:
-                    trades += 1
-                    # اگر قیمت رشد کرد (سود)
-                    if df['Close'].iloc[i] * (1 + tp) < df['Close'].iloc[i+10:i+30].max(): 
-                        wins += 1
+        df = pd.read_csv(path)
+        # محاسبه ۹ فاکتور هوش مصنوعی
+        df = indicators.calculate_indicators(df)
+        
+        trades, wins = 0, 0
+        # استفاده از ستون‌های ۹ گانه برای مدل
+        features = [
+            'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 'feat_trend_line',
+            'feat_ema_deviation', 'feat_rsi_momentum', 'feat_body_ratio', 'feat_high_volume_session'
+        ]
+        
+        # ۳. شروع شبیه‌سازی
+        for i in range(200, len(df) - 1):
+            input_data = df.loc[[i], features]
+            # فیلتر هوش مصنوعی
+            if model.predict(input_data)[0] == 1:
+                trades += 1
                 
-                # ۲. بررسیِ روندِ نزولی (Short - اصلاحِ منطق)
-                elif df['Close'].iloc[i] < df['MA200'].iloc[i] and df['RSI'].iloc[i] > 70:
-                    trades += 1
-                    # اگر قیمت ریزش کرد (سود در جهت نزول)
-                    if df['Close'].iloc[i] * (1 - tp) > df['Close'].iloc[i+10:i+30].min():
-                        wins += 1
+                # منطق ساده ورود: اگر پیش‌بینی مثبت بود، بررسی سودآوری در ۵ کندل بعد
+                price_entry = df.loc[i, 'Close']
+                price_future = df.loc[i+5, 'Close']
+                
+                if price_future > price_entry:
+                    wins += 1
+        
+        win_rate = (wins / trades * 100) if trades > 0 else 0
+        report += f"{s}: معاملات فیلتر شده: {trades}, نرخ برد: {win_rate:.1f}%\n"
             
-            win_rate = (wins / trades * 100) if trades > 0 else 0
-            report += f"{s}: معاملات: {trades}, نرخ برد: {win_rate:.1f}%\n"
-            
-    with open('summary.txt', 'w') as f: f.write(report)
-    print("✅ بک‌تستر با منطقِ کاملِ دوطرفه (Long & Short) بازنویسی شد.")
+    with open('backtest_summary.txt', 'w') as f:
+        f.write(report)
+    print("✅ بکتست هوشمند با موفقیت انجام شد. نتایج در backtest_summary.txt ذخیره شد.")
 
-if __name__ == "__main__": run_backtest()
+if __name__ == "__main__":
+    run_backtest()
