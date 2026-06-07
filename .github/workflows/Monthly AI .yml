@@ -1,33 +1,53 @@
-name: Monthly AI Self-Correction
+name: Monthly AI
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # اجازه اجرای دستی برای تست
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
     - name: Set up Python
       uses: actions/setup-python@v5
-      with: {python-version: '3.11'}
-    - name: Install
-      run: pip install pandas requests ccxt
-      
+      with:
+        python-version: '3.11'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas requests ccxt
+
     - name: Fetch Data
       run: |
+        echo "Creating data directory..."
+        mkdir -p data/historical
+        echo "Running fetcher.py..."
         python fetcher.py
-        # بررسی اینکه آیا فایل‌ها ساخته شدند
+        
+        # بررسی حیاتی: آیا فایل‌ها ساخته شدند؟
+        echo "Checking if files exist..."
         ls -la data/historical
-        if [ -z "$(ls -A data/historical)" ]; then echo "❌ دیتا دانلود نشد"; exit 1; fi
+        if [ -z "$(ls -A data/historical)" ]; then
+          echo "❌ خطا: پوشه دیتا خالی است!"
+          exit 1
+        fi
 
     - name: Backtest
-      run: python backtester.py
+      run: |
+        python backtester.py
+        # بررسی اینکه گزارش تولید شده باشد
+        if [ ! -f "backtest_summary.txt" ]; then
+          echo "❌ خطا: گزارش بکتست تولید نشد!"
+          exit 1
+        fi
 
-    - name: Commit
+    - name: Commit Results
       run: |
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
-        git add data/trading_bot.db
-        git commit -m "Update" || echo "No changes"
+        git add data/trading_bot.db backtest_summary.txt
+        git commit -m "Update DB and Report [Skip CI]" || echo "No changes to commit"
         git push
