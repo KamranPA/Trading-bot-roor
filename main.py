@@ -1,5 +1,5 @@
 # main.py
-# نسخه کاملاً یکپارچه، جامع و بدون نقص v7.1 (پشتیبانی کامل از ارتقای ۱۰‌بعدی هوش مصنوعی و دیتای ۵۰۰ کندلی)
+# نسخه کاملاً یکپارچه، جامع و بدون نقص v7.1 (پشتیبانی کامل از ارتقای ۱۰‌بعدی دیتابیس و هوش مصنوعی)
 
 import os
 import sys
@@ -28,7 +28,7 @@ from src import train_model
 MODEL_PATH = os.path.join(CURRENT_DIR, "src", "models", "trading_filter_model.pkl")
 
 def check_ai_permission(features_dict):
-    """🧠 دروازه‌بان هوش مصنوعی ۳۶۰ درجه برای فیلتر شکست‌های فیک بر پایه ساختار ۱۰‌بعدی"""
+    """🧠 دروازه‌بان هوش مصنوعی ۳۶۰ درجه برای فیلتر شکست‌های فیک"""
     if not os.path.exists(MODEL_PATH):
         print("ℹ️ مدل هوش مصنوعی هنوز آموزش ندیده است؛ تایید خودکار سیگنال.")
         return True, 1.0
@@ -36,7 +36,7 @@ def check_ai_permission(features_dict):
     try:
         model = joblib.load(MODEL_PATH)
         
-        # 🛡️ لایه سازگاری عقب‌رو (Backward Compatibility): 
+        # 🛡️ لایه سازگاری عقب‌رو (Backward Compatibility)
         if hasattr(model, 'n_features_in_') and model.n_features_in_ == 5:
             input_data = pd.DataFrame([{
                 'feat_adx': features_dict['feat_adx'],
@@ -45,7 +45,8 @@ def check_ai_permission(features_dict):
                 'feat_rsi': features_dict['feat_rsi'],
                 'feat_trend_line': features_dict['feat_trend_line']
             }])
-        elif hasattr(model, 'n_features_in_') and model.n_features_in_ == 9:
+        else:
+            # اگر مدل جدید ۹ فاکتوره آموزش دیده باشد، تمام فاکتورها ارسال می‌شوند
             input_data = pd.DataFrame([{
                 'feat_adx': features_dict['feat_adx'],
                 'feat_vol_ratio': features_dict['feat_vol_ratio'],
@@ -57,30 +58,16 @@ def check_ai_permission(features_dict):
                 'feat_body_ratio': features_dict['feat_body_ratio'],
                 'feat_high_volume_session': features_dict['feat_high_volume_session']
             }])
-        else:
-            # 🚀 اگر مدل جدید برای سیستم ۱۰‌بعدی آموزش دیده باشد
-            input_data = pd.DataFrame([{
-                'feat_adx': features_dict['feat_adx'],
-                'feat_vol_ratio': features_dict['feat_vol_ratio'],
-                'feat_atr_percent': features_dict['feat_atr_percent'],
-                'feat_rsi': features_dict['feat_rsi'],
-                'feat_trend_line': features_dict['feat_trend_line'],
-                'feat_ema_deviation': features_dict['feat_ema_deviation'],
-                'feat_rsi_momentum': features_dict['feat_rsi_momentum'],
-                'feat_body_ratio': features_dict['feat_body_ratio'],
-                'feat_high_volume_session': features_dict['feat_high_volume_session'],
-                'feat_vol_confirm': features_dict.get('feat_vol_confirm', 0.0) # هندل کردن فاکتور دهم
-            }])
         
         prediction = model.predict(input_data)[0]
         probabilities = model.predict_proba(input_data)[0]
         return (True, probabilities[1]) if prediction == 1 else (False, probabilities[1])
-    except Exception e:
+    except Exception as e:
         print(f"⚠️ خطا در ارزیابی مدل هوش مصنوعی: {e}")
         return True, 1.0
 
 def update_open_positions():
-    """🛡️ مکانیزم ریسک‌فری خودکار و مدیریت خروج پوزیشن‌های باز"""
+    """🛡️ مکانیزم ریسک‌فری خودکار و مدیریت خروج پوزیشن‌های باز با Context Manager امن"""
     db_path = database.DB_NAME
     if not os.path.exists(db_path):
         return
@@ -138,12 +125,13 @@ def update_open_positions():
                     cursor.execute("UPDATE signals SET status = 'CLOSED', closed_at = ?, pnl_percent = ? WHERE id = ?", 
                                    (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), round(pnl, 2), pos_id))
                     telegram_bot.send_telegram_message(f"🚪 **خروج پوزیشن #{symbol}**\nعلت: {reason}\nبازدهی: {pnl:.2f}%")
-            conn.commit()
+            
+            # ذخیره تغییرات (Commit) به صورت خودکار توسط بافت context manager اعمال می‌شود.
     except Exception as e:
         print(f"⚠️ خطا در بروزرسانی معاملات: {e}")
 
 def is_telegram_locked_8h(symbol, hours_limit=8):
-    """🔏 بررسی قفل ۸ ساعته تلگرام جهت جلوگیری از ارسال سیگنال‌های تکراری"""
+    """🔏 بررسی قفل ۸ ساعته بر اساس زمان آخرین سیگنال صادر شده زنده در جدول اصلی"""
     db_path = database.DB_NAME
     if not os.path.exists(db_path):
         return False
@@ -191,7 +179,7 @@ def run_bot():
         df = indicators.calculate_indicators(df)
         signal_result = strategy.generate_signal(df, pair)
         
-        # اگر استراتژی چارت ۵۰۰ کندلی سیگنال قطعی صادر کرد
+        # اگر استراتژی چارت ۴ ساعته سیگنال قطعی صادر کرد
         if signal_result and isinstance(signal_result, dict):
             
             # بررسی قفل تلگرام فقط هنگام پیدا شدن سیگنال واقعی
@@ -200,26 +188,31 @@ def run_bot():
                 database.log_scan(symbol, "Signal Found (Blocked by 8h Telegram Lock)")
                 continue
                 
-            # ارزیابی توسط سنسورهای هوش مصنوعی (ارسال کل دیکشنری سیگنال ۱۰‌بعدی)
+            # ارزیابی توسط سنسورهای هوش مصنوعی (ارسال کل دیکشنری سیگنال)
             ai_approved, win_rate = check_ai_permission(signal_result)
             
             if not ai_approved:
                 database.log_scan(symbol, f"Blocked by AI ({win_rate*100:.1f}%)")
                 continue
             
-            # ذخیره نهایی پوزیشن در دیتابیس با هر ۱۰ فاکتور کامل
+            # ذخیره نهایی پوزیشن در دیتابیس با هر ۹ فاکتور کامل
+            # اصلاحیه: حذف status="OPEN" از آرگومان‌ها به دلیل مدیریت داخلی آن در ماژول database
             database.save_signal_advanced(
-                symbol=symbol, direction=signal_result['direction'],
-                entry_price=signal_result['entry_price'], stop_loss=signal_result['stop_loss'],
-                tp1=signal_result['tp1'], tp2=signal_result['tp2'],
-                feat_adx=signal_result['feat_adx'], feat_vol_ratio=signal_result['feat_vol_ratio'],
-                feat_atr_percent=signal_result['feat_atr_percent'], feat_rsi=signal_result['feat_rsi'],
+                symbol=symbol, 
+                direction=signal_result['direction'],
+                entry_price=signal_result['entry_price'], 
+                stop_loss=signal_result['stop_loss'],
+                tp1=signal_result['tp1'], 
+                tp2=signal_result['tp2'],
+                feat_adx=signal_result['feat_adx'], 
+                feat_vol_ratio=signal_result['feat_vol_ratio'],
+                feat_atr_percent=signal_result['feat_atr_percent'], 
+                feat_rsi=signal_result['feat_rsi'],
                 feat_trend_line=signal_result['feat_trend_line'],
                 feat_ema_deviation=signal_result['feat_ema_deviation'],
                 feat_rsi_momentum=signal_result['feat_rsi_momentum'],
                 feat_body_ratio=signal_result['feat_body_ratio'],
-                feat_high_volume_session=signal_result['feat_high_volume_session'],
-                feat_vol_confirm=signal_result.get('feat_vol_confirm', 0.0) # افزودن فاکتور دهم در دیتابیس
+                feat_high_volume_session=signal_result['feat_high_volume_session']
             )
             
             # ارسال نهایی به کانال تلگرام شما
