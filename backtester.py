@@ -2,31 +2,52 @@ import pandas as pd
 import os
 import sqlite3
 import shutil
+from pathlib import Path
 from src import indicators
 
 def run_backtest():
-    # مسیر ایمن دیتابیس
-    db_path = os.path.join("data", "trading_bot.db")
-    os.makedirs("data", exist_ok=True)
+    # استفاده از Pathlib برای مدیریت مسیرها
+    base_dir = Path.cwd()
+    data_dir = base_dir / "data"
+    history_dir = data_dir / "historical"
+    db_path = data_dir / "trading_bot.db"
     
-    # اتصال و آماده‌سازی دیتابیس
+    data_dir.mkdir(exist_ok=True)
+    
+    # اتصال به دیتابیس
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE IF NOT EXISTS signals (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, symbol TEXT, direction TEXT, entry_price REAL, stop_loss REAL, status TEXT, pnl_percent REAL, feat_adx REAL, feat_vol_ratio REAL, feat_atr_percent REAL, feat_rsi REAL, feat_trend_line REAL, feat_ema_deviation REAL, feat_rsi_momentum REAL, feat_body_ratio REAL, feat_high_volume_session REAL, feat_vol_confirm REAL);")
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, symbol TEXT, direction TEXT, 
+            entry_price REAL, stop_loss REAL, status TEXT, pnl_percent REAL, 
+            feat_adx REAL, feat_trend_line REAL, feat_vol_confirm REAL
+        )
+    """)
     cursor.execute("DELETE FROM signals;") 
     conn.commit()
 
-    history_dir = "data/historical"
-    symbols = [f.replace('_history.csv', '') for f in os.listdir(history_dir) if f.endswith('_history.csv')]
-    
-    all_trades = [] 
-    print(f"🚀 شروع بکتست واقعی روی {len(symbols)} جفت‌ارز...")
+    # بررسی وجود پوشه دیتا
+    if not history_dir.exists():
+        print(f"❌ خطا: پوشه {history_dir} یافت نشد.")
+        return
 
-    for s in symbols:
+    csv_files = list(history_dir.glob("*_history.csv"))
+    all_trades = [] 
+    summary_data = {}
+
+    print(f"🚀 شروع بکتست روی {len(csv_files)} فایل...")
+
+    for file_path in csv_files:
+        symbol = file_path.name.replace('_history.csv', '')
         try:
-            df = pd.read_csv(os.path.join(history_dir, f"{s}_history.csv"))
+            df = pd.read_csv(file_path)
             df.columns = [c.capitalize() for c in df.columns]
             df = indicators.calculate_indicators(df)
+            
+            # فیلتر کردن و محاسبه معاملات
+            trades_count = 0
+            wins_count = 0
             
             for i in range(200, len(df) - 5):
                 candle = df.iloc[i]
@@ -40,37 +61,43 @@ def run_backtest():
                     future_price = float(df.iloc[i+5]['Close'])
                     pnl = ((future_price - entry) / entry) * 100 * (1 if direction == "LONG" else -1)
                     
-                    all_trades.append((candle['Timestamp'], s, direction, entry, entry * 0.98, 'CLOSED', pnl, adx, 0, 0, 0, trend, 0, 0, 0, 0, vol_confirm))
+                    all_trades.append((candle['Timestamp'], symbol, direction, entry, entry * 0.98, 'CLOSED', pnl, adx, trend, vol_confirm))
+                    
+                    trades_count += 1
+                    if pnl > 0: wins_count += 1
+            
+            summary_data[symbol] = (trades_count, wins_count)
+            
         except Exception as e:
-            print(f"⚠️ خطا در پردازش {s}: {e}")
+            print(f"⚠️ خطا در پردازش {symbol}: {e}")
 
+    # درج دسته‌ای در دیتابیس
     if all_trades:
         cursor.executemany("""
-            INSERT INTO signals (timestamp, symbol, direction, entry_price, stop_loss, status, pnl_percent,
-            feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, feat_ema_deviation, 
-            feat_rsi_momentum, feat_body_ratio, feat_high_volume_session, feat_vol_confirm)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, 0, 0, 0, 0, ?)
+            INSERT INTO signals (timestamp, symbol, direction, entry_price, stop_loss, status, pnl_percent, feat_adx, feat_trend_line, feat_vol_confirm)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, all_trades)
     
     conn.commit()
     conn.close()
-    shutil.copyfile(db_path, "trading_bot.db")
     
-    # تولید گزارش تفکیک‌شده شبیه عکس
+    # کپی دیتابیس برای دسترسی‌های بعدی
+    shutil.copyfile(db_path, base_dir / "trading_bot.db")
+    
+    # تولید گزارش متنی استاندارد
     with open('backtest_summary.txt', 'w', encoding='utf-8') as f:
-        for s in symbols:
-            s_trades = [t for t in all_trades if t[1] == s]
-            if not s_trades:
-                f.write(f"{s} | دی‌تای تاریخی یافت نشد\n")
-                continue
-            wins = sum(1 for t in s_trades if t[6] > 0)
-            win_rate = (wins / len(s_trades)) * 100
-            f.write(f"{s} | معاملات: {len(s_trades)} | نرخ برد: {win_rate:.1f}%\n")
+        for s, (trades, wins) in summary_data.items():
+            if trades == 0:
+                f.write(f"{s} | داده‌ها موجود است اما معامله‌ای یافت نشد\n")
+            else:
+                win_rate = (wins / trades) * 100
+                f.write(f"{s} | معاملات: {trades} | نرخ برد: {win_rate:.1f}%\n")
         
-        f.write("----------------------------------\n")
+        f.write("-" * 35 + "\n")
+        total_trades = len(all_trades)
         total_wins = sum(1 for t in all_trades if t[6] > 0)
-        total_win_rate = (total_wins / len(all_trades)) * 100 if all_trades else 0
-        f.write(f"📊 خلاصه کل سبد ({len(symbols)} ارز):\nمجموع معاملات: {len(all_trades)}\nنرخ برد میانگین: {total_win_rate:.1f}%\n")
+        total_win_rate = (total_wins / total_trades) * 100 if total_trades > 0 else 0
+        f.write(f"📊 خلاصه کل سبد:\nمجموع معاملات: {total_trades}\nنرخ برد میانگین: {total_win_rate:.1f}%\n")
     
     print(f"✅ بکتست پایان یافت. مجموع معاملات: {len(all_trades)}")
 
