@@ -1,28 +1,35 @@
-name: Full Backtest Pipeline
-on: workflow_dispatch
+name: Fetch and Run Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  run:
+  run-pipeline:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
       - name: Install dependencies
-        run: pip install pandas ccxt matplotlib
-      
-      - name: Fetch and Run Pipeline
-        run: |
-          python fetcher.py
-          python optimizer.py
-          python backtester.py
+        run: pip install pandas
+
+      # گام اول: اجرای بهینه‌ساز (تولیدِ فایلِ پارامترها)
+      - name: Run Optimizer
+        run: python optimizer.py
+
+      # گام دوم: اجرای بک‌تستر (فقط در صورتی که Optimizer موفق بود)
+      - name: Run Backtester
+        run: python backtester.py
         
-      - name: Upload All Results
-        if: always()
+      # گام سوم: آپلود نتایج (برای اینکه فایل summary را ببینید)
+      - name: Upload Results
         uses: actions/upload-artifact@v4
         with:
-          name: final-backtest-results
-          path: |
-            *.png
-            *.json
-            *.txt
-            data/historical/*.csv
+          name: backtest-results
+          path: summary.txt
