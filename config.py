@@ -15,7 +15,6 @@ PARAMS_FILE = os.path.join(BASE_DIR, "best_params.json")
 
 # --- ۲. تابع بارگذاری پارامترهای هوشمند ---
 def load_params():
-    """بارگذاری پارامترها با در نظر گرفتن مقادیر پیش‌فرض برای پایداری سیستم"""
     default_params = {
         "adx_threshold": 25.0,
         "tp_ratio": 1.5,
@@ -33,7 +32,7 @@ def load_params():
 _params = load_params()
 
 # --- ۳. متغیرهای تنظیمات ---
-# اصلاح نمادها: حذف اسلش (/) مطابق با API کوینکس
+# نمادها طبق استاندارد کوینکس (بدون اسلش)
 WATCHLIST = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "SUIUSDT", "LINKUSDT", 
     "AVAXUSDT", "DOGEUSDT", "ADAUSDT", "DOTUSDT",
@@ -44,7 +43,7 @@ CANDLES_LIMIT = 500
 TIMEFRAME = "4h"
 COINEX_API_URL = "https://api.coinex.com/v2"
 
-# تنظیمات استراتژی (متصل به Optimizer)
+# تنظیمات استراتژی
 ADX_THRESHOLD = _params.get("adx_threshold", 25.0)
 VOLUME_CONFIRMATION_RATIO = _params.get("volume_confirmation_ratio", 1.2)
 RISK_REWARD_TP1 = _params.get("tp_ratio", 1.5)
@@ -55,6 +54,6 @@ MAX_OPEN_POSITIONS = 15
 TOTAL_CAPITAL = 1000.0
 RISK_PERCENT = 0.1
 
-# اطلاعات حساس (از متغیرهای محیطی گیت‌هاب خوانده می‌شود)
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+# اطلاعات حساس با مقدار پیش‌فرض خالی برای جلوگیری از خطای Runtime
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
