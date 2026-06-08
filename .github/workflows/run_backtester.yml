@@ -1,7 +1,7 @@
 name: Run Backtester
 
 on:
-  workflow_dispatch: # اجرای دستی از پنل گیت‌هاب
+  workflow_dispatch: 
 
 jobs:
   backtest:
@@ -22,8 +22,16 @@ jobs:
 
       - name: Run Backtest
         env:
-          # تنظیم ریشه پروژه به عنوان مسیر جستجوی پکیج‌ها
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          # اجرای فایل از داخل پوشه src
+          # اجرای بک‌تستر
           python src/backtester.py
+
+      # این بخش برای ذخیره کردن نتیجه در گیت‌هاب حیاتی است
+      - name: Commit Backtest Results
+        run: |
+          git config --global user.name 'github-actions'
+          git config --global user.email 'github-actions@github.com'
+          git add backtest_summary.txt
+          git commit -m "Auto-update backtest summary" || echo "No changes to commit"
+          git push
