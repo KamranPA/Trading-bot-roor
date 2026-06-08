@@ -11,7 +11,6 @@ from src import indicators
 def run_backtest():
     base_dir = Path.cwd()
     data_dir = base_dir / "data"
-    # مسیر جدید دیتاها
     path_30m = data_dir / "30m"
     path_4h = data_dir / "4h"
     db_path = data_dir / "trading_bot.db"
@@ -33,36 +32,39 @@ def run_backtest():
     for file_path in csv_files:
         symbol = file_path.name.replace('_history.csv', '')
         try:
-            # ۱. خواندن دیتای ورود (30m)
             df_30m = pd.read_csv(file_path)
-            # ۲. خواندن دیتای روند (4h) - فرض بر این است که فایل 4h هم با همین نام موجود است
             df_4h = pd.read_csv(path_4h / file_path.name)
             
             # استانداردسازی ستون‌ها
             df_30m.columns = [c.capitalize() for c in df_30m.columns]
             df_4h.columns = [c.capitalize() for c in df_4h.columns]
             
-            # محاسبه ایندیکاتورها (فراخوانی تابع شما)
+            # محاسبه ایندیکاتورها
             df_30m = indicators.calculate_indicators(df_30m)
             df_4h = indicators.calculate_indicators(df_4h)
             
-            # بررسی صحت ستون‌ها (اصلاح کیس-سنیتیویتی)
-            # در indicators.py ستون‌ها بصورت 'feat_adx' با حروف کوچک تعریف شده‌اند
+            # استفاده از نام‌های دقیق همان‌طور که در indicators.py تعریف شده‌اند (با حروف کوچک)
             adx_col = 'feat_adx'
             vol_col = 'feat_vol_confirm'
             trend_col = 'feat_trend_line'
             
-            # منطق چندزمانی: فیلتر روند از 4h و سیگنال از 30m
-            # اگر در 4h روند صعودی بود (feat_trend_line == 1)
+            # بررسی وجود ستون‌ها
+            if trend_col not in df_4h.columns or adx_col not in df_30m.columns:
+                print(f"⚠️ هشدار: اندیکاتورها برای {symbol} محاسبه نشدند.")
+                summary_data[symbol] = (0, 0)
+                continue
+
+            # فیلتر روند (4 ساعته)
             is_uptrend = df_4h[trend_col].iloc[-1] == 1.0
             
+            # شرط ورود (بدون تغییر در ADX)
             mask = (df_30m[adx_col] > 25) & (df_30m[vol_col] == 1.0)
             trades_df = df_30m[mask].copy()
             
             if not trades_df.empty:
-                # استفاده از فیلتر روند 4 ساعته برای تعیین جهت
                 trades_df['Direction'] = 'LONG' if is_uptrend else 'SHORT'
                 
+                # محاسبه سود و زیان (Pnl)
                 future_close = df_30m['Close'].shift(-5)
                 trades_df['Pnl'] = ((future_close - trades_df['Close']) / trades_df['Close']) * 100
                 trades_df['Pnl'] = trades_df.apply(lambda x: x['Pnl'] if x['Direction'] == 'LONG' else -x['Pnl'], axis=1)
