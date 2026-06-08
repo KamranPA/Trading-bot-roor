@@ -24,14 +24,13 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          # اجرای بک‌تستر
           python src/backtester.py
 
-      # این بخش برای ذخیره کردن نتیجه در گیت‌هاب حیاتی است
-      - name: Commit Backtest Results
+      # این مرحله فایل را به مخزن شما "پوش" می‌کند
+      - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           git add backtest_summary.txt
-          git commit -m "Auto-update backtest summary" || echo "No changes to commit"
+          git commit -m "Update backtest summary from live exchange data" || echo "No changes"
           git push
