@@ -1,43 +1,28 @@
-name: Full Backtest Pipeline
+name: Run Backtester
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # اجرای دستی از پنل گیت‌هاب
 
 jobs:
-  run-backtest:
+  backtest:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-      
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
-          cache: 'pip' # 🚀 کش کردن برای کاهش زمان اجرا
-      
+          python-version: '3.9'
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      
-      - name: Fetch and Run Backtest Engine
-        # اجرای خط لوله به ترتیب منطقی
-        run: |
-          python fetcher.py
-          python optimizer.py
-          python backtester.py
+          pip install pandas requests ccxt scikit-learn numpy joblib
+
+      - name: Run Backtest
         env:
-          PYTHONUNBUFFERED: 1 # مشاهده آنی لاگ‌ها در محیط اکشنز
-      
-      - name: Archive Results
-        if: always() # اجرای این بخش حتی در صورت شکستِ تست‌ها
-        uses: actions/upload-artifact@v4
-        with:
-          name: backtest-report-${{ github.run_id }}
-          path: |
-            *.png
-            *.json
-            *.txt
-            data/historical/*.csv
-          retention-days: 7 # مدیریت فضای ذخیره‌سازی
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          # اجرای بک‌تستر با تنظیم دقیق مسیر
+          python backtester.py
