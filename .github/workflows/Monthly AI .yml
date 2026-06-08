@@ -1,13 +1,13 @@
-name: Monthly AI
+name: Monthly AI Self-Correction & Reporting
 
 on:
-  workflow_dispatch: # اجرای دستی برای تست
+  workflow_dispatch: # اجرای دستی برای تست و اجرای خودکار
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # برای اجازه کامیت و پوش
+      contents: write # اجازه دسترسی برای کامیت کردن نتایج
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
@@ -29,8 +29,7 @@ jobs:
         echo "Running fetcher.py..."
         python fetcher.py
         
-        # بررسی حیاتی: آیا فایل‌ها ساخته شدند؟
-        echo "Listing files in data/historical:"
+        # بررسی اینکه آیا فایل‌ها واقعا ساخته شدند
         ls -la data/historical
         if [ -z "$(ls -A data/historical)" ]; then
           echo "❌ خطا: هیچ فایلی دانلود نشد!"
@@ -40,7 +39,7 @@ jobs:
     - name: Backtest
       run: |
         python backtester.py
-        # بررسی اینکه گزارش تولید شده باشد
+        # بررسی اینکه گزارش حتما تولید شده باشد
         if [ ! -f "backtest_summary.txt" ]; then
           echo "❌ خطا: گزارش بکتست تولید نشد!"
           exit 1
@@ -50,8 +49,11 @@ jobs:
       run: |
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
-        # استفاده از -f برای عبور از .gitignore در صورتی که فایل‌ها نادیده گرفته شده بودند
-        git add -f data/trading_bot.db backtest_summary.txt
-        # کامیت تغییرات (اگر تغییری نبود، عملیات متوقف نمی‌شود)
-        git commit -m "🧠 AI Update: DB & Report Refined" || echo "No changes to commit"
+        
+        # استفاده از -f (Force) برای دور زدن .gitignore
+        # افزودن دیتابیس، گزارش و فایل‌های CSV دیتای تاریخی
+        git add -f data/trading_bot.db backtest_summary.txt data/historical/*.csv
+        
+        # کامیت تغییرات (اگر تغییری نبود، اسکریپت با خطا بسته نشود)
+        git commit -m "🧠 AI Update: DB, Report & Historical Data [Skip CI]" || echo "No changes to commit"
         git push
