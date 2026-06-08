@@ -24,9 +24,11 @@ jobs:
 
       - name: Run AI Training
         env:
-          PYTHONPATH: ${{ github.workspace }}/src
+          # این همان کلیدِ حلِ مشکلِ ماژول در ماهانه است
+          PYTHONPATH: ${{ github.workspace }}
         run: |
-          python -c "from train_model import train_all; train_all()"
+          # اجرای مستقیم تابع train_all از درونِ ماژولِ train_model
+          python -c "from src.train_model import train_all; train_all()"
 
       - name: Commit and Push
         run: |
