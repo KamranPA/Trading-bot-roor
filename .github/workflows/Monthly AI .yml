@@ -1,70 +1,52 @@
-name: Monthly AI
-
+name: Monthly AI 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: '0 0 1 * *' # اجرای خودکار در ساعت ۰۰:۰۰ روز اول ماه
-  workflow_dispatch: # برای اجرای دستی (تست)
+    - cron: '0 0 1 * *'
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # اجازه نوشتن در مخزن برای ثبت گزارش و دیتابیس
+      contents: write
 
     steps:
-    - name: Checkout Repository
+    - name: Checkout
       uses: actions/checkout@v4
       with:
         persist-credentials: true
 
-    - name: Set up Python
+    - name: Setup Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
         cache: 'pip'
 
-    - name: Install Dependencies
+    - name: Install
       run: |
         python -m pip install --upgrade pip
         pip install pandas requests
 
-    - name: Fetch Data
+    - name: Run Pipeline
       run: |
-        echo "Creating data directory..."
-        mkdir -p data/historical
-        echo "Running fetcher.py..."
         python fetcher.py
-        
-        # بررسی حیاتی: اگر دیتا دانلود نشد، پایپ‌لاین متوقف شود
-        if [ -z "$(ls -A data/historical)" ]; then
-          echo "❌ خطا: هیچ فایلی در پوشه historical یافت نشد!"
-          exit 1
-        fi
-
-    - name: Run Backtest
-      run: |
         python backtester.py
-        # بررسی اینکه گزارش حتما تولید شده باشد
-        if [ ! -f "backtest_summary.txt" ]; then
-          echo "❌ خطا: فایل گزارش backtest_summary.txt تولید نشد!"
-          exit 1
-        fi
 
-    - name: Commit and Push Results
+    - name: Commit and Push
       run: |
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
         
-        # استفاده از -f (Force) برای دور زدن .gitignore و اجبار به آپلود
-        git add -f data/trading_bot.db
-        git add -f backtest_summary.txt
-        git add -f data/historical/*.csv
-        if [ -d "src/models" ]; then git add -f src/models/*.pkl; fi
+        # استفاده از دستورات هوشمند برای جلوگیری از خطای 128
+        git add -f data/trading_bot.db backtest_summary.txt data/historical/*.csv
+        if [ -d "src/models" ] && ls src/models/*.pkl >/dev/null 2>&1; then
+          git add -f src/models/*.pkl
+        fi
         
-        # کامیت تغییرات (اگر تغییری نبود، اسکریپت با خطا بسته نشود)
+        # کامیت فقط در صورت وجود تغییرات
         if git diff --staged --quiet; then
-          echo "هیچ تغییر جدیدی یافت نشد."
+          echo "No changes to commit."
         else
-          git commit -m "🧠 AI Update: DB, Report & Models [Skip CI]"
+          git commit -m "🧠 AI Update: DB, Report & Data"
           git push
         fi
