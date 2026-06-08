@@ -1,4 +1,14 @@
 #main.py
+
+import os
+import sys
+# اضافه کردن دایرکتوری جاری به مسیر جستجوی پایتون
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# اطمینان از اینکه پوشه src در مسیر جستجو است
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
+
+import database, coinex_client, strategy, telegram_bot, indicators, optimizer, train_model
+
 import os
 import sys
 import logging
