@@ -1,39 +1,43 @@
-import json, itertools, pandas as pd, os
+# optimizer
 
-def calculate_profit(df, tp, sl):
-    capital = 1000.0
-    for i in range(1, len(df)):
-        change = (df['Close'].iloc[i] - df['Close'].iloc[i-1]) / df['Close'].iloc[i-1]
-        if change > tp: capital *= (1 + tp)
-        elif change < -sl: capital *= (1 - sl)
-    return capital
+import json
+import sqlite3
+import pandas as pd
+
+def get_performance_stats():
+    """تحلیلِ نتایجِ ۵۰ معامله اخیر از دیتابیس"""
+    conn = sqlite3.connect("data/trading_bot.db")
+    # فرض بر این است که جدول signals دارای ستون‌های pnl و feat_adx و غیره است
+    df = pd.read_sql("SELECT * FROM signals ORDER BY id DESC LIMIT 50", conn)
+    conn.close()
+    return df
 
 def optimize():
-    symbols = ["BTC_USDT", "ETH_USDT", "SOL_USDT", "SUI_USDT", "LINK_USDT", "AVAX_USDT"]
-    best_config = {"tp": 0.02, "sl": 0.01}
-    max_test_profit = -1 
+    print("🤖 سیستم خودارتقایی فعال شد: در حال تحلیلِ عملکرد...")
+    df = get_performance_stats()
     
-    print("🧠 شروعِ ارتقایِ هوشمند: استفاده از متد Out-of-Sample...")
+    if len(df) < 50:
+        print(f"⏳ هنوز به ۵۰ معامله نرسیدیم ({len(df)}/50). ارتقا به تعویق افتاد.")
+        return
+
+    # تحلیل ساده: اگر میانگین PnL منفی است، فیلترها را سخت‌تر کن
+    avg_pnl = df['pnl_percent'].mean()
     
-    for tp, sl in itertools.product([0.01, 0.03, 0.05], [0.01, 0.02]):
-        total_test_profit = 0
-        for s in symbols:
-            path = f"data/historical/{s}_history.csv"
-            if os.path.exists(path) and os.path.getsize(path) > 200:
-                df = pd.read_csv(path)
-                # جداسازی دیتای آموزشی (۸۰٪) از دیتای تست (۲۰٪)
-                split_idx = int(len(df) * 0.8)
-                test_df = df.iloc[split_idx:]
-                
-                total_test_profit += calculate_profit(test_df, tp, sl)
+    # خواندن تنظیمات فعلی (برای ارتقا دادنِ آن‌ها)
+    with open('best_params.json', 'r') as f:
+        params = json.load(f)
+    
+    if avg_pnl < 0:
+        print("📉 عملکرد منفی شناسایی شد: در حال سخت‌گیرتر کردنِ فیلترها...")
+        params['adx_threshold'] = params.get('adx_threshold', 25) + 2
+        params['tp'] = params.get('tp', 0.03) + 0.005
+    else:
+        print("🚀 عملکرد مثبت: تنظیمات فعلی حفظ شد.")
         
-        if total_test_profit > max_test_profit:
-            max_test_profit = total_test_profit
-            best_config = {"tp": tp, "sl": sl}
-            
     with open('best_params.json', 'w') as f:
-        json.dump(best_config, f)
-    print(f"✨ بهینه‌سازیِ خودکارِ هوشمند انجام شد. بهترین تنظیمات: {best_config}")
+        json.dump(params, f)
+    
+    print("✅ ارتقای سیستم کامل شد.")
 
 if __name__ == "__main__":
     optimize()
