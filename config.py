@@ -4,13 +4,18 @@
 import os
 import json
 
-# --- ۱. مسیرهای پایه ---
+# --- ۱. تنظیم مسیرهای پایه ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_NAME = os.path.join(BASE_DIR, "data", "trading_bot.db")
+DATA_DIR = os.path.join(BASE_DIR, "data")
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
+
+DB_NAME = os.path.join(DATA_DIR, "trading_bot.db")
 PARAMS_FILE = os.path.join(BASE_DIR, "best_params.json")
 
 # --- ۲. تابع بارگذاری پارامترهای هوشمند ---
 def load_params():
+    """بارگذاری پارامترها با در نظر گرفتن مقادیر پیش‌فرض برای پایداری سیستم"""
     default_params = {
         "adx_threshold": 25.0,
         "tp_ratio": 1.5,
@@ -21,19 +26,18 @@ def load_params():
         try:
             with open(PARAMS_FILE, 'r') as f:
                 return json.load(f)
-        except Exception as e:
-            print(f"⚠️ خطا در خواندن پارامترها، استفاده از پیش‌فرض: {e}")
+        except Exception:
             return default_params
     return default_params
 
-# بارگذاری مقادیر
 _params = load_params()
 
 # --- ۳. متغیرهای تنظیمات ---
+# اصلاح نمادها: حذف اسلش (/) مطابق با API کوینکس
 WATCHLIST = [
-    "BTC/USDT", "ETH/USDT", "SOL/USDT", "SUI/USDT", "LINK/USDT", 
-    "AVAX/USDT", "DOGE/USDT", "ADA/USDT", "MATIC/USDT", "DOT/USDT",
-    "ARB/USDT", "OP/USDT", "ATOM/USDT", "NEAR/USDT", "FTM/USDT"
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "SUIUSDT", "LINKUSDT", 
+    "AVAXUSDT", "DOGEUSDT", "ADAUSDT", "MATICUSDT", "DOTUSDT",
+    "ARBUSDT", "OPUSDT", "ATOMUSDT", "NEARUSDT", "FTMUSDT"
 ]
 
 CANDLES_LIMIT = 500
@@ -51,6 +55,6 @@ MAX_OPEN_POSITIONS = 15
 TOTAL_CAPITAL = 1000.0
 RISK_PERCENT = 0.1
 
-# اطلاعات حساس
+# اطلاعات حساس (از متغیرهای محیطی گیت‌هاب خوانده می‌شود)
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
