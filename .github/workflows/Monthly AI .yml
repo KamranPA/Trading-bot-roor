@@ -1,5 +1,4 @@
-name: Monthly AI Self-Correction & Reporting
-
+name: Monthly AI
 on:
   workflow_dispatch: # اجرای دستی برای تست و اجرای خودکار
 
