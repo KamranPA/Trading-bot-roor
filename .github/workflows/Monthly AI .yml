@@ -1,20 +1,27 @@
 name: Monthly AI
+
 on:
-  workflow_dispatch: # اجرای دستی برای تست و اجرای خودکار
+  schedule:
+    - cron: '0 0 1 * *' # اجرای خودکار در ساعت ۰۰:۰۰ روز اول ماه
+  workflow_dispatch: # برای اجرای دستی (تست)
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # اجازه دسترسی برای کامیت کردن نتایج
+      contents: write # اجازه نوشتن در مخزن برای ثبت گزارش و دیتابیس
+
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
+      with:
+        persist-credentials: true
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
+        cache: 'pip'
 
     - name: Install Dependencies
       run: |
@@ -28,19 +35,18 @@ jobs:
         echo "Running fetcher.py..."
         python fetcher.py
         
-        # بررسی اینکه آیا فایل‌ها واقعا ساخته شدند
-        ls -la data/historical
+        # بررسی حیاتی: اگر دیتا دانلود نشد، پایپ‌لاین متوقف شود
         if [ -z "$(ls -A data/historical)" ]; then
-          echo "❌ خطا: هیچ فایلی دانلود نشد!"
+          echo "❌ خطا: هیچ فایلی در پوشه historical یافت نشد!"
           exit 1
         fi
 
-    - name: Backtest
+    - name: Run Backtest
       run: |
         python backtester.py
         # بررسی اینکه گزارش حتما تولید شده باشد
         if [ ! -f "backtest_summary.txt" ]; then
-          echo "❌ خطا: گزارش بکتست تولید نشد!"
+          echo "❌ خطا: فایل گزارش backtest_summary.txt تولید نشد!"
           exit 1
         fi
 
@@ -49,10 +55,16 @@ jobs:
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
         
-        # استفاده از -f (Force) برای دور زدن .gitignore
-        # افزودن دیتابیس، گزارش و فایل‌های CSV دیتای تاریخی
-        git add -f data/trading_bot.db backtest_summary.txt data/historical/*.csv
+        # استفاده از -f (Force) برای دور زدن .gitignore و اجبار به آپلود
+        git add -f data/trading_bot.db
+        git add -f backtest_summary.txt
+        git add -f data/historical/*.csv
+        if [ -d "src/models" ]; then git add -f src/models/*.pkl; fi
         
         # کامیت تغییرات (اگر تغییری نبود، اسکریپت با خطا بسته نشود)
-        git commit -m "🧠 AI Update: DB, Report & Historical Data [Skip CI]" || echo "No changes to commit"
-        git push
+        if git diff --staged --quiet; then
+          echo "هیچ تغییر جدیدی یافت نشد."
+        else
+          git commit -m "🧠 AI Update: DB, Report & Models [Skip CI]"
+          git push
+        fi
