@@ -8,16 +8,13 @@ from pathlib import Path
 from src import indicators
 
 def run_backtest():
-    base_dir = Path.cwd()
-    data_dir = base_dir / "data"
-    path_30m = data_dir / "30m"
-    path_4h = data_dir / "4h"
-    db_path = data_dir / "trading_bot.db"
+    # تنظیمات ریسک و پاداش (این پارامترها را می‌توانید در config تغییر دهید)
+    TAKE_PROFIT = 0.03  # ۳ درصد سود
+    STOP_LOSS = 0.015   # ۱.۵ درصد ضرر
     
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("DROP TABLE IF EXISTS signals")
-    cursor.execute("CREATE TABLE signals (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, symbol TEXT, direction TEXT, entry_price REAL, pnl_percent REAL, feat_adx REAL)")
+    base_dir = Path.cwd()
+    path_30m = base_dir / "data" / "30m"
+    path_4h = base_dir / "data" / "4h"
     
     csv_files = list(path_30m.glob("*_history.csv"))
     all_trades = [] 
@@ -25,11 +22,9 @@ def run_backtest():
 
     for file_path in csv_files:
         symbol = file_path.name.replace('_history.csv', '')
-        file_4h_path = path_4h / file_path.name
-        
         try:
             df_30m = pd.read_csv(file_path)
-            df_4h = pd.read_csv(file_4h_path)
+            df_4h = pd.read_csv(path_4h / file_path.name)
             
             df_30m.columns = [c.capitalize() for c in df_30m.columns]
             df_4h.columns = [c.capitalize() for c in df_4h.columns]
@@ -37,43 +32,47 @@ def run_backtest():
             df_30m = indicators.calculate_indicators(df_30m)
             df_4h = indicators.calculate_indicators(df_4h)
             
-            # بررسی ایمنی: آیا ستون‌های لازم ساخته شده‌اند؟
             if 'feat_trend_line' not in df_4h.columns or 'feat_adx' not in df_30m.columns:
-                summary_data[symbol] = (0, 0)
                 continue
 
             is_uptrend = df_4h['feat_trend_line'].iloc[-1] == 1.0
-            
-            # شرط ورود (در صورت نیاز به سیگنال بیشتر، این عدد را به 15 کاهش دهید)
             mask = (df_30m['feat_adx'] > 25) & (df_30m['feat_vol_confirm'] == 1.0)
-            trades_df = df_30m[mask].copy()
+            entry_points = df_30m[mask].index
+
+            wins = 0
+            trades = 0
             
-            if not trades_df.empty:
-                trades_df['Direction'] = 'LONG' if is_uptrend else 'SHORT'
-                future_close = df_30m['Close'].shift(-5)
-                trades_df['Pnl'] = ((future_close - trades_df['Close']) / trades_df['Close']) * 100
-                trades_df['Pnl'] = trades_df.apply(lambda x: x['Pnl'] if x['Direction'] == 'LONG' else -x['Pnl'], axis=1)
+            for idx in entry_points:
+                if idx + 20 >= len(df_30m): break # جلوگیری از خطای ایندکس
                 
-                for _, row in trades_df.iterrows():
-                    all_trades.append((row['Timestamp'], symbol, row['Direction'], row['Close'], row['Pnl'], row['feat_adx']))
-                
-                summary_data[symbol] = (len(trades_df), len(trades_df[trades_df['Pnl'] > 0]))
-            else:
-                summary_data[symbol] = (0, 0)
+                entry_price = df_30m.loc[idx, 'Close']
+                # بررسی قیمت‌های بعدی برای پیدا کردن TP یا SL
+                for i in range(1, 20):
+                    price = df_30m.loc[idx + i, 'Close']
+                    pct_change = (price - entry_price) / entry_price if is_uptrend else (entry_price - price) / entry_price
+                    
+                    if pct_change >= TAKE_PROFIT:
+                        wins += 1
+                        trades += 1
+                        break
+                    elif pct_change <= -STOP_LOSS:
+                        trades += 1
+                        break
+            
+            summary_data[symbol] = (trades, wins)
+            
         except Exception as e:
             print(f"❌ خطای پردازش {symbol}: {e}")
 
-    if all_trades:
-        cursor.executemany("INSERT INTO signals (timestamp, symbol, direction, entry_price, pnl_percent, feat_adx) VALUES (?, ?, ?, ?, ?, ?)", all_trades)
-    conn.commit()
-    conn.close()
-    
+    # تولید گزارش نهایی
     with open('backtest_summary.txt', 'w', encoding='utf-8') as f:
-        f.write("📈 گزارش بکتست چندزمانی (4H + 30m)\n==================================\n")
+        f.write("📈 گزارش راستی‌آزمایی (با حد سود 3% و حد ضرر 1.5%)\n==================================\n")
+        total_trades = 0
         for s, (trades, wins) in summary_data.items():
+            total_trades += trades
             win_rate = (wins / trades * 100) if trades > 0 else 0
             f.write(f"{s:10} | معاملات: {trades:4} | نرخ برد: {win_rate:5.1f}%\n")
-        f.write("==================================\n📊 مجموع کل معاملات: " + str(len(all_trades)))
+        f.write("==================================\n📊 مجموع کل معاملات واقعی: " + str(total_trades))
 
 if __name__ == "__main__": 
     run_backtest()
