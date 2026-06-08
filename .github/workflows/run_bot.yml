@@ -1,10 +1,12 @@
-name: Run Backtester
+name: Run Trading Bot
 
 on:
-  workflow_dispatch: 
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
 
 jobs:
-  backtest:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -20,18 +22,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas requests ccxt scikit-learn numpy joblib
 
-      - name: Run Backtest
+      - name: Run Trading Engine
         env:
+          # اینجا مسیر پروژه را به عنوان ریشه قرار می‌دهیم
           PYTHONPATH: ${{ github.workspace }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # اجرای بک‌تستر
-          python src/backtester.py
-
-      # این بخش برای ذخیره کردن نتیجه در گیت‌هاب حیاتی است
-      - name: Commit Backtest Results
-        run: |
-          git config --global user.name 'github-actions'
-          git config --global user.email 'github-actions@github.com'
-          git add backtest_summary.txt
-          git commit -m "Auto-update backtest summary" || echo "No changes to commit"
-          git push
+          python main.py
