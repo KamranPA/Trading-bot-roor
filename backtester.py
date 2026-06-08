@@ -7,68 +7,64 @@ import sqlite3
 from pathlib import Path
 from src import indicators
 
-def check_10_filters(row):
-    """ارزیابی ۱۰ فاکتور سیستم هوش مصنوعی"""
-    return (row['feat_trend_line'] == 1.0) and \
-           (row['feat_adx'] > 25) and \
-           (row['feat_vol_confirm'] == 1.0) and \
-           (row['feat_rsi'] < 70) and \
-           (row['feat_vol_ratio'] > 0.8)
+def check_filters(row):
+    """
+    سیستم جدید: فیلتر حجم حذف شد.
+    فقط شرایط روند و مومنتوم بررسی می‌شود.
+    """
+    trend_ok = row['feat_trend_line'] == 1.0
+    adx_ok = row['feat_adx'] > 15  # کاهش آستانه برای یافتن سیگنال
+    rsi_ok = row['feat_rsi'] < 75  # فقط حذف حالت اشباع خرید شدید
+    
+    return trend_ok and adx_ok and rsi_ok
 
 def run_backtest():
     base_dir = Path.cwd()
-    path_30m = base_dir / "data" / "30m"
-    path_4h = base_dir / "data" / "4h"
+    data_dir = base_dir / "data"
+    path_30m = data_dir / "30m"
     
+    # استفاده از حلقه for برای پیمایش تمام فایل‌ها
     csv_files = list(path_30m.glob("*_history.csv"))
+    print(f"DEBUG: تعداد فایل‌های پیدا شده برای بکتست: {len(csv_files)}")
+    
     summary_data = {}
+    total_trades = 0
 
     for file_path in csv_files:
         symbol = file_path.name.replace('_history.csv', '')
         try:
-            df_30m = pd.read_csv(file_path)
-            df_30m.columns = [c.capitalize() for c in df_30m.columns]
-            df_30m = indicators.calculate_indicators(df_30m)
+            df = pd.read_csv(file_path)
+            df.columns = [c.capitalize() for c in df.columns]
+            df = indicators.calculate_indicators(df)
             
-            # پیدا کردن نقاط ورود بر اساس ۱۰ فیلتر
-            mask = df_30m.apply(check_10_filters, axis=1)
-            entry_points = df_30m[mask].index
-
-            wins, trades = 0, 0
+            # پیدا کردن نقاط ورود با فیلترهای جدید
+            mask = df.apply(check_filters, axis=1)
+            entry_indices = df[mask].index
             
-            for idx in entry_points:
-                if idx + 30 >= len(df_30m): break
+            trades, wins = 0, 0
+            for idx in entry_indices:
+                if idx + 20 >= len(df): break
                 
-                entry_price = df_30m.loc[idx, 'Close']
-                atr = df_30m.loc[idx, 'Atr'] # استفاده از ATR محاسبه شده
-                
-                # تعیین حد سود و ضرر پویا
-                dynamic_tp = atr * 3.0  # سود = 3 برابر نوسان
-                dynamic_sl = atr * 1.5  # ضرر = 1.5 برابر نوسان
-                
-                for i in range(1, 30):
-                    price = df_30m.loc[idx + i, 'Close']
-                    diff = price - entry_price
-                    
-                    if diff >= dynamic_tp:
-                        wins += 1
-                        trades += 1
-                        break
-                    elif diff <= -dynamic_sl:
-                        trades += 1
-                        break
+                entry_price = df.loc[idx, 'Close']
+                # تست ساده سود/ضرر
+                future_price = df.loc[idx + 5, 'Close']
+                if future_price > entry_price:
+                    wins += 1
+                trades += 1
             
             summary_data[symbol] = (trades, wins)
+            total_trades += trades
+            
         except Exception as e:
-            print(f"❌ خطای پردازش {symbol}: {e}")
+            print(f"❌ خطا در پردازش {symbol}: {e}")
 
-    # گزارش نهایی
+    # تولید گزارش
     with open('backtest_summary.txt', 'w', encoding='utf-8') as f:
-        f.write("🤖 گزارش بکتست سیستم ۱۰‌بعدی (Dynamic ATR-based)\n==================================\n")
+        f.write("📈 گزارش بکتست (بدون فیلتر حجم)\n==============================\n")
         for s, (t, w) in summary_data.items():
             wr = (w / t * 100) if t > 0 else 0
             f.write(f"{s:10} | معاملات: {t:4} | نرخ برد: {wr:5.1f}%\n")
-        f.write("==================================\n📊 پایان بکتست هوشمند.")
+        f.write("==============================\n📊 مجموع معاملات: " + str(total_trades))
 
 if __name__ == "__main__": 
     run_backtest()
