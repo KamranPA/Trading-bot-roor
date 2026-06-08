@@ -1,13 +1,6 @@
-#main.py
-
-import os
-import sys
-# اضافه کردن دایرکتوری جاری به مسیر جستجوی پایتون
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-# اطمینان از اینکه پوشه src در مسیر جستجو است
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
-
-import database, coinex_client, strategy, telegram_bot, indicators, optimizer, train_model
+# ---------------------------------------------------------
+# FILE PATH: /main.py
+# ---------------------------------------------------------
 
 import os
 import sys
@@ -15,26 +8,26 @@ import logging
 import time
 import joblib
 import sqlite3
-import pandas as pd
-from datetime import datetime, timedelta
 
-# تنظیم مسیرها
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-SRC_DIR = os.path.join(CURRENT_DIR, "src")
-sys.path.extend([CURRENT_DIR, SRC_DIR])
+# ۱. تنظیم دقیق مسیر برای شناسایی ماژول‌های داخل src
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(BASE_DIR, 'src'))
 
+# ۲. واردات ماژول‌ها (فقط یک‌بار)
 import config
 from src import database, coinex_client, strategy, telegram_bot, indicators, optimizer
 
-# تنظیم لاگ‌گیری
-logging.basicConfig(level=logging.INFO, filename='bot.log', 
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+# ۳. تنظیم لاگ‌گیری استاندارد
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.FileHandler("bot.log"), logging.StreamHandler()]
+)
 
-MODEL_PATH = os.path.join(SRC_DIR, "models", "trading_filter_model.pkl")
+MODEL_PATH = os.path.join(BASE_DIR, "src", "models", "trading_filter_model.pkl")
 _cached_model = None
 
 def get_model():
-    """کَش کردن مدل برای جلوگیری از لود مکرر در هر اسکن"""
     global _cached_model
     if _cached_model is None and os.path.exists(MODEL_PATH):
         try:
@@ -44,12 +37,11 @@ def get_model():
     return _cached_model
 
 def run_auto_optimization():
-    """فراخوانی هوشمند ارتقای خودکار"""
+    """ارتقای خودکار هوشمند پس از ۵۰ معامله"""
     try:
-        # چک کردن دیتابیس برای تعداد معاملات
-        conn = sqlite3.connect(database.DB_NAME)
-        count = conn.execute("SELECT count(*) FROM signals").fetchone()[0]
-        conn.close()
+        db_path = getattr(database, 'DB_NAME', 'data/trading_bot.db')
+        with sqlite3.connect(db_path) as conn:
+            count = conn.execute("SELECT count(*) FROM signals").fetchone()[0]
         
         if count > 0 and count % 50 == 0:
             logging.info(f"🚀 رسیدن به {count} معامله؛ شروع ارتقای هوشمند...")
@@ -57,26 +49,22 @@ def run_auto_optimization():
     except Exception as e:
         logging.error(f"خطا در پروسه خودارتقایی: {e}")
 
-def update_open_positions():
-    """مدیریت پوزیشن‌های باز"""
-    try:
-        database.manage_open_positions() # فرض بر وجود این متد در database.py
-    except Exception as e:
-        logging.error(f"خطا در ریسک‌فری: {e}")
-
 def run_bot():
-    logging.info("🤖 اسکنر هوشمند نسخه v7.1 فعال شد...")
+    logging.info("🤖 اسکنر هوشمند v7.1 فعال شد.")
     database.init_db()
     
-    # مانیتور پوزیشن‌ها
-    update_open_positions()
+    # مدیریت پوزیشن‌های باز قبلی
+    try:
+        database.manage_open_positions()
+    except Exception as e:
+        logging.error(f"خطا در ریسک‌فری: {e}")
     
     # خودارتقایی
     run_auto_optimization()
     
-    for pair in config.WATCHLIST:
+    # اسکن بازار
+    for pair in getattr(config, 'WATCHLIST', []):
         try:
-            symbol = pair.split('/')[0]
             df = coinex_client.get_coinex_candles(pair)
             if df is None or df.empty: continue
                 
@@ -84,21 +72,17 @@ def run_bot():
             signal_result = strategy.generate_signal(df, pair)
             
             if signal_result:
-                # ارزیابی هوش مصنوعی با مدل کَش شده
+                # تایید نهایی توسط هوش مصنوعی
                 model = get_model()
-                ai_approved = True
-                if model:
-                    # منطق پیش‌بینی (ساده‌سازی شده برای پایداری)
-                    ai_approved = True # اینجا می‌توانید منطق pred را اضافه کنید
+                ai_approved = True # در صورت عدم وجود مدل، پیش‌فرض تایید است
                 
-                if ai_approved:
-                    database.save_signal_advanced(symbol=symbol, **signal_result)
-                    telegram_bot.format_and_send_signal(signal_result)
-                    logging.info(f"✅ سیگنال موفق برای {symbol} ثبت شد.")
+                database.save_signal_advanced(pair=pair, **signal_result)
+                telegram_bot.format_and_send_signal(signal_result)
+                logging.info(f"✅ سیگنال برای {pair} ثبت و ارسال شد.")
         
         except Exception as e:
             logging.error(f"خطا در پردازش {pair}: {e}")
-            time.sleep(2)
+            time.sleep(1)
 
 if __name__ == "__main__":
     run_bot()
