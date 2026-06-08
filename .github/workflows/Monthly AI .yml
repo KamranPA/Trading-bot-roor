@@ -2,14 +2,14 @@ name: Monthly AI
 
 on:
   schedule:
-    - cron: '0 0 1 * *' # اجرای خودکار روز اول هر ماه
-  workflow_dispatch: # امکان اجرای دستی برای تست
+    - cron: '0 0 1 * *' # اجرای خودکار در روز اول ماه
+  workflow_dispatch: # برای اجرای دستی و تست
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # اجازه دسترسی برای نوشتن و Push کردن نتایج
+      contents: write # اجازه نوشتن برای Push کردن خروجی‌ها
 
     steps:
     - name: Checkout Repository
@@ -32,7 +32,7 @@ jobs:
       run: |
         echo "Running fetcher.py..."
         python fetcher.py
-        # بررسی اینکه آیا فایل‌ها ساخته شدند
+        # بررسی اینکه آیا فایل‌ها در پوشه دیتا دانلود شده‌اند
         if [ -z "$(ls -A data/historical)" ]; then
           echo "❌ خطا: هیچ فایلی دانلود نشد!"
           exit 1
@@ -52,15 +52,18 @@ jobs:
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
         
-        # ۱. اضافه کردن اجباری دیتابیس و گزارش بکتست
+        # ۱. اضافه کردن اجباری دیتابیس و گزارش
+        # استفاده از -f (Force) برای دور زدنِ .gitignore
         git add -f data/trading_bot.db backtest_summary.txt data/historical/*.csv
         
-        # ۲. اضافه کردن مدل‌ها در صورت وجود (بدون ایجاد خطا)
+        # ۲. اضافه کردن هوشمندانه مدل‌ها (فقط اگر وجود داشتند)
+        # این شرط از خطای 128 جلوگیری می‌کند
         if [ -d "src/models" ] && ls src/models/*.pkl >/dev/null 2>&1; then
           git add -f src/models/*.pkl
         fi
         
-        # ۳. کامیت هوشمند: فقط در صورت تغییرات واقعی
+        # ۳. کامیت و پوش هوشمند
+        # اگر تغییری در فایل‌ها نبود، اسکریپت با خطا متوقف نمی‌شود
         if git diff --staged --quiet; then
           echo "هیچ تغییر جدیدی یافت نشد."
         else
