@@ -1,72 +1,35 @@
-name: Monthly AI
+name: Monthly AI Brain Update
 
 on:
   schedule:
-    - cron: '0 0 1 * *' # اجرای خودکار در روز اول ماه
-  workflow_dispatch: # برای اجرای دستی و تست
+    - cron: '0 0 1 * *' # اجرای خودکار در روز اول هر ماه
+  workflow_dispatch:
 
 jobs:
-  run-bot:
+  train:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # اجازه نوشتن برای Push کردن خروجی‌ها
-
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-      with:
-        persist-credentials: true
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: 'pip'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas requests
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas requests ccxt scikit-learn numpy joblib
 
-    - name: Fetch Data
-      run: |
-        echo "Running fetcher.py..."
-        python fetcher.py
-        # بررسی اینکه آیا فایل‌ها در پوشه دیتا دانلود شده‌اند
-        if [ -z "$(ls -A data/historical)" ]; then
-          echo "❌ خطا: هیچ فایلی دانلود نشد!"
-          exit 1
-        fi
+      - name: Run AI Training
+        run: |
+          python -c "from src.train_model import train_all; train_all()"
 
-    - name: Run Backtest
-      run: |
-        python backtester.py
-        # بررسی اینکه گزارش حتما تولید شده باشد
-        if [ ! -f "backtest_summary.txt" ]; then
-          echo "❌ خطا: گزارش بکتست تولید نشد!"
-          exit 1
-        fi
-
-    - name: Commit and Push Results
-      run: |
-        git config --local user.email "actions@github.com"
-        git config --local user.name "GitHub Actions"
-        
-        # ۱. اضافه کردن اجباری دیتابیس و گزارش
-        # استفاده از -f (Force) برای دور زدنِ .gitignore
-        git add -f data/trading_bot.db backtest_summary.txt data/historical/*.csv
-        
-        # ۲. اضافه کردن هوشمندانه مدل‌ها (فقط اگر وجود داشتند)
-        # این شرط از خطای 128 جلوگیری می‌کند
-        if [ -d "src/models" ] && ls src/models/*.pkl >/dev/null 2>&1; then
-          git add -f src/models/*.pkl
-        fi
-        
-        # ۳. کامیت و پوش هوشمند
-        # اگر تغییری در فایل‌ها نبود، اسکریپت با خطا متوقف نمی‌شود
-        if git diff --staged --quiet; then
-          echo "هیچ تغییر جدیدی یافت نشد."
-        else
-          git commit -m "🧠 AI Update: DB, Report & Data [Skip CI]"
+      - name: Commit and Push
+        run: |
+          git config --global user.name 'github-actions'
+          git config --global user.email 'github-actions@github.com'
+          git add data/models/
+          git commit -m "Auto-update AI model" || echo "No changes to commit"
           git push
-        fi
