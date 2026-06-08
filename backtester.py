@@ -1,9 +1,7 @@
 # ---------------------------------------------------------
 # FILE NAME: backtester.py
-# FILE PATH: /src/backtester.py (یا مسیر ریشه پروژه در صورت قرارگیری در Root)
-# PURPOSE: اجرای بکتست استراتژی معاملاتی و ذخیره نتایج در دیتابیس و فایل متنی
+# FILE PATH: /src/backtester.py
 # ---------------------------------------------------------
-
 import pandas as pd
 import os
 import sqlite3
@@ -13,10 +11,10 @@ from src import indicators
 def run_backtest():
     base_dir = Path.cwd()
     data_dir = base_dir / "data"
-    history_dir = data_dir / "historical"
+    # مسیر جدید دیتاها
+    path_30m = data_dir / "30m"
+    path_4h = data_dir / "4h"
     db_path = data_dir / "trading_bot.db"
-    
-    data_dir.mkdir(exist_ok=True)
     
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -28,33 +26,49 @@ def run_backtest():
         )
     """)
     
-    csv_files = list(history_dir.glob("*_history.csv"))
+    csv_files = list(path_30m.glob("*_history.csv"))
     all_trades = [] 
     summary_data = {}
 
     for file_path in csv_files:
         symbol = file_path.name.replace('_history.csv', '')
         try:
-            df = pd.read_csv(file_path)
-            df.columns = [c.capitalize() for c in df.columns]
-            df = indicators.calculate_indicators(df)
+            # ۱. خواندن دیتای ورود (30m)
+            df_30m = pd.read_csv(file_path)
+            # ۲. خواندن دیتای روند (4h) - فرض بر این است که فایل 4h هم با همین نام موجود است
+            df_4h = pd.read_csv(path_4h / file_path.name)
             
-            # عیب‌یابی: چک کردن مقادیر اندیکاتورها
-            if 'Feat_adx' in df.columns:
-                max_adx = df['Feat_adx'].max()
-                print(f"DEBUG: {symbol} | Max ADX: {max_adx:.2f}")
-
-            mask = (df['Feat_adx'] > 25) & (df['Feat_vol_confirm'] == 1.0)
-            trades_df = df[mask].copy()
+            # استانداردسازی ستون‌ها
+            df_30m.columns = [c.capitalize() for c in df_30m.columns]
+            df_4h.columns = [c.capitalize() for c in df_4h.columns]
+            
+            # محاسبه ایندیکاتورها (فراخوانی تابع شما)
+            df_30m = indicators.calculate_indicators(df_30m)
+            df_4h = indicators.calculate_indicators(df_4h)
+            
+            # بررسی صحت ستون‌ها (اصلاح کیس-سنیتیویتی)
+            # در indicators.py ستون‌ها بصورت 'feat_adx' با حروف کوچک تعریف شده‌اند
+            adx_col = 'feat_adx'
+            vol_col = 'feat_vol_confirm'
+            trend_col = 'feat_trend_line'
+            
+            # منطق چندزمانی: فیلتر روند از 4h و سیگنال از 30m
+            # اگر در 4h روند صعودی بود (feat_trend_line == 1)
+            is_uptrend = df_4h[trend_col].iloc[-1] == 1.0
+            
+            mask = (df_30m[adx_col] > 25) & (df_30m[vol_col] == 1.0)
+            trades_df = df_30m[mask].copy()
             
             if not trades_df.empty:
-                trades_df['Direction'] = trades_df['Feat_trend_line'].apply(lambda x: 'LONG' if x == 1.0 else 'SHORT')
-                future_close = df['Close'].shift(-5)
+                # استفاده از فیلتر روند 4 ساعته برای تعیین جهت
+                trades_df['Direction'] = 'LONG' if is_uptrend else 'SHORT'
+                
+                future_close = df_30m['Close'].shift(-5)
                 trades_df['Pnl'] = ((future_close - trades_df['Close']) / trades_df['Close']) * 100
                 trades_df['Pnl'] = trades_df.apply(lambda x: x['Pnl'] if x['Direction'] == 'LONG' else -x['Pnl'], axis=1)
                 
                 for _, row in trades_df.iterrows():
-                    all_trades.append((row['Timestamp'], symbol, row['Direction'], row['Close'], row['Pnl'], row['Feat_adx']))
+                    all_trades.append((row['Timestamp'], symbol, row['Direction'], row['Close'], row['Pnl'], row[adx_col]))
                 
                 summary_data[symbol] = (len(trades_df), len(trades_df[trades_df['Pnl'] > 0]))
             else:
@@ -70,7 +84,7 @@ def run_backtest():
     conn.close()
     
     with open('backtest_summary.txt', 'w', encoding='utf-8') as f:
-        f.write("📈 گزارش بکتست استراتژی هوشمند\n==================================\n")
+        f.write("📈 گزارش بکتست چندزمانی (4H + 30m)\n==================================\n")
         for s, (trades, wins) in summary_data.items():
             win_rate = (wins / trades * 100) if trades > 0 else 0
             f.write(f"{s:10} | معاملات: {trades:4} | نرخ برد: {win_rate:5.1f}%\n")
