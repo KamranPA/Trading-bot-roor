@@ -1,71 +1,37 @@
-name: Monthly AI Self-Correction & Reporting
+name: Monthly AI Brain Update
 
 on:
   schedule:
     - cron: '0 0 1 * *'
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
-  optimize-and-report:
+  train:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout Repository Code
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Set up Python Environment
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-    - name: Install Project Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas requests ccxt scikit-learn numpy joblib
 
-    # ۱. تولید و دانلود دیتای تاریخی (کارخانه‌ی تولید دیتا)
-    - name: Fetch Historical Market Data
-      run: |
-        mkdir -p data/historical
-        if [ -f "src/fetcher.py" ]; then python src/fetcher.py; elif [ -f "fetcher.py" ]; then python fetcher.py; fi
+      - name: Run AI Training
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          python -c "from train_model import train_all; train_all()"
 
-    # ۲. اجرای بکتست و تولید دیتابیس و گزارش
-    - name: Run Backtest Engine
-      run: python backtester.py
-
-    # ۳. بازآموزی مدل هوش مصنوعی
-    - name: Run AI Engine (Model Retraining)
-      env:
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: python src/train_model.py
-
-    # ۴. ارسال کارنامه به تلگرام
-    - name: Generate & Send Telegram Report
-      env:
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: |
-        python -c "from src import telegram_bot; telegram_bot.send_performance_report()"
-
-    # ۵. آپلود گزارش و مدل در بخش Artifacts برای بررسی دستی
-    - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: ai-performance-report
-        path: |
-          backtest_summary.txt
-          src/models/trading_filter_model.pkl
-
-    # ۶. کامیت و پوش نهایی تغییرات (برای ذخیره دیتابیس و مدل در ریپازیتوری)
-    - name: Commit and Push Results
-      run: |
-        git config --local user.email "actions@github.com"
-        git config --local user.name "GitHub Actions"
-        git add data/trading_bot.db
-        if [ -f "src/models/trading_filter_model.pkl" ]; then git add src/models/trading_filter_model.pkl; fi
-        git diff --quiet && git diff --staged --quiet || (git commit -m "🧠 AI Update: Model & DB Refined [Skip CI]" && git push)
+      - name: Commit and Push
+        run: |
+          git config --global user.name 'github-actions'
+          git config --global user.email 'github-actions@github.com'
+          git add src/models/
+          git commit -m "Auto-update AI model" || echo "No changes to commit"
+          git push
