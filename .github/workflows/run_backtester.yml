@@ -1,4 +1,4 @@
-name: Run Backtester
+name: Run Backtester and Optimizer
 
 on:
   workflow_dispatch: 
@@ -20,17 +20,29 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas requests ccxt scikit-learn numpy joblib
 
+      # ۱. اجرای بک‌تستر (تولید گزارش و بروزرسانی نتایج در دیتابیس)
       - name: Run Backtest
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/backtester.py
 
-      # این مرحله فایل را به مخزن شما "پوش" می‌کند
+      # ۲. اجرای بهینه‌ساز (تغییر پارامترها بر اساس عملکرد)
+      - name: Run Optimizer
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python src/optimizer.py
+
+      # ۳. ذخیره نتایج بک‌تست و پارامترهای جدید در مخزن
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
-          git add backtest_summary.txt
-          git commit -m "Update backtest summary from live exchange data" || echo "No changes"
+          
+          # اضافه کردن فایل گزارش و فایل پارامترهای هوشمند
+          git add backtest_summary.txt best_params.json
+          
+          # کامیت کردن اگر تغییری وجود داشت
+          git commit -m "Auto-update: Backtest results and optimized parameters" || echo "No changes to commit"
           git push
