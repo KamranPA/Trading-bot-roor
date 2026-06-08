@@ -20,29 +20,34 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas requests ccxt scikit-learn numpy joblib
 
-      # ۱. اجرای بک‌تستر (تولید گزارش و بروزرسانی نتایج در دیتابیس)
+      # ۱. اجرای بک‌تستر
       - name: Run Backtest
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/backtester.py
 
-      # ۲. اجرای بهینه‌ساز (تغییر پارامترها بر اساس عملکرد)
+      # ۲. اجرای بهینه‌ساز
       - name: Run Optimizer
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/optimizer.py
 
-      # ۳. ذخیره نتایج بک‌تست و پارامترهای جدید در مخزن
+      # ۳. ذخیره نتایج با مدیریت خطا برای فایل‌های تولید شده
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # اضافه کردن فایل گزارش و فایل پارامترهای هوشمند
-          git add backtest_summary.txt best_params.json
+          # افزودنِ فایل گزارش که همیشه تولید می‌شود
+          git add backtest_summary.txt
           
-          # کامیت کردن اگر تغییری وجود داشت
-          git commit -m "Auto-update: Backtest results and optimized parameters" || echo "No changes to commit"
+          # افزودنِ فایل پارامترها فقط در صورتی که تولید شده باشد
+          if [ -f "best_params.json" ]; then
+            git add best_params.json
+          fi
+          
+          # کامیت کردن فقط در صورت وجود تغییرات
+          git commit -m "Auto-update: Backtest summary and optimized params" || echo "No changes to commit"
           git push
