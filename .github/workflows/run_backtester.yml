@@ -22,7 +22,8 @@ jobs:
 
       - name: Run Backtest
         env:
-          PYTHONPATH: ${{ github.workspace }}/src
+          # تنظیم ریشه پروژه به عنوان مسیر جستجوی پکیج‌ها
+          PYTHONPATH: ${{ github.workspace }}
         run: |
-          # اجرای بک‌تستر با تنظیم دقیق مسیر
-          python backtester.py
+          # اجرای فایل از داخل پوشه src
+          python src/backtester.py
