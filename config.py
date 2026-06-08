@@ -36,8 +36,8 @@ _params = load_params()
 # اصلاح نمادها: حذف اسلش (/) مطابق با API کوینکس
 WATCHLIST = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "SUIUSDT", "LINKUSDT", 
-    "AVAXUSDT", "DOGEUSDT", "ADAUSDT", "MATICUSDT", "DOTUSDT",
-    "ARBUSDT", "OPUSDT", "ATOMUSDT", "NEARUSDT", "FTMUSDT"
+    "AVAXUSDT", "DOGEUSDT", "ADAUSDT", "DOTUSDT",
+    "ARBUSDT", "OPUSDT", "ATOMUSDT", "NEARUSDT"
 ]
 
 CANDLES_LIMIT = 500
