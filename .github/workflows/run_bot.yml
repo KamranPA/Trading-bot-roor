@@ -2,53 +2,30 @@ name: Run Trading Bot
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # هر ۳۰ دقیقه
-  workflow_dispatch: # امکان اجرای دستی برای دیباگ
-
-permissions:
-  contents: write # ضروری برای Push کردن تغییرات
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
 
 jobs:
-  run-bot-job:
+  build:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-      with:
-        persist-credentials: true
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: 'pip'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        # استفاده از --no-cache-dir برای جلوگیری از پر شدن حافظه موقت سرور
-        pip install --no-cache-dir -r requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas requests ccxt scikit-learn numpy joblib
 
-    - name: Execute Trading Engine
-      env:
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: python main.py
-
-    - name: Commit & Push Changes
-      run: |
-        git config --local user.email "actions@github.com"
-        git config --local user.name "GitHub Actions"
-        
-        # ۱. اضافه کردن فایل‌ها به صورت Force برای دور زدن احتمالی .gitignore
-        # ۲. استفاده از || true برای جلوگیری از شکست خوردنِ اکشن در صورت نبودن فایل
-        git add -f data/trading_bot.db || true
-        git add -f src/models/*.pkl || true
-        
-        # بررسی تغییرات قبل از کامیت
-        if git diff --staged --quiet; then
-          echo "هیچ تغییر جدیدی یافت نشد. عملیات کامیت لغو شد."
-        else
-          git commit -m "🚀 بروزرسانی خودکار دیتابیس و مدل [Skip CI]"
-          git push origin main
-        fi
+      - name: Run Trading Engine
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python main.py
