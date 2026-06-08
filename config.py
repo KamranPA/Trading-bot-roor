@@ -35,9 +35,9 @@ _params = load_params()
 # نمادها طبق استاندارد کوینکس (بدون اسلش)
 WATCHLIST = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "SUIUSDT", "LINKUSDT", 
-    "AVAXUSDT", "DOGEUSDT", "ADAUSDT", "DOTUSDT",
-    "ARBUSDT", "OPUSDT", "ATOMUSDT", "NEARUSDT"
+    "AVAXUSDT", "DOGEUSDT", "ADAUSDT", "DOTUSDT", "ARBUSDT"
 ]
+
 
 CANDLES_LIMIT = 500
 TIMEFRAME = "4h"
