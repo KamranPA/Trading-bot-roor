@@ -1,19 +1,15 @@
-# ---------------------------------------------------------
-# FILE NAME: database.py
-# FILE PATH: /src/database.py
-# ---------------------------------------------------------
+# src/database.py
 import sqlite3
 import os
 from datetime import datetime
 
-DB_NAME = "trading_bot.db"
+DB_NAME = "data/trading_bot.db" # اصلاح مسیر منطبق با دیتای پروژه
 
 def init_db():
     """ایجاد جداول دیتابیس در صورت عدم وجود"""
+    os.makedirs(os.path.dirname(DB_NAME), exist_ok=True)
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
-        
-        # جدول سیگنال‌ها
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,8 +27,6 @@ def init_db():
                 ema_diff REAL
             )
         ''')
-        
-        # جدول تارگت‌ها
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS signal_targets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,8 +39,18 @@ def init_db():
         ''')
         conn.commit()
 
-def save_signal(symbol, direction, entry_price, stop_loss, targets, indicators_dict):
-    """ذخیره سیگنال جدید به همراه اندیکاتورها برای آموزش هوش مصنوعی"""
+def get_open_positions_count():
+    """افزودن تابع مفقوده برای بررسی سقف پوزیشن ها"""
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM signals WHERE status = 'OPEN'")
+            return cursor.fetchone()[0]
+    except Exception:
+        return 0
+
+def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, **features):
+    """متد پیشرفته و هماهنگ شده با main.py"""
     init_db()
     try:
         with sqlite3.connect(DB_NAME) as conn:
@@ -58,15 +62,16 @@ def save_signal(symbol, direction, entry_price, stop_loss, targets, indicators_d
                 VALUES (?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?)
             ''', (
                 symbol, direction, entry_price, stop_loss, created_at,
-                indicators_dict.get('ATR', 0.0),
-                indicators_dict.get('ADX', 0.0),
-                indicators_dict.get('RSI', 0.0),
-                indicators_dict.get('EMA_diff', 0.0)
+                features.get('feat_atr_percent', 0.0),
+                features.get('feat_adx', 0.0),
+                features.get('feat_rsi', 50.0),
+                features.get('feat_ema_deviation', 0.0)
             ))
             
             signal_id = cursor.lastrowid
             
-            for i, target_price in enumerate(targets, 1):
+            # ذخیره تارگت‌ها
+            for i, target_price in enumerate([tp1, tp2], 1):
                 cursor.execute('''
                     INSERT INTO signal_targets (signal_id, target_number, target_price, status)
                     VALUES (?, ?, ?, 'PENDING')
@@ -79,29 +84,22 @@ def save_signal(symbol, direction, entry_price, stop_loss, targets, indicators_d
         return None
 
 def manage_open_positions():
-    """مدیریت پوزیشن‌های باز: ریسک‌فری در TP1 و بستن پوزیشن در SL یا TP2"""
+    """مدیریت پوزیشن‌های باز"""
     from src import coinex_client 
     init_db()
-    
     try:
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
-            
             cursor.execute("SELECT id, symbol, direction, entry_price, stop_loss FROM signals WHERE status = 'OPEN'")
             open_trades = cursor.fetchall()
             
-            if not open_trades:
-                return
-
             for trade in open_trades:
                 trade_id, symbol, direction, entry_price, stop_loss = trade
-                
                 df = coinex_client.get_coinex_candles(symbol)
                 if df is None or df.empty:
                     continue
                     
                 current_price = float(df.iloc[-1]['Close'])
-                
                 cursor.execute("SELECT target_number, target_price, status FROM signal_targets WHERE signal_id = ? ORDER BY target_number", (trade_id,))
                 targets = cursor.fetchall()
                 
@@ -111,7 +109,6 @@ def manage_open_positions():
                 
                 close_trade = False
                 pnl_percent = 0.0
-                new_sl = stop_loss
 
                 if direction == 'LONG':
                     if current_price <= stop_loss:
@@ -121,10 +118,9 @@ def manage_open_positions():
                         close_trade = True
                         pnl_percent = ((tp2_price - entry_price) / entry_price) * 100
                     elif tp1_price and current_price >= tp1_price and tp1_status == 'PENDING':
-                        new_sl = entry_price
                         cursor.execute("UPDATE signal_targets SET status = 'HIT' WHERE signal_id = ? AND target_number = 1", (trade_id,))
-                        cursor.execute("UPDATE signals SET stop_loss = ? WHERE id = ?", (new_sl, trade_id))
-                        print(f"🛡️ پوزیشن {symbol} ریسک‌فری شد. استاپ به نقطه ورود انتقال یافت.")
+                        cursor.execute("UPDATE signals SET stop_loss = ? WHERE id = ?", (entry_price, trade_id))
+                        print(f"🛡️ پوزیشن {symbol} ریسک‌فری شد.")
 
                 elif direction == 'SHORT':
                     if current_price >= stop_loss:
@@ -134,10 +130,9 @@ def manage_open_positions():
                         close_trade = True
                         pnl_percent = ((entry_price - tp2_price) / entry_price) * 100
                     elif tp1_price and current_price <= tp1_price and tp1_status == 'PENDING':
-                        new_sl = entry_price
                         cursor.execute("UPDATE signal_targets SET status = 'HIT' WHERE signal_id = ? AND target_number = 1", (trade_id,))
-                        cursor.execute("UPDATE signals SET stop_loss = ? WHERE id = ?", (new_sl, trade_id))
-                        print(f"🛡️ پوزیشن {symbol} ریسک‌فری شد. استاپ به نقطه ورود انتقال یافت.")
+                        cursor.execute("UPDATE signals SET stop_loss = ? WHERE id = ?", (entry_price, trade_id))
+                        print(f"🛡️ پوزیشن {symbol} ریسک‌فری شد.")
 
                 if close_trade:
                     closed_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
@@ -146,7 +141,5 @@ def manage_open_positions():
                         (closed_at, round(pnl_percent, 2), trade_id)
                     )
                     conn.commit()
-                    print(f"✅ معامله {symbol} با وضعیت نهایی ثبت و بسته شد. سود/زیان: {round(pnl_percent, 2)}%")
-
     except Exception as e:
         print(f"❌ خطا در اجرای پایش پوزیشن‌های باز: {e}")
