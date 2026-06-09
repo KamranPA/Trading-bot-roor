@@ -3,67 +3,57 @@
 # FILE PATH: /src/train_model.py
 # ---------------------------------------------------------
 import sqlite3
-import pandas as pd
-import numpy as np
 import os
-import joblib
+import jobpath
+import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report
 
-def train_filter_model():
-    """🧠 آموزش مجدد مدل هوش مصنوعی بدون استفاده از ویژگی‌های حجمی"""
-    db_path = "data/trading_bot.db"
-    model_dir = "src/models"
-    model_path = os.path.join(model_dir, "trading_filter_model.pkl")
-    
-    os.makedirs(model_dir, exist_ok=True)
-    
-    if not os.path.exists(db_path):
-        print(f"❌ دیتابیس یافت نشد: {db_path}")
+DB_NAME = "trading_bot.db"
+MODEL_DIR = "ml_models"
+MODEL_PATH = os.path.join(MODEL_DIR, "rf_trading_model.pkl")
+
+def train_ai_model():
+    """آموزش مجدد مدل یادگیری ماشین بر اساس تاریخچه معاملات واقعی ربات"""
+    if not os.path.exists(DB_NAME):
+        print("❌ دیتابیس یافت نشد. آموزش لغو شد.")
         return
 
     try:
-        conn = sqlite3.connect(db_path)
-        df = pd.read_sql_query("SELECT * FROM signals WHERE status = 'CLOSED'", conn)
-        conn.close()
+        with sqlite3.connect(DB_NAME) as conn:
+            # خواندن کلیدی‌ترین ویژگی‌ها به همراه سود/زیان پوزیشن‌های بسته شده
+            query = """
+                SELECT atr, adx, rsi, ema_diff, pnl_percent 
+                FROM signals 
+                WHERE status = 'CLOSED'
+            """
+            df = pd.read_sql_query(query, conn)
+
+        if len(df) < 50:
+            print(f"ℹ️ تعداد داده‌های بسته شده کافی نیست ({len(df)}/50). برای پیشگیری از بیش‌برازش آموزش انجام نمی‌شود.")
+            return
+
+        # برچسب‌گذاری: اگر سود مثبت باشد ۱ (موفق) و در غیر این صورت ۰ (ناموفق)
+        df['target'] = (df['pnl_percent'] > 0).astype(int)
+        
+        feature_cols = ['atr', 'adx', 'rsi', 'ema_diff']
+        X = df[feature_cols]
+        y = df['target']
+        
+        print(f"🔄 در حال آموزش مدل هوش مصنوعی با {len(df)} نمونه داده واقعی...")
+        
+        model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
+        model.fit(X, y)
+        
+        if not os.path.exists(MODEL_DIR):
+            os.makedirs(MODEL_DIR)
+            
+        with open(MODEL_PATH, 'wb') as f:
+            jobpath.dump(model, f)
+            
+        print("🧠 مدل هوش مصنوعی با موفقیت آپدیت و ذخیره شد.")
+
     except Exception as e:
-        print(f"❌ خطای پایگاه داده: {e}")
-        return
-
-    # تعریف ویژگی‌های سیستم بدون فیلترهای حجم
-    features = [
-        'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 
-        'feat_trend_line', 'feat_ema_deviation', 'feat_rsi_momentum', 'feat_body_ratio'
-    ]
-    
-    df = df.dropna(subset=features)
-    
-    if len(df) < 50:
-        print(f"⚠️ دیتای کافی موجود نیست ({len(df)} معامله). مدل برای آپدیت شدن به ۵0 معامله بسته شده نیاز دارد.")
-        return
-
-    X = df[features]
-    y = np.where(df['pnl_percent'] > 0, 1, 0)
-
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    model = RandomForestClassifier(
-        n_estimators=100, 
-        max_depth=7, 
-        min_samples_split=5,
-        class_weight='balanced',
-        random_state=42
-    )
-    
-    model.fit(X_train, y_train)
-
-    print("📊 گزارش نهایی دقت مدل بدون فیلتر حجم:")
-    predictions = model.predict(X_test)
-    print(classification_report(y_test, predictions))
-
-    joblib.dump(model, model_path)
-    print(f"✅ مدل هوشمند با موفقیت فاقد فیلتر حجم آپدیت شد: {model_path}")
+        print(f"❌ خطا در فرآیند آموزش مدل: {e}")
 
 if __name__ == "__main__":
-    train_filter_model()
+    train_ai_model()
