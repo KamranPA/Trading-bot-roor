@@ -7,35 +7,38 @@ import config
 
 def check_strategy(df):
     """
-    بررسی استراتژی شکست سقف و کف داینامیک (بدون فیلتر حجم)
-    خروجی: دیکشنری مشخصات سیگنال جهت مانیتورینگ و ارسال به تلگرام یا None
+    بررسی استراتژی شکست سقف و کف داینامیک (بدون فیلتر حجم و کاملاً امن در برابر دیتای خالی)
     """
-    if df is None or len(df) < 50:
+    # گام امنیتی: اگر دیتا وجود نداشت یا ناقص بود، بدون کرش کردن خارج شو
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty or len(df) < 50:
         return None
 
     try:
-        # ۱. محاسبه اندیکاتورها از طریق ماژول کمکی
+        # ۱. محاسبه اندیکاتورها از طریق ماژول کمکی شما
         df = calculate_indicators(df)
         
-        # تبدیل تمام ستون‌های دیتافریم به حروف کوچک برای جلوگیری قطعی از خطای KeyError
+        # چک کردن مجدد برای اطمینان از اینکه خروجی لایبرری تحلیل هم خالی نیست
+        if df is None or df.empty:
+            return None
+            
+        # متصل کردن نام ستون‌ها به حروف کوچک برای ستون‌های استاندارد صرافی
         df.columns = [col.lower() for col in df.columns]
         
-        # دسترسی به آخرین کندل بسته شده (کندل یکی مانده به آخر جهت پایداری داده‌ها)
+        # دسترسی به آخرین کندل بسته شده (یکی مانده به آخر)
         last_row = df.iloc[-2]
-        
         current_price = float(last_row['close'])
         
-        # استخراج اندیکاتورها (پشتیبانی همزمان از حروف کوچک و بزرگ برای امنیت کد)
+        # استخراج اندیکاتورها با پشتیبانی هوشمند از حروف کوچک و بزرگ برای امنیت بالا
         rsi = float(last_row.get('rsi', last_row.get('RSI', 50.0)))
         adx = float(last_row.get('adx', last_row.get('ADX', 20.0)))
         ema_200 = float(last_row.get('ema_200', last_row.get('EMA_200', current_price)))
         atr = float(last_row.get('atr', last_row.get('ATR', 0.0)))
         
-        # محاسبات انحراف تکنیکال برای دیتابیس و خروجی هوش مصنوعی
+        # محاسبات فرعی تکنیکال برای ثبت در دیتابیس مانیتورینگ
         ema_deviation = ((current_price - ema_200) / ema_200) * 100 if ema_200 else 0
         atr_percent = (atr / current_price) * 100 if current_price else 0
 
-        # ۲. پیدا کردن نقاط چرخش (Swing High / Swing Low) اخیر با حروف کوچک
+        # ۲. پیدا کردن نقاط چرخش سقف و کف (Swing High / Swing Low)
         window = getattr(config, 'SWING_WINDOW', 5)
         recent_highs = df.iloc[-(window*3):-2]['high'].tolist()
         recent_lows = df.iloc[-(window*3):-2]['low'].tolist()
@@ -43,14 +46,13 @@ def check_strategy(df):
         last_swing_high = max(recent_highs) if recent_highs else current_price
         last_swing_low = min(recent_lows) if recent_lows else current_price
 
-        # دریافت حد آستانه ADX از کانفیگ
+        # دریافت حد آستانه روند از تنظیمات
         adx_threshold = getattr(config, 'ADX_THRESHOLD', 25.0)
 
-        # 🟢 بررسی موقعیت خرید مانیتورینگ (LONG)
+        # 🟢 بررسی موقعیت خرید (LONG) برای ارسال به تلگرام
         if current_price > last_swing_high and current_price > ema_200:
             if rsi > 50 and adx > adx_threshold:
                 
-                # محاسبه حد سود و ضرر بر اساس ATR (بدون دخالت فیلتر حجم)
                 sl_dist = atr * 1.5
                 stop_loss = current_price - sl_dist
                 tp1 = current_price + (sl_dist * getattr(config, 'RISK_REWARD_TP1', 1.5))
@@ -68,11 +70,10 @@ def check_strategy(df):
                     'ema_diff': round(ema_deviation, 4)
                 }
 
-        # 🔴 بررسی موقعیت فروش مانیتورینگ (SHORT)
+        # 🔴 بررسی موقعیت فروش (SHORT) برای ارسال به تلگرام
         if current_price < last_swing_low and current_price < ema_200:
             if rsi < 50 and adx > adx_threshold:
                 
-                # محاسبه حد سود و ضرر بر اساس ATR (بدون دخالت فیلتر حجم)
                 sl_dist = atr * 1.5
                 stop_loss = current_price + sl_dist
                 tp1 = current_price - (sl_dist * getattr(config, 'RISK_REWARD_TP1', 1.5))
@@ -91,6 +92,6 @@ def check_strategy(df):
                 }
 
     except Exception as e:
-        logging.error(f"❌ خطا در اجرای منطق استراتژی: {e}")
+        logging.error(f"❌ خطا در پردازش ریاضی استراتژی: {e}")
         
     return None
