@@ -1,5 +1,5 @@
-import sys, os
-# این خط باعث می‌شود مسیر src همیشه در دسترس پایتون باشد
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-from . import database, coinex_client, strategy, telegram_bot, indicators, train_model, optimizer, backtester
+# ---------------------------------------------------------
+# FILE PATH: /src/__init__.py
+# ---------------------------------------------------------
+# حذف هرگونه import مربوط به indicators از اینجا
+from . import database, coinex_client, strategy, telegram_bot, strategy_utils, optimizer
