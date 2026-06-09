@@ -26,7 +26,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pandas requests pandas-ta scikit-learn joblib
+          python -m pip install --upgrade pip
+          pip install pandas requests scikit-learn joblib
+          # نصب مستقیم از گیت‌هاب برای رفع خطای pandas-ta
+          pip install git+https://github.com/twopirllc/pandas-ta.git
 
       - name: Run Trading Engine
         run: python main.py
@@ -35,8 +38,9 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          # اضافه کردن فایل‌هایی که باید بروزرسانی شوند
+          
+          # اضافه کردن فایل‌های مهم برای آپدیت شدن
           git add backtest_summary.txt best_params.json data/trading_bot.db
           
-          # بررسی تغییرات و پوش کردن آن‌ها
+          # بررسی اینکه آیا تغییری ایجاد شده است یا خیر
           git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update: Bot results and database" && git push)
