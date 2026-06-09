@@ -8,47 +8,43 @@ import config
 from src import database, strategy_utils
 
 def generate_signal(df, pair):
+    """
+    🛡️ بررسی و تولید سیگنال بر اساس شکست سطوح بدون اعمال فیلتر حجم
+    """
     if df is None or len(df) < 50:
         return None
 
-    # محاسبه محلی ATR برای رفع قطعی خطای کلید 'ATR'
-    df = df.copy()
-    high_low = df['High'] - df['Low']
-    high_close = (df['High'] - df['Close'].shift()).abs()
-    low_close = (df['Low'] - df['Close'].shift()).abs()
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    df['ATR'] = tr.rolling(window=14).mean().fillna(df['High'] - df['Low'])
-
     idx = len(df) - 1
     candle = df.iloc[idx]
-    symbol = pair.split('/')[0]
     
-    # ۱. مدیریت ریسک (فقط چک تعداد پوزیشن‌ها)
+    # ۱. سقف تعداد پوزیشن‌های باز همزمان
     if database.get_open_positions_count() >= config.MAX_OPEN_POSITIONS:
         return None
 
-    # ۲. فیلتر قدرت روند (ADX) برای جلوگیری از بازارهای رنج
+    # ۲. فیلتر قدرت روند (ADX) برای فیلتر بازارهای سایدوی و بدون حرکت
     if float(candle.get('feat_adx', 0)) < config.ADX_THRESHOLD:
         return None
 
-    # ۳. شناسایی سطوح Swing
+    # ۳. شناسایی آخرین قله و دره قیمتی
     last_swing_high = strategy_utils.find_last_swing(df, 'high', config.SWING_WINDOW)
     last_swing_low = strategy_utils.find_last_swing(df, 'low', config.SWING_WINDOW)
 
     if last_swing_high is None or last_swing_low is None:
         return None
 
-    # ۴. ویژگی‌های هوش مصنوعی
+    # ۴. استخراج ویژگی‌های معتبر قیمتی برای هوش مصنوعی (بدون فاکتورهای حجم)
     features = {
         'feat_adx': float(candle.get('feat_adx', 0)),
         'feat_rsi': float(candle.get('feat_rsi', 50)),
         'feat_trend_line': float(candle.get('feat_trend_line', 0)),
         'feat_ema_deviation': float(candle.get('feat_ema_deviation', 0)),
         'feat_rsi_momentum': float(candle.get('feat_rsi_momentum', 0)),
-        'feat_body_ratio': float(candle.get('feat_body_ratio', 0))
+        'feat_body_ratio': float(candle.get('feat_body_ratio', 0)),
+        'feat_vol_ratio': float(candle.get('feat_vol_ratio', 1.0)),
+        'feat_atr_percent': float(candle.get('feat_atr_percent', 0))
     }
 
-    # ۵. مدیریت سرمایه و محاسبه حجم پوزیشن
+    # ۵. مدیریت سرمایه و محاسبات حجم پوزیشن
     risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0)
     sl_dist = 1.5 * float(candle['ATR'])
     close_price = float(candle['Close'])
@@ -59,7 +55,7 @@ def generate_signal(df, pair):
     sl_percent = (sl_dist / close_price) * 100
     position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL) if sl_percent > 0 else 0
 
-    # ۶. منطق شکست (Breakout Logic) به همراه تاییدیه مومنتوم RSI
+    # ۶. منطق شکست سطوح (Breakout Logic) به همراه مومنتوم تاییدکننده RSI
     is_bullish_momentum = float(candle.get('feat_rsi', 50)) > 50
     is_bearish_momentum = float(candle.get('feat_rsi', 50)) < 50
 
