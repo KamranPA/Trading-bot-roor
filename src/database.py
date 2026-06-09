@@ -6,11 +6,11 @@ from datetime import datetime
 import config 
 
 def init_db():
-    """🛡️ مقداردهی اولیه دیتابیس در ریشه پروژه (ساختار ۹ فیلتره)"""
+    """🛡️ مقداردهی اولیه دیتابیس با ساختار ۹ فیلتره"""
     with sqlite3.connect(config.DB_NAME) as conn:
         cursor = conn.cursor()
         
-        # جدول اصلی سیگنال‌ها (بدون ستون feat_vol_confirm)
+        # جدول اصلی سیگنال‌ها (بدون ولوم)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY,
@@ -55,9 +55,34 @@ def manage_open_positions():
     except Exception as e:
         print(f"❌ خطا در مدیریت پوزیشن‌ها: {e}")
 
-def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, **features):
-    """ذخیره سیگنال با ۹ فیچر استاندارد"""
+def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1, tp2, position_size, **features):
+    """ذخیره سیگنال به همراه فیچرهای ۹گانه"""
     with sqlite3.connect(config.DB_NAME) as conn:
         cursor = conn.cursor()
-        # در اینجا لیست کلیدهای دیکشنری features باید دقیقاً با ۹ ستون بالا مطابقت داشته باشد
+        
+        allowed_features = [
+            'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 
+            'feat_trend_line', 'feat_ema_deviation', 'feat_rsi_momentum', 
+            'feat_body_ratio', 'feat_high_volume_session'
+        ]
+        
+        # استخراج مقادیر فیچرها (مقدار پیش‌فرض 0.0)
+        values = [features.get(f, 0.0) for f in allowed_features]
+        
+        # درج در دیتابیس
+        query = f"""
+            INSERT INTO signals (
+                timestamp, symbol, direction, entry_price, stop_loss, 
+                {', '.join(allowed_features)}
+            ) VALUES (?, ?, ?, ?, ?, {', '.join(['?'] * len(allowed_features))})
+        """
+        
+        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(query, [timestamp, pair, direction, entry_price, stop_loss] + values)
+        
+        # ذخیره تارگت‌ها
+        signal_id = cursor.lastrowid
+        cursor.execute("INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, 1, ?)", (signal_id, tp1))
+        cursor.execute("INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, 2, ?)", (signal_id, tp2))
+        
         conn.commit()
