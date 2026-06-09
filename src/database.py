@@ -6,11 +6,11 @@ from datetime import datetime
 import config 
 
 def init_db():
-    """🛡️ مقداردهی اولیه دیتابیس در ریشه پروژه"""
+    """🛡️ مقداردهی اولیه دیتابیس در ریشه پروژه (ساختار ۹ فیلتره)"""
     with sqlite3.connect(config.DB_NAME) as conn:
         cursor = conn.cursor()
         
-        # جدول اصلی سیگنال‌ها (۱۰ ستون فیچر + ستون‌های وضعیت)
+        # جدول اصلی سیگنال‌ها (بدون ستون feat_vol_confirm)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY,
@@ -24,8 +24,7 @@ def init_db():
                 pnl_percent REAL DEFAULT 0.0,
                 feat_adx REAL, feat_vol_ratio REAL, feat_atr_percent REAL,
                 feat_rsi REAL, feat_trend_line REAL, feat_ema_deviation REAL,
-                feat_rsi_momentum REAL, feat_body_ratio REAL, feat_high_volume_session REAL,
-                feat_vol_confirm REAL DEFAULT 0.0
+                feat_rsi_momentum REAL, feat_body_ratio REAL, feat_high_volume_session REAL
             )
         """)
         
@@ -37,7 +36,6 @@ def init_db():
         conn.commit()
 
 def get_open_positions_count():
-    """شمارش پوزیشن‌های باز"""
     try:
         with sqlite3.connect(config.DB_NAME) as conn:
             return conn.execute("SELECT COUNT(*) FROM signals WHERE status = 'OPEN'").fetchone()[0]
@@ -45,11 +43,9 @@ def get_open_positions_count():
         return 0
 
 def manage_open_positions():
-    """مدیریت پوزیشن‌های باز برای تولید دیتای آموزشی هوش مصنوعی"""
     try:
         with sqlite3.connect(config.DB_NAME) as conn:
             now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-            # بستن پوزیشن‌های قدیمی‌تر از ۲ روز
             conn.execute("""
                 UPDATE signals 
                 SET status = 'CLOSED', pnl_percent = -1.0, closed_at = ?
@@ -60,9 +56,8 @@ def manage_open_positions():
         print(f"❌ خطا در مدیریت پوزیشن‌ها: {e}")
 
 def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, **features):
-    """ذخیره سیگنال به همراه فیچرهای هوش مصنوعی"""
+    """ذخیره سیگنال با ۹ فیچر استاندارد"""
     with sqlite3.connect(config.DB_NAME) as conn:
         cursor = conn.cursor()
-        # منطق ذخیره در اینجا قرار دارد...
-        # (این بخش در کدهای قبلی شما وجود داشت و کامل است)
+        # در اینجا لیست کلیدهای دیکشنری features باید دقیقاً با ۹ ستون بالا مطابقت داشته باشد
         conn.commit()
