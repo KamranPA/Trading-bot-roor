@@ -1,18 +1,20 @@
-name: Run Trading Bot
+# ---------------------------------------------------------
+# FILE PATH: .github/workflows/main.yml
+# ---------------------------------------------------------
+name: Trading Bot Engine
 
 on:
+  push:
+    branches: [ main ]
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '0 */4 * * *' 
   workflow_dispatch:
 
 jobs:
-  build:
+  run-bot:
     runs-on: ubuntu-latest
-    
-    # ⚠️ دسترسی نوشتن برای کامیت کردن دیتابیس در گیت‌هاب
     permissions:
-      contents: write
-
+      contents: write 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -24,31 +26,17 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install pandas requests ccxt scikit-learn numpy joblib
+          pip install pandas requests pandas-ta scikit-learn joblib
 
       - name: Run Trading Engine
-        env:
-          # اینجا مسیر پروژه را به عنوان ریشه قرار می‌دهیم
-          PYTHONPATH: ${{ github.workspace }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python main.py
+        run: python main.py
 
-      # 💾 بخش جدید: کامیت و پوش کردن دیتابیس پس از اجرای ربات
-      - name: Commit and Push Database
+      - name: Commit and Push Results
         run: |
-          git config --global user.name 'github-actions'
-          git config --global user.email 'github-actions@github.com'
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          # اضافه کردن فایل‌هایی که باید بروزرسانی شوند
+          git add backtest_summary.txt best_params.json data/trading_bot.db
           
-          # اضافه کردن فایل دیتابیس به لیست تغییرات
-          git add data/trading_bot.db
-          
-          # بررسی اینکه آیا سیگنال جدیدی ثبت شده و دیتابیس تغییر کرده است یا خیر
-          if git diff --staged --quiet; then
-            echo "تغییری در دیتابیس وجود نداشت. از کامیت صرف‌نظر شد."
-          else
-            git commit -m "Auto-update: Save new trades and signals to DB"
-            git push
-          fi
+          # بررسی تغییرات و پوش کردن آن‌ها
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update: Bot results and database" && git push)
