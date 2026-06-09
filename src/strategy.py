@@ -1,61 +1,74 @@
-# File Path: src/strategy.py
-import numpy as np
-import pandas as pd
-import logging
+# ---------------------------------------------------------
+# FILE PATH: /src/strategy.py
+# ---------------------------------------------------------
 import config
-from src import strategy_utils
+from src import database, strategy_utils
 
 def generate_signal(df, pair):
-    if df is None or len(df) < 50:
+    if df is None or len(df) < 500:
         return None
 
-    try:
-        # 🟢 اصلاح حیاتی: تبدیل تمام ستون‌ها به حروف کوچک یک‌بار برای همیشه
-        df.columns = [c.lower() for c in df.columns]
-        
-        # حالا همه ستون‌ها با حروف کوچک در دسترس هستند
-        idx = len(df) - 1
-        candle = df.iloc[idx]
-        
-        # استخراج داده‌ها با نام‌های کوچک (مطابق با نرمال‌سازی بالا)
-        close_price = float(candle['close'])
-        
-        # استفاده از تابع utils شما
-        window = getattr(config, 'SWING_WINDOW', 5)
-        last_swing_high = strategy_utils.find_last_swing(df, 'high', window)
-        last_swing_low = strategy_utils.find_last_swing(df, 'low', window)
+    idx = len(df) - 1
+    candle = df.iloc[idx]
+    symbol = pair.split('/')[0]
+    
+    # ۱. مدیریت ریسک (فقط چک تعداد پوزیشن‌ها)
+    if database.get_open_positions_count() >= config.MAX_OPEN_POSITIONS:
+        return None
 
-        if last_swing_high is None or last_swing_low is None:
-            return None
+    # ۲. حذف فیلترهای حجمی و سخت‌گیرانه
+    # فقط فیلترهای جهت‌گیری کلی (EMA) و قدرت روند (ADX) برای جلوگیری از بازارهای رنج باقی می‌مانند
+    if float(candle['feat_adx']) < config.ADX_THRESHOLD:
+        return None
 
-        # استخراج سایر ویژگی‌ها با کلیدهای کوچک
-        atr_value = float(candle.get('feat_atr_percent', 0.1)) * close_price / 100
-        ema_200 = float(candle.get('ema_200', close_price))
-        rsi = float(candle.get('feat_rsi', 50))
-        adx = float(candle.get('feat_adx', 0))
+    # ۳. شناسایی سطوح Swing
+    last_swing_high = strategy_utils.find_last_swing(df, 'high', config.SWING_WINDOW)
+    last_swing_low = strategy_utils.find_last_swing(df, 'low', config.SWING_WINDOW)
 
-        # منطق سیگنال
-        if close_price > last_swing_high and close_price > ema_200 and rsi > 50 and adx > 25:
-            sl_dist = 1.5 * atr_value
-            return {
-                'pair': pair, 'direction': 'LONG', 
-                'entry_price': round(close_price, 4),
-                'stop_loss': round(close_price - sl_dist, 4), 
-                'tp1': round(close_price + (sl_dist * 1.5), 4),
-                'tp2': round(close_price + (sl_dist * 2.5), 4)
-            }
+    if last_swing_high is None or last_swing_low is None:
+        return None
+
+    # ۴. ویژگی‌های هوش مصنوعی (بدون فیلترهای حجم)
+    features = {
+        'feat_adx': float(candle['feat_adx']),
+        'feat_rsi': float(candle['feat_rsi']),
+        'feat_trend_line': float(candle['feat_trend_line']),
+        'feat_ema_deviation': float(candle['feat_ema_deviation']),
+        'feat_rsi_momentum': float(candle['feat_rsi_momentum']),
+        'feat_body_ratio': float(candle['feat_body_ratio'])
+    }
+
+    # ۵. مدیریت سرمایه
+    risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0)
+    sl_dist = 1.5 * float(candle['ATR'])
+    close_price = float(candle['Close'])
+    
+    if close_price <= 0: return None
         
-        elif close_price < last_swing_low and close_price < ema_200 and rsi < 50 and adx > 25:
-            sl_dist = 1.5 * atr_value
-            return {
-                'pair': pair, 'direction': 'SHORT', 
-                'entry_price': round(close_price, 4),
-                'stop_loss': round(close_price + sl_dist, 4), 
-                'tp1': round(close_price - (sl_dist * 1.5), 4),
-                'tp2': round(close_price - (sl_dist * 2.5), 4)
-            }
+    sl_percent = (sl_dist / close_price) * 100
+    position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL) if sl_percent > 0 else 0
 
-    except Exception as e:
-        logging.error(f"❌ خطا در پردازش استراتژی {pair}: {e}")
+    # ۶. منطق شکست (Breakout Logic)
+    # اضافه کردن فیلتر مومنتوم RSI برای تایید شکست
+    is_bullish_momentum = float(candle['feat_rsi']) > 50
+    is_bearish_momentum = float(candle['feat_rsi']) < 50
+
+    if close_price > last_swing_high and is_bullish_momentum:
+        return {
+            'pair': pair, 'direction': 'LONG', 'entry_price': round(close_price, 4),
+            'stop_loss': round(close_price - sl_dist, 4), 
+            'tp1': round(close_price + sl_dist, 4),
+            'tp2': round(close_price + (sl_dist * 2), 4),
+            'position_size': round(position_size, 2), **features
+        }
+    
+    elif close_price < last_swing_low and is_bearish_momentum:
+        return {
+            'pair': pair, 'direction': 'SHORT', 'entry_price': round(close_price, 4),
+            'stop_loss': round(close_price + sl_dist, 4), 
+            'tp1': round(close_price - sl_dist, 4),
+            'tp2': round(close_price - (sl_dist * 2), 4),
+            'position_size': round(position_size, 2), **features
+        }
 
     return None
