@@ -1,25 +1,55 @@
-name: Daily Bot Status Check
+# File Path: .github/workflows/run_bot.yml
+name: Crypto Trading Bot Pipeline
 
 on:
   schedule:
-    - cron: '0 8 * * *' # هر روز ساعت ۱۱:۳۰ صبح به وقت ایران (۰۸:۰۰ به وقت UTC)
-  workflow_dispatch: # دکمه اجرای دستی از داخل گیت‌هاب
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
 
 jobs:
-  ping_telegram:
+  trade:
     runs-on: ubuntu-latest
     steps:
-    - name: Send Status Message to Telegram
-      uses: appleboy/telegram-action@master
-      with:
-        to: ${{ secrets.TELEGRAM_CHAT_ID }}
-        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        format: markdown
-        message: |
-          🟢 *گزارش سلامت سیستم*
-          ━━━━━━━━━━━━━━━
-          🤖 ربات با موفقیت در حال اجراست.
-          ⏰ وضعیت: فعال و در حال اسکن بازار
-          🔍 ارزهای تحت نظر: BTC, ETH, SOL
+    - name: Checkout Repository Code
+      uses: actions/checkout@v4
 
-          ✓ همه‌چیز مرتب است.
+    - name: Set up Python Environment
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10' # تصحیح شد: اصلاح ویژگی از python-node به python-version
+        cache: 'pip'
+
+    - name: Install System Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Download Previous Session State (Database & ML Model)
+      uses: actions/download-artifact@v4
+      with:
+        name: bot-runtime-state
+        path: .
+      continue-on-error: true
+
+    - name: Run Trading Bot Logic & Position Manager
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        COINEX_API_KEY: ${{ secrets.COINEX_API_KEY }}
+        COINEX_SECRET_KEY: ${{ secrets.COINEX_SECRET_KEY }}
+      run: python main.py
+
+    - name: Train and Update AI Model
+      run: python -m src.train_model
+
+    - name: Upload and Preserve Updated State for Next Run
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: bot-runtime-state
+        path: |
+          data/
+          trading_bot.db
+          ml_models/
+          best_params.json
+        retention-days: 7
