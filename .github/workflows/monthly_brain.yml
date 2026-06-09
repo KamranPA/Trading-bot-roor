@@ -1,38 +1,49 @@
-name: Monthly AI Brain Update
+# File Path: .github/workflows/monthly_brain.yml
+name: Monthly AI Brain Re-Training
 
 on:
   schedule:
+    # اجرا در ساعت 00:00 اولین روز هر ماه میلادی
     - cron: '0 0 1 * *'
-  workflow_dispatch:
+  workflow_dispatch: # امکان اجرای دستی از پنل گیت‌هاب
 
 jobs:
-  train:
+  retrain:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.10'
+          cache: 'pip'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas requests ccxt scikit-learn numpy joblib scikit-learn
+          pip install -r requirements.txt
+
+      - name: Download Database Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bot-database
+          path: data/
+        continue-on-error: true # اگر در اولین ماه‌ها آرتیفکتی نباشد خطا ندهد
 
       - name: Run AI Training
         env:
           PYTHONPATH: ${{ github.workspace }}
+        # اصلاح شد: نام متد فراخوانی شده مطابق با تابع واقعی داخل فایل train_model.py به train_ai_model تغییر یافت.
         run: |
-          # اینجا نام تابع را به مقدار درست تغییر دادیم
-          python -c "from src.train_model import train_filter_model; train_filter_model()"
+          python -c "from src.train_model import train_ai_model; train_ai_model()"
 
-      - name: Commit and Push
-        run: |
-          git config --global user.name 'github-actions'
-          git config --global user.email 'github-actions@github.com'
-          git add src/models/
-          git commit -m "Auto-update AI model" || echo "No changes to commit"
-          git push
+      - name: Upload Updated Model and Assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-model-assets
+          path: |
+            ml_models/
+            data/
+          retention-days: 90
