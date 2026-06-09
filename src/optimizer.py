@@ -5,25 +5,31 @@ import json
 import sqlite3
 import os
 import logging
-import pandas as pd  # <-- این ایمپورت اضافه شد تا از کرش سیستم جلوگیری شود
+import pandas as pd
+import config  # ایمپورت فایل کانفیگ برای دسترسی به مسیر صحیح دیتابیس
 
-PARAMS_FILE = "best_params.json"
+# مسیر ذخیره پارامترها در ریشه پروژه
+PARAMS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "best_params.json")
 
 def optimize():
     """
     تحلیل عملکرد ۵۰ معامله آخر و بازنویسیِ هوشمندِ فیلترها
     """
     try:
-        # مسیر دیتابیس با توجه به ساختار پروژه شما
-        BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        db_path = os.path.join(BASE_DIR, "data", "trading_bot.db")
+        # استفاده از مسیر دیتابیسِ موجود در فایل config
+        db_path = config.DB_NAME
         
+        if not os.path.exists(db_path):
+            logging.error(f"⚠️ دیتابیس در مسیر {db_path} پیدا نشد.")
+            return
+
         conn = sqlite3.connect(db_path)
         # دریافت ۵۰ معامله آخر
         df = pd.read_sql("SELECT pnl_percent FROM signals WHERE status = 'CLOSED' ORDER BY id DESC LIMIT 50", conn)
         conn.close()
 
         if len(df) < 50:
+            logging.info("تعداد معاملات کافی نیست (حداقل ۵۰ مورد نیاز است).")
             return
 
         avg_pnl = df['pnl_percent'].mean()
@@ -37,12 +43,10 @@ def optimize():
 
         # منطقِ خودارتقایی (Self-Optimization Logic)
         if avg_pnl < 0:
-            # اگر عملکرد منفی است، فیلترها را سخت‌گیرانه‌تر کن
-            params['adx_threshold'] += 1.0 # ورود در روندهای قوی‌تر
+            params['adx_threshold'] += 1.0 
             if 'tp' in params: params['tp'] += 0.002
             logging.info("📉 عملکرد منفی: پارامترها سخت‌گیرانه‌تر شدند.")
         else:
-            # اگر عملکرد مثبت است، کمی ریسک را بهینه کن
             params['adx_threshold'] = max(20.0, params['adx_threshold'] - 0.5)
             logging.info("🚀 عملکرد مثبت: پارامترها بهینه باقی ماندند.")
 
@@ -50,7 +54,7 @@ def optimize():
         with open(PARAMS_FILE, 'w') as f:
             json.dump(params, f, indent=4)
             
-        logging.info(f"✅ فایل {PARAMS_FILE} با موفقیت آپدیت شد: {params}")
+        logging.info(f"✅ فایل {PARAMS_FILE} با موفقیت آپدیت شد.")
 
     except Exception as e:
         logging.error(f"⚠️ خطا در پروسه ارتقای خودکار: {e}")
