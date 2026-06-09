@@ -1,16 +1,19 @@
-# File Path: /src/database.py
+# File Path: src/database.py
 import sqlite3
 import os
 from datetime import datetime
+import config
 
-DB_NAME = "data/trading_bot.db"  # اصلاح مسیر برای هماهنگی با خط لوله گیت‌هاب
+# دریافت مسیر دیتابیس از کانفیگ مرکزی
+DB_NAME = getattr(config, 'DB_NAME', 'data/trading_bot.db')
 
 def init_db():
-    """ایجاد جداول دیتابیس در صورت عدم وجود"""
+    """ایجاد جداول دیتابیس مانیتورینگ با ستون‌های استاندارد"""
     os.makedirs(os.path.dirname(DB_NAME), exist_ok=True)
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
         
+        # جدول اصلی ثبت سیگنال‌ها برای مانیتورینگ و هوش مصنوعی
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29,6 +32,7 @@ def init_db():
             )
         ''')
         
+        # جدول پایش تارگت‌های فرضی
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS signal_targets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,27 +46,28 @@ def init_db():
         conn.commit()
 
 def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, **indicators_dict):
-    """اصلاح شد: تطبیق نام تابع و ساختار آرگومان‌ها با فایل main.py"""
+    """ثبت سیگنال رصد شده جهت پایش مجازی و استفاده در هوش مصنوعی"""
     init_db()
     try:
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
             created_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
             
+            # ذخیره با حروف کوچک کاملاً هماهنگ با بخش Train هوش مصنوعی
             cursor.execute('''
                 INSERT INTO signals (symbol, direction, entry_price, stop_loss, status, created_at, atr, adx, rsi, ema_diff)
                 VALUES (?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?)
             ''', (
                 symbol, direction, entry_price, stop_loss, created_at,
-                indicators_dict.get('feat_atr_percent', 0.0),
-                indicators_dict.get('feat_adx', 0.0),
-                indicators_dict.get('feat_rsi', 0.0),
-                indicators_dict.get('feat_ema_deviation', 0.0)
+                indicators_dict.get('feat_atr_percent', indicators_dict.get('atr', 0.0)),
+                indicators_dict.get('feat_adx', indicators_dict.get('adx', 0.0)),
+                indicators_dict.get('feat_rsi', indicators_dict.get('rsi', 0.0)),
+                indicators_dict.get('feat_ema_deviation', indicators_dict.get('ema_diff', 0.0))
             ))
             
             signal_id = cursor.lastrowid
             
-            # ذخیره تارگت‌های ۱ و ۲
+            # ثبت تارگت‌های ۱ و ۲ برای پایش فرضی قیمت
             for i, target_price in enumerate([tp1, tp2], 1):
                 cursor.execute('''
                     INSERT INTO signal_targets (signal_id, target_number, target_price, status)
@@ -70,13 +75,14 @@ def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, **
                 ''', (signal_id, i, target_price))
                 
             conn.commit()
+            print(f"📊 [Monitor] سیگنال فرضی {symbol} برای مانیتورینگ در دیتابیس ثبت شد.")
             return signal_id
     except Exception as e:
         print(f"❌ [Database] خطا در ذخیره سیگنال پیشرفته: {e}")
         return None
 
 def get_open_positions_count():
-    """تعداد پوزیشن‌های باز برای اعمال محدودیت تعداد معاملات همزمان"""
+    """تعداد سیگنال‌های در حال مانیتور فعال"""
     init_db()
     try:
         with sqlite3.connect(DB_NAME) as conn:
@@ -84,11 +90,10 @@ def get_open_positions_count():
             cursor.execute("SELECT COUNT(*) FROM signals WHERE status = 'OPEN'")
             return cursor.fetchone()[0]
     except Exception as e:
-        print(f"❌ [Database] خطا در دریافت تعداد پوزیشن‌ها: {e}")
         return 0
 
 def manage_open_positions():
-    """مدیریت پوزیشن‌های باز: ریسک‌فری در TP1 و بستن پوزیشن در SL یا TP2"""
+    """پایش پوزیشن‌های باز مجازی بر اساس آخرین قیمت صرافی بدون ترید واقعی"""
     from src import coinex_client 
     init_db()
     
@@ -103,7 +108,6 @@ def manage_open_positions():
 
             for trade in open_trades:
                 trade_id, symbol, direction, entry_price, stop_loss = trade
-                
                 df = coinex_client.get_coinex_candles(symbol)
                 if df is None or df.empty:
                     continue
@@ -130,7 +134,7 @@ def manage_open_positions():
                     elif tp1_price and current_price >= tp1_price and tp1_status == 'PENDING':
                         cursor.execute("UPDATE signal_targets SET status = 'HIT' WHERE signal_id = ? AND target_number = 1", (trade_id,))
                         cursor.execute("UPDATE signals SET stop_loss = ? WHERE id = ?", (entry_price, trade_id))
-                        print(f"🛡️ پوزیشن {symbol} ریسک‌فری شد.")
+                        print(f"🛡️ سیگنال مانیتورینگ {symbol} ریسک‌فری شد.")
 
                 elif direction == 'SHORT':
                     if current_price >= stop_loss:
@@ -142,7 +146,7 @@ def manage_open_positions():
                     elif tp1_price and current_price <= tp1_price and tp1_status == 'PENDING':
                         cursor.execute("UPDATE signal_targets SET status = 'HIT' WHERE signal_id = ? AND target_number = 1", (trade_id,))
                         cursor.execute("UPDATE signals SET stop_loss = ? WHERE id = ?", (entry_price, trade_id))
-                        print(f"🛡️ پوزیشن {symbol} ریسک‌فری شد.")
+                        print(f"🛡️ سیگنال مانیتورینگ {symbol} ریسک‌فری شد.")
 
                 if close_trade:
                     closed_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
@@ -151,7 +155,6 @@ def manage_open_positions():
                         (closed_at, round(pnl_percent, 2), trade_id)
                     )
                     conn.commit()
-                    print(f"✅ معامله {symbol} بسته شد. PnL: {round(pnl_percent, 2)}%")
-
+                    print(f"✅ پوزیشن فرضی {symbol} بسته شد. بازدهی ثبت‌شده: {round(pnl_percent, 2)}%")
     except Exception as e:
-        print(f"❌ خطا در اجرای پایش پوزیشن‌ها: {e}")
+        print(f"❌ خطا در مانیتورینگ پوزیشن‌ها: {e}")
