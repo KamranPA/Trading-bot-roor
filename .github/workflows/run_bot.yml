@@ -1,4 +1,5 @@
 # ---------------------------------------------------------
+# FILE NAME: main.yml
 # FILE PATH: .github/workflows/main.yml
 # ---------------------------------------------------------
 name: Trading Bot Engine
@@ -22,14 +23,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.10' # ارتقا به نسخه ۳.۱۰ برای سازگاری بهتر با کتابخانه‌ها
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pandas requests scikit-learn joblib
-          # نصب مستقیم از گیت‌هاب برای رفع خطای pandas-ta
-          pip install git+https://github.com/twopirllc/pandas-ta.git
+          pip install pandas-ta --use-deprecated=legacy-resolver || pip install pandas-ta
 
       - name: Run Trading Engine
         run: python main.py
@@ -39,8 +39,8 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           
-          # اضافه کردن فایل‌های مهم برای آپدیت شدن
+          # اضافه کردن فایل‌های نتایج به محیط گیت
           git add backtest_summary.txt best_params.json data/trading_bot.db
           
-          # بررسی اینکه آیا تغییری ایجاد شده است یا خیر
+          # تایید تغییرات و ارسال به سرور در صورت وجود تغییر جدید
           git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update: Bot results and database" && git push)
