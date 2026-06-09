@@ -1,4 +1,5 @@
 # ---------------------------------------------------------
+# FILE NAME: database.py
 # FILE PATH: /src/database.py
 # ---------------------------------------------------------
 import os
@@ -112,3 +113,23 @@ def log_scan(symbol, result):
             )
     except Exception as e:
         print(f"❌ خطا در ثبت لاگ اسکن: {e}")
+
+def manage_open_positions():
+    """
+    🔍 پایش پوزیشن‌های باز دیتابیس
+    این تابع برای جلوگیری از توقف و کرش کردن ربات در main.py الزامی است.
+    """
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            cursor = conn.cursor()
+            # استخراج پوزیشن‌های باز موجود در سیستم
+            cursor.execute("SELECT id, symbol, direction, entry_price, stop_loss FROM signals WHERE status = 'OPEN'")
+            open_positions = cursor.fetchall()
+            
+            if not open_positions:
+                return
+            
+            # در اینجا می‌توان در آینده منطق پیاده‌سازی لایو ریسک‌فری (برخورد قیمت به TP1 یا SL) را توسعه داد.
+                
+    except Exception as e:
+        print(f"❌ خطا در بررسی و مدیریت پوزیشن‌های باز در دیتابیس: {e}")
