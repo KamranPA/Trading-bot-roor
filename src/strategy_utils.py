@@ -1,9 +1,36 @@
 # ---------------------------------------------------------
-# FILE NAME: indicators.py
-# FILE PATH: /src/indicators.py
+# FILE PATH: src/strategy_utils.py
 # ---------------------------------------------------------
 import pandas as pd
 import numpy as np
+
+def find_last_swing(df, swing_type='high', window=5):
+    """
+    پیدا کردن آخرین قله (Swing High) یا دره (Swing Low) 
+    برای تعیین نقاط مقاومت و حمایت استراتژی Breakout.
+    """
+    try:
+        if len(df) < window * 2:
+            return None
+            
+        if swing_type == 'high':
+            # یافتن ماکزیمم محلی
+            swing_series = df['High'].rolling(window=window*2+1, center=True).max()
+            # پیدا کردن آخرین نقطه‌ای که ماکزیمم محلی با قیمت High خودش برابر است
+            swings = df[df['High'] == swing_series]
+            if not swings.empty:
+                return float(swings.iloc[-1]['High'])
+        elif swing_type == 'low':
+            # یافتن مینیمم محلی
+            swing_series = df['Low'].rolling(window=window*2+1, center=True).min()
+            swings = df[df['Low'] == swing_series]
+            if not swings.empty:
+                return float(swings.iloc[-1]['Low'])
+                
+        return None
+    except Exception as e:
+        print(f"خطا در محاسبه Swing: {e}")
+        return None
 
 def calculate_indicators(df):
     """
@@ -19,7 +46,7 @@ def calculate_indicators(df):
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
+    rs = gain / (loss + 1e-10) # جلوگیری از خطای تقسیم بر صفر
     df['feat_adx'] = 100 - (100 / (1 + rs))
     
     # 3. ATR Percent (نوسان‌پذیری)
@@ -32,7 +59,7 @@ def calculate_indicators(df):
     down = -1 * delta.clip(upper=0)
     ema_up = up.ewm(com=13, adjust=False).mean()
     ema_down = down.ewm(com=13, adjust=False).mean()
-    rs = ema_up / ema_down
+    rs = ema_up / (ema_down + 1e-10)
     df['feat_rsi'] = 100 - (100 / (1 + rs))
     
     # 5. EMA Deviation (انحراف از میانگین - برای تشخیص پولبک)
@@ -46,11 +73,10 @@ def calculate_indicators(df):
     df['feat_body_ratio'] = abs(df['Close'] - df['Open']) / (df['High'] - df['Low'] + 0.0001)
     
     # 8. High Volume Session (تغییر ماهیت به نوسان قیمتی):
-    # به جای حجم، از دامنه تغییرات قیمت (Range) برای تشخیصِ اهمیت کندل استفاده می‌کنیم
     df['feat_high_volume_session'] = np.where((df['High'] - df['Low']) > (df['High'] - df['Low']).rolling(20).mean(), 1.0, 0.0)
     
     # 9. Volatility Ratio (نسبت نوسان فعلی به میانگین)
-    df['feat_vol_ratio'] = (df['High'] - df['Low']) / (df['High'] - df['Low']).rolling(window=10).mean()
+    df['feat_vol_ratio'] = (df['High'] - df['Low']) / ((df['High'] - df['Low']).rolling(window=10).mean() + 1e-10)
 
     # پر کردن مقادیر خالی (NaN)
     df.fillna(0, inplace=True)
