@@ -1,4 +1,4 @@
-name: Crypto Trading Bot Pipeline
+name: Run Trading Bot
 
 on:
   schedule:
@@ -6,44 +6,26 @@ on:
   workflow_dispatch:
 
 jobs:
-  trade:
+  build:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout Repository Code
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Set up Python Environment
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-        cache: 'pip'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-    - name: Install System Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas requests ccxt scikit-learn numpy joblib
 
-    - name: Download Previous Session State
-      uses: actions/download-artifact@v4
-      with:
-        name: bot-runtime-state
-        path: .
-      continue-on-error: true
-
-    - name: Run Trading Bot Logic & Position Manager
-      env:
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        COINEX_API_KEY: ${{ secrets.COINEX_API_KEY }}
-        COINEX_SECRET_KEY: ${{ secrets.COINEX_SECRET_KEY }}
-      run: python main.py
-
-    - name: Upload and Preserve Updated State
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: bot-runtime-state
-        path: |
-          **/*.db
-          **/*.json
-        if-no-files-found: ignore
+      - name: Run Trading Engine
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python main.py
