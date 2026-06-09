@@ -1,8 +1,9 @@
+# File Path: .github/workflows/run_bot.yml
 name: Crypto Trading Bot Pipeline
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # اجرای خودکار دقیقاً هر ۳۰ دقیقه یکبار
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -15,7 +16,7 @@ jobs:
     - name: Set up Python Environment
       uses: actions/setup-python@v5
       with:
-        python-node: '3.10'
+        python-version: '3.10'
         cache: 'pip'
 
     - name: Install System Dependencies
@@ -23,12 +24,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Download Previous Session State (Database & ML Model)
+    - name: Download Previous Session State
       uses: actions/download-artifact@v4
       with:
         name: bot-runtime-state
         path: .
-      continue-on-error: true # در اولین اجرا که آرتیفکتی نیست خطا صادر نمی‌کند
+      continue-on-error: true
 
     - name: Run Trading Bot Logic & Position Manager
       env:
@@ -40,14 +41,14 @@ jobs:
 
     - name: Train and Update AI Model
       run: python -m src.train_model
+      continue-on-error: true
 
-    - name: Upload and Preserve Updated State for Next Run
-      if: always() # حتی اگر ربات با خطا مواجه شد دیتابیس فعلی حفظ می‌شود
+    - name: Upload and Preserve Updated State
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: bot-runtime-state
         path: |
-          trading_bot.db
-          ml_models/
-          best_params.json
-        retention-days: 7
+          **/*.db
+          **/*.json
+        if-no-files-found: ignore
