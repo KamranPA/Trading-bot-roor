@@ -8,6 +8,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    
+    # ⚠️ دسترسی نوشتن برای کامیت کردن دیتابیس در گیت‌هاب
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -30,3 +35,20 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python main.py
+
+      # 💾 بخش جدید: کامیت و پوش کردن دیتابیس پس از اجرای ربات
+      - name: Commit and Push Database
+        run: |
+          git config --global user.name 'github-actions'
+          git config --global user.email 'github-actions@github.com'
+          
+          # اضافه کردن فایل دیتابیس به لیست تغییرات
+          git add data/trading_bot.db
+          
+          # بررسی اینکه آیا سیگنال جدیدی ثبت شده و دیتابیس تغییر کرده است یا خیر
+          if git diff --staged --quiet; then
+            echo "تغییری در دیتابیس وجود نداشت. از کامیت صرف‌نظر شد."
+          else
+            git commit -m "Auto-update: Save new trades and signals to DB"
+            git push
+          fi
