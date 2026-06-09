@@ -6,8 +6,8 @@ import os
 # 🪙 لیست واچ‌لیست (۱۵ ارز اصلی)
 WATCHLIST = [
     "BTC/USDT", "ETH/USDT", "SOL/USDT", "SUI/USDT", "LINK/USDT", 
-    "AVAX/USDT", "DOGE/USDT", "ADA/USDT", "MATIC/USDT", "DOT/USDT",
-    "ARB/USDT", "OP/USDT", "ATOM/USDT", "NEAR/USDT", "FTM/USDT"
+    "AVAX/USDT", "DOGE/USDT", "ADA/USDT", "POL/USDT", "DOT/USDT",
+    "ARB/USDT", "OP/USDT", "ATOM/USDT", "NEAR/USDT",
 ]
 
 # 📊 تنظیمات داده و تایم‌فریم
