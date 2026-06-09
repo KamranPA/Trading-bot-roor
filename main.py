@@ -1,4 +1,5 @@
 # ---------------------------------------------------------
+# FILE NAME: main.py
 # FILE PATH: /main.py
 # ---------------------------------------------------------
 
@@ -6,90 +7,112 @@ import os
 import sys
 import logging
 import time
-import joblib
 import sqlite3
 
-# ۱. تنظیم هوشمند مسیرها (بدون وابستگی به محل اجرا)
+# ۱. تنظیم هوشمند مسیرها (بدون وابستگی به محل اجرا در گیت‌هاب)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SRC_DIR = os.path.join(BASE_DIR, 'src')
 
-# افزودن مسیرها به ابتدای لیست جستجوی پایتون (اولویت بالا)
+# افزودن مسیرها به ابتدای لیست جستجوی پایتون برای اولویت بالا
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-# ۲. واردات ماژول‌ها - استفاده از Try/Except برای دیباگ سریع‌تر
+# ۲. واردات ماژول‌ها با مدیریت خطا برای دیباگ سریع‌تر
 try:
     import config
-    from src import database, coinex_client, strategy, telegram_bot, indicators, optimizer
+    from src import database, coinex_client, strategy, telegram_bot, strategy_utils, optimizer, brain
 except ImportError as e:
-    logging.critical(f"خطای بحرانی در وارد کردن ماژول‌ها: {e}")
+    logging.critical(f"❌ خطای بحرانی در وارد کردن ماژول‌ها: {e}")
     sys.exit(1)
 
-# ۳. تنظیم لاگ‌گیری استاندارد (ذخیره در فایل برای بررسی در گیت‌هاب)
+# ۳. تنظیم لاگ‌گیری استاندارد برای گیت‌هاب اکشنز
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()] # لاگ‌ها در گیت‌هاب اکشن مستقیم چاپ می‌شوند
+    handlers=[logging.StreamHandler()]
 )
 
-MODEL_PATH = os.path.join(SRC_DIR, "models", "trading_filter_model.pkl")
-
-def get_model():
-    """لود مدل با بررسی وجود فایل و مدیریت حافظه"""
-    if not os.path.exists(MODEL_PATH):
-        logging.warning("فایل مدل یافت نشد. بدون هوش مصنوعی ادامه می‌دهیم.")
-        return None
-    try:
-        return joblib.load(MODEL_PATH)
-    except Exception as e:
-        logging.error(f"خطا در بارگذاری مدل: {e}")
-        return None
-
 def run_auto_optimization():
-    """فراخوانی بهینه‌ساز با چک کردن مسیر دیتابیس"""
+    """📊 فراخوانی بهینه‌ساز پس از رسیدن معاملات بسته شده به ضریب ۵۰"""
     try:
-        # استفاده از مسیر مطلق برای دیتابیس
         db_path = getattr(database, 'DB_NAME', os.path.join(BASE_DIR, 'data', 'trading_bot.db'))
         if os.path.exists(db_path):
             with sqlite3.connect(db_path) as conn:
-                count = conn.execute("SELECT count(*) FROM signals").fetchone()[0]
+                count = conn.execute("SELECT count(*) FROM signals WHERE status = 'CLOSED'").fetchone()[0]
             
             if count > 0 and count % 50 == 0:
-                logging.info(f"🚀 رسیدن به {count} معامله؛ شروع ارتقای هوشمند...")
+                logging.info(f"🚀 رسیدن به {count} معامله بسته شده؛ شروع ارتقای هوشمند پارامترها...")
                 optimizer.optimize()
     except Exception as e:
-        logging.error(f"خطا در پروسه خودارتقایی: {e}")
+        logging.error(f"⚠️ خطا در پروسه خودارتقایی دیتابیس: {e}")
 
 def run_bot():
     logging.info("🤖 اسکنر هوشمند v7.2 فعال شد.")
+    
+    # راه‌اندازی و پایش پایگاه داده
     database.init_db()
     
-    # مدیریت پوزیشن‌های باز
     try:
         database.manage_open_positions()
     except Exception as e:
-        logging.error(f"خطا در مدیریت پوزیشن‌ها: {e}")
+        logging.error(f"⚠️ خطا در مدیریت پوزیشن‌های باز: {e}")
     
+    # بررسی نیاز به بهینه‌سازی پارامترها
     run_auto_optimization()
     
-    # اسکن بازار
+    # مقداردهی اولیه به مغز متفکر هوش مصنوعی
+    trading_brain = brain.TradingBrain()
+    
+    # شروع اسکن چرخشی واچ‌لیست بهینه‌سازی شده
     watchlist = getattr(config, 'WATCHLIST', [])
+    logging.info(f"🔍 شروع اسکن {len(watchlist)} جفت ارز در تایم‌فریم {config.TIMEFRAME}...")
+    
     for pair in watchlist:
         try:
+            # ۱. دریافت داده‌های کندل استیک از صرافی کوین‌اکس
             df = coinex_client.get_coinex_candles(pair)
-            if df is None or df.empty: continue
+            if df is None or df.empty:
+                logging.warning(f"⚠️ دیتایی برای {pair} دریافت نشد. رفتن به ارز بعدی...")
+                continue
                 
-            df = indicators.calculate_indicators(df)
+            # ۲. محاسبه دقیق ۹ فیلتر قیمتی و مومنتوم
+            df = strategy_utils.calculate_indicators(df)
+            
+            # ۳. بررسی شرایط شکست (Breakout) قله یا دره اخیر
             signal_result = strategy.generate_signal(df, pair)
             
             if signal_result:
-                database.save_signal_advanced(pair=pair, **signal_result)
-                telegram_bot.format_and_send_signal(signal_result)
-                logging.info(f"✅ سیگنال برای {pair} ارسال شد.")
+                # ۴. فیلترینگ نهایی سیگنال توسط مدل یادگیری ماشین (AI Filter)
+                ai_features = {k: v for k, v in signal_result.items() if k.startswith('feat_')}
+                is_approved_by_ai = trading_brain.predict(ai_features)
+                
+                if is_approved_by_ai:
+                    # حذف کلیدهای موقتی قبل از ذخیره در دیتابیس
+                    pop_keys = ['pair', 'position_size']
+                    db_features = {k: v for k, v in signal_result.items() if k not in pop_keys}
+                    
+                    # ۵. ذخیره سیگنال تایید شده در SQLite
+                    database.save_signal_advanced(
+                        symbol=pair,
+                        direction=signal_result['direction'],
+                        entry_price=signal_result['entry_price'],
+                        stop_loss=signal_result['stop_loss'],
+                        tp1=signal_result['tp1'],
+                        tp2=signal_result['tp2'],
+                        **{k: v for k, v in ai_features.items()}
+                    )
+                    
+                    # ۶. ارسال سیگنال به کانال یا گروه تلگرام شما
+                    telegram_bot.format_and_send_signal(signal_result)
+                    logging.info(f"✅ سیگنال خرید/فروش برای {pair} با موفقیت صادر و ارسال شد.")
+                else:
+                    logging.info(f"🧠 [هوش مصنوعی]: سیگنال {pair} به دلیل ریسک بالا رد شد.")
         
         except Exception as e:
-            logging.error(f"خطا در پردازش {pair}: {e}")
+            logging.error(f"❌ خطا در پردازش چرخشی جفت ارز {pair}: {e}")
             time.sleep(1)
+            
+    logging.info("🏁 اسکن دوره‌ای با موفقیت پایان یافت. سیستم در انتظار چرخه بعدی...")
 
 if __name__ == "__main__":
     run_bot()
