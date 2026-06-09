@@ -3,45 +3,50 @@
 # ---------------------------------------------------------
 
 import os
-import joblib
+import jobpath
 import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODEL_PATH = os.path.join(BASE_DIR, "src", "models", "trading_filter_model.pkl")
+MODEL_PATH = "ml_models/rf_trading_model.pkl"
 
 class TradingBrain:
     def __init__(self):
-        """🧠 مغز متفکر هوش مصنوعی ۱۰‌بعدی"""
         self.model = None
-        self.is_active = False
-        
+        self.feature_order = ['atr', 'adx', 'rsi', 'ema_diff']
+        self.load_model()
+
+    def load_model(self):
+        """بارگذاری مدل هوش مصنوعی در صورت وجود"""
         if os.path.exists(MODEL_PATH):
             try:
-                self.model = joblib.load(MODEL_PATH)
-                self.is_active = True
-                print("🤖 [هوش مصنوعی]: مدل ۱۰‌بعدی بارگذاری شد.")
+                with open(MODEL_PATH, 'rb') as f:
+                    self.model = jobpath.load(f)
+                print("🧠 مدل هوش مصنوعی با موفقیت بارگذاری شد.")
             except Exception as e:
-                print(f"⚠️ خطای بارگذاری مدل: {e}")
+                print(f"⚠️ خطا در بارگذاری مدل هوش مصنوعی: {e}")
+                self.model = None
+        else:
+            print("ℹ️ فیلتر هوش مصنوعی فعال نیست (مدل یافت نشد). تایید خودکار اعمال می‌شود.")
 
-    def predict(self, features_dict):
-        """
-        🔮 فیلتر هوشمند سیگنال
-        """
-        if not self.is_active or self.model is None:
-            return True # حالتِ جمع‌آوری دیتا: همه سیگنال‌ها تایید می‌شوند
-
+    def approve_signal(self, indicators_dict):
+        """بررسی سیگنال صادر شده توسط مدل هوش مصنوعی"""
+        if self.model is None:
+            return True  # اگر مدلی آموزش ندیده باشد، سیگنال استراتژی را مسدود نمی‌کند
+            
         try:
-            # شناسایی ویژگی‌های مورد نیاز مدل به صورت داینامیک
-            # این کار باعث می‌شود اگر مدل ۱۰ فاکتوره است، ۱۰ تا را بگیرد و اگر ۱۱ شد، اتوماتیک آپدیت شود
-            feature_names = self.model.feature_names_in_ 
+            # تبدیل کلیدها به حروف کوچک برای یکپارچگی با نام ستون‌های دیتابیس
+            input_data = {
+                'atr': indicators_dict.get('ATR', 0.0),
+                'adx': indicators_dict.get('ADX', 0.0),
+                'rsi': indicators_dict.get('RSI', 0.0),
+                'ema_diff': indicators_dict.get('EMA_diff', 0.0)
+            }
             
-            # آماده‌سازی دیتافریم ورودی بر اساس نیاز مدل
-            input_data = pd.DataFrame([{f: features_dict.get(f, 0.0) for f in feature_names}])
+            # چیدمان دقیق ویژگی‌ها بر اساس ترتیب تعریف شده
+            df_features = pd.DataFrame([input_data], columns=self.feature_order)
             
-            # پیش‌بینی
-            prediction = self.model.predict(input_data)[0]
+            prediction = self.model.predict(df_features)[0]
             return bool(prediction == 1)
-            
         except Exception as e:
-            print(f"❌ خطای پیش‌بینی: {e}")
-            return True 
+            print(f"❌ خطا در پردازش فیلتر هوش مصنوعی: {e}")
+            return True
