@@ -1,36 +1,58 @@
 # ---------------------------------------------------------
-# FILE NAME: src/strategy_utils.py
+# FILE NAME: indicators.py
+# FILE PATH: /src/indicators.py
 # ---------------------------------------------------------
 import pandas as pd
 import numpy as np
 
-def find_last_swing(df, window=5):
-    """پیدا کردن آخرین نقطه سویینگ (High/Low) برای استراتژی"""
-    if len(df) < window:
-        return None
+def calculate_indicators(df):
+    """
+    محاسبه ۹ فیلتر کلیدی برای سیستم هوشمند.
+    فیلترهای حجم حذف شده‌اند و تمرکز بر قیمت و مومنتوم است.
+    """
+    df = df.copy()
     
-    # پیدا کردن آخرین سقف یا کف محلی
-    last_high = df['high'].rolling(window=window, center=True).max().iloc[-1]
-    last_low = df['low'].rolling(window=window, center=True).min().iloc[-1]
+    # 1. Trend Line (ساده‌سازی شده برای تشخیص روند کلی)
+    df['feat_trend_line'] = np.where(df['Close'] > df['Close'].rolling(window=20).mean(), 1.0, 0.0)
     
-    return {"high": last_high, "low": last_low}
+    # 2. ADX (قدرت روند)
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df['feat_adx'] = 100 - (100 / (1 + rs))
+    
+    # 3. ATR Percent (نوسان‌پذیری)
+    high_low = df['High'] - df['Low']
+    df['feat_atr_percent'] = (high_low.rolling(window=14).mean() / df['Close']) * 100
+    
+    # 4. RSI (شاخص قدرت نسبی)
+    delta = df['Close'].diff()
+    up = delta.clip(lower=0)
+    down = -1 * delta.clip(upper=0)
+    ema_up = up.ewm(com=13, adjust=False).mean()
+    ema_down = down.ewm(com=13, adjust=False).mean()
+    rs = ema_up / ema_down
+    df['feat_rsi'] = 100 - (100 / (1 + rs))
+    
+    # 5. EMA Deviation (انحراف از میانگین - برای تشخیص پولبک)
+    ema_20 = df['Close'].ewm(span=20, adjust=False).mean()
+    df['feat_ema_deviation'] = (df['Close'] - ema_20) / ema_20 * 100
+    
+    # 6. RSI Momentum (شتاب RSI)
+    df['feat_rsi_momentum'] = df['feat_rsi'].diff()
+    
+    # 7. Body Ratio (نسبت بدنه به سایه - قدرت خریدار/فروشنده)
+    df['feat_body_ratio'] = abs(df['Close'] - df['Open']) / (df['High'] - df['Low'] + 0.0001)
+    
+    # 8. High Volume Session (تغییر ماهیت به نوسان قیمتی):
+    # به جای حجم، از دامنه تغییرات قیمت (Range) برای تشخیصِ اهمیت کندل استفاده می‌کنیم
+    df['feat_high_volume_session'] = np.where((df['High'] - df['Low']) > (df['High'] - df['Low']).rolling(20).mean(), 1.0, 0.0)
+    
+    # 9. Volatility Ratio (نسبت نوسان فعلی به میانگین)
+    df['feat_vol_ratio'] = (df['High'] - df['Low']) / (df['High'] - df['Low']).rolling(window=10).mean()
 
-def calculate_adx(df, period=14):
-    """محاسبه شاخص ADX برای فیلتر قدرت روند"""
-    plus_dm = df['high'].diff()
-    minus_dm = df['low'].diff()
-    plus_dm[plus_dm < 0] = 0
-    minus_dm[minus_dm < 0] = 0
+    # پر کردن مقادیر خالی (NaN)
+    df.fillna(0, inplace=True)
     
-    tr1 = pd.DataFrame(df['high'] - df['low'])
-    tr2 = pd.DataFrame(abs(df['high'] - df['close'].shift(1)))
-    tr3 = pd.DataFrame(abs(df['low'] - df['close'].shift(1)))
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    
-    atr = tr.rolling(period).mean()
-    plus_di = 100 * (plus_dm.rolling(period).mean() / atr)
-    minus_di = 100 * (minus_dm.rolling(period).mean() / atr)
-    dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
-    adx = dx.rolling(period).mean()
-    
-    return adx.iloc[-1]
+    return df
