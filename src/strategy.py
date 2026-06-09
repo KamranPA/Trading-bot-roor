@@ -2,96 +2,89 @@
 import numpy as np
 import pandas as pd
 import logging
-from src.strategy_utils import calculate_indicators
 import config
+from src import database, strategy_utils
 
-def check_strategy(df):
+def generate_signal(df, pair):
     """
-    بررسی استراتژی شکست سقف و کف داینامیک (بدون فیلتر حجم و کاملاً امن در برابر دیتای خالی)
+    بررسی و تولید سیگنال بر اساس شکست سطوح (بدون فیلتر حجم)
+    هماهنگ شده با main.py و strategy_utils.py
     """
-    # گام امنیتی: اگر دیتا وجود نداشت یا ناقص بود، بدون کرش کردن خارج شو
-    if df is None or not isinstance(df, pd.DataFrame) or df.empty or len(df) < 50:
+    if df is None or len(df) < 50:
         return None
 
     try:
-        # ۱. محاسبه اندیکاتورها از طریق ماژول کمکی شما
-        df = calculate_indicators(df)
+        idx = len(df) - 1
+        candle = df.iloc[idx]
         
-        # چک کردن مجدد برای اطمینان از اینکه خروجی لایبرری تحلیل هم خالی نیست
-        if df is None or df.empty:
+        # ۱. سقف تعداد پوزیشن‌های باز همزمان
+        if database.get_open_positions_count() >= getattr(config, 'MAX_OPEN_POSITIONS', 15):
+            return None
+
+        # ۲. فیلتر قدرت روند (ADX) برای فیلتر بازارهای رنج
+        adx_threshold = getattr(config, 'ADX_THRESHOLD', 25.0)
+        if float(candle.get('feat_adx', 0)) < adx_threshold:
+            return None
+
+        # ۳. شناسایی آخرین قله و دره قیمتی با استفاده از تابع اصلی شما
+        window = getattr(config, 'SWING_WINDOW', 5)
+        last_swing_high = strategy_utils.find_last_swing(df, 'high', window)
+        last_swing_low = strategy_utils.find_last_swing(df, 'low', window)
+
+        if last_swing_high is None or last_swing_low is None:
+            return None
+
+        # ۴. استخراج ویژگی‌های معتبر قیمتی برای هوش مصنوعی (بدون فاکتورهای حجم)
+        features = {
+            'feat_adx': float(candle.get('feat_adx', 0)),
+            'feat_rsi': float(candle.get('feat_rsi', 50)),
+            'feat_trend_line': float(candle.get('feat_trend_line', 0)),
+            'feat_ema_deviation': float(candle.get('feat_ema_deviation', 0)),
+            'feat_rsi_momentum': float(candle.get('feat_rsi_momentum', 0)),
+            'feat_body_ratio': float(candle.get('feat_body_ratio', 0)),
+            'feat_vol_ratio': float(candle.get('feat_vol_ratio', 1.0)),
+            'feat_atr_percent': float(candle.get('feat_atr_percent', 0))
+        }
+
+        # ۵. مدیریت سرمایه و محاسبات حد ضرر/سود
+        close_price = float(candle['Close'])
+        atr_value = float(candle['ATR'])
+        
+        if close_price <= 0: 
             return None
             
-        # متصل کردن نام ستون‌ها به حروف کوچک برای ستون‌های استاندارد صرافی
-        df.columns = [col.lower() for col in df.columns]
-        
-        # دسترسی به آخرین کندل بسته شده (یکی مانده به آخر)
-        last_row = df.iloc[-2]
-        current_price = float(last_row['close'])
-        
-        # استخراج اندیکاتورها با پشتیبانی هوشمند از حروف کوچک و بزرگ برای امنیت بالا
-        rsi = float(last_row.get('rsi', last_row.get('RSI', 50.0)))
-        adx = float(last_row.get('adx', last_row.get('ADX', 20.0)))
-        ema_200 = float(last_row.get('ema_200', last_row.get('EMA_200', current_price)))
-        atr = float(last_row.get('atr', last_row.get('ATR', 0.0)))
-        
-        # محاسبات فرعی تکنیکال برای ثبت در دیتابیس مانیتورینگ
-        ema_deviation = ((current_price - ema_200) / ema_200) * 100 if ema_200 else 0
-        atr_percent = (atr / current_price) * 100 if current_price else 0
+        sl_dist = 1.5 * atr_value
 
-        # ۲. پیدا کردن نقاط چرخش سقف و کف (Swing High / Swing Low)
-        window = getattr(config, 'SWING_WINDOW', 5)
-        recent_highs = df.iloc[-(window*3):-2]['high'].tolist()
-        recent_lows = df.iloc[-(window*3):-2]['low'].tolist()
+        # ۶. منطق شکست سطوح (Breakout Logic) همراه با تایید RSI و روند کلی (EMA200)
+        is_bullish_momentum = float(candle.get('feat_rsi', 50)) > 50
+        is_bearish_momentum = float(candle.get('feat_rsi', 50)) < 50
+        ema_200 = float(candle.get('ema_200', close_price))
+
+        # موقعیت خرید (LONG)
+        if close_price > last_swing_high and close_price > ema_200 and is_bullish_momentum:
+            return {
+                'pair': pair, 
+                'direction': 'LONG', 
+                'entry_price': round(close_price, 4),
+                'stop_loss': round(close_price - sl_dist, 4), 
+                'tp1': round(close_price + sl_dist, 4),
+                'tp2': round(close_price + (sl_dist * 2), 4),
+                **features
+            }
         
-        last_swing_high = max(recent_highs) if recent_highs else current_price
-        last_swing_low = min(recent_lows) if recent_lows else current_price
-
-        # دریافت حد آستانه روند از تنظیمات
-        adx_threshold = getattr(config, 'ADX_THRESHOLD', 25.0)
-
-        # 🟢 بررسی موقعیت خرید (LONG) برای ارسال به تلگرام
-        if current_price > last_swing_high and current_price > ema_200:
-            if rsi > 50 and adx > adx_threshold:
-                
-                sl_dist = atr * 1.5
-                stop_loss = current_price - sl_dist
-                tp1 = current_price + (sl_dist * getattr(config, 'RISK_REWARD_TP1', 1.5))
-                tp2 = current_price + (sl_dist * getattr(config, 'RISK_REWARD_TP2', 2.5))
-                
-                return {
-                    'direction': 'LONG',
-                    'entry_price': round(current_price, 4),
-                    'stop_loss': round(stop_loss, 4),
-                    'tp1': round(tp1, 4),
-                    'tp2': round(tp2, 4),
-                    'atr': round(atr_percent, 4),
-                    'adx': round(adx, 2),
-                    'rsi': round(rsi, 2),
-                    'ema_diff': round(ema_deviation, 4)
-                }
-
-        # 🔴 بررسی موقعیت فروش (SHORT) برای ارسال به تلگرام
-        if current_price < last_swing_low and current_price < ema_200:
-            if rsi < 50 and adx > adx_threshold:
-                
-                sl_dist = atr * 1.5
-                stop_loss = current_price + sl_dist
-                tp1 = current_price - (sl_dist * getattr(config, 'RISK_REWARD_TP1', 1.5))
-                tp2 = current_price - (sl_dist * getattr(config, 'RISK_REWARD_TP2', 2.5))
-                
-                return {
-                    'direction': 'SHORT',
-                    'entry_price': round(current_price, 4),
-                    'stop_loss': round(stop_loss, 4),
-                    'tp1': round(tp1, 4),
-                    'tp2': round(tp2, 4),
-                    'atr': round(atr_percent, 4),
-                    'adx': round(adx, 2),
-                    'rsi': round(rsi, 2),
-                    'ema_diff': round(ema_deviation, 4)
-                }
+        # موقعیت فروش (SHORT)
+        elif close_price < last_swing_low and close_price < ema_200 and is_bearish_momentum:
+            return {
+                'pair': pair, 
+                'direction': 'SHORT', 
+                'entry_price': round(close_price, 4),
+                'stop_loss': round(close_price + sl_dist, 4), 
+                'tp1': round(close_price - sl_dist, 4),
+                'tp2': round(close_price - (sl_dist * 2), 4),
+                **features
+            }
 
     except Exception as e:
-        logging.error(f"❌ خطا در پردازش ریاضی استراتژی: {e}")
-        
+        logging.error(f"❌ خطا در پردازش استراتژی برای {pair}: {e}")
+
     return None
