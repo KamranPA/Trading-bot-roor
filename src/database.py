@@ -6,6 +6,7 @@ import os
 import sqlite3
 from datetime import datetime
 
+# تنظیمات مسیر دیتابیس
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 if not os.path.exists(DATA_DIR):
@@ -14,9 +15,10 @@ if not os.path.exists(DATA_DIR):
 DB_NAME = os.path.join(DATA_DIR, "trading_bot.db")
 
 def init_db():
-    """🛡️ راه‌اندازی و بررسی ساختار پایگاه داده"""
+    """🛡️ راه‌اندازی و بررسی یکپارچگی پایگاه داده"""
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
+        # ایجاد جدول سیگنال‌ها (بدون فیلترهای حجمی)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY,
@@ -30,16 +32,17 @@ def init_db():
                 pnl_percent REAL DEFAULT 0.0,
                 feat_adx REAL, feat_vol_ratio REAL, feat_atr_percent REAL,
                 feat_rsi REAL, feat_trend_line REAL, feat_ema_deviation REAL,
-                feat_rsi_momentum REAL, feat_body_ratio REAL, feat_high_volume_session REAL,
-                feat_vol_confirm REAL DEFAULT 0.0
+                feat_rsi_momentum REAL, feat_body_ratio REAL
             )
         """)
+        # جدول‌های جانبی
         cursor.execute("CREATE TABLE IF NOT EXISTS signal_targets (id INTEGER PRIMARY KEY, signal_id INTEGER, target_number INTEGER, target_price REAL, status TEXT DEFAULT 'PENDING')")
         cursor.execute("CREATE TABLE IF NOT EXISTS scan_logs (id INTEGER PRIMARY KEY, timestamp TEXT, symbol TEXT, result TEXT)")
         cursor.execute("CREATE TABLE IF NOT EXISTS bot_settings (setting_key TEXT PRIMARY KEY, setting_value TEXT)")
         cursor.execute("INSERT OR IGNORE INTO bot_settings (setting_key, setting_value) VALUES ('bot_status', 'ACTIVE')")
 
 def get_open_positions_count():
+    """شمارش پوزیشن‌های باز"""
     try:
         with sqlite3.connect(DB_NAME) as conn:
             return conn.execute("SELECT COUNT(*) FROM signals WHERE status = 'OPEN'").fetchone()[0]
@@ -47,14 +50,14 @@ def get_open_positions_count():
         return 0
 
 def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, **features):
-    """💾 ثبت داده‌های سیگنال جدید در پایگاه داده با همگام‌سازی فیلترها"""
+    """💾 ثبت امن سیگنال جدید در دیتابیس"""
     try:
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
             base_cols = "timestamp, symbol, direction, entry_price, stop_loss, status"
             vals = [datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), symbol, direction, entry_price, stop_loss, "OPEN"]
             
-            # پر کردن داینامیک فیلدها
+            # افزودن داینامیک ویژگی‌های قیمتی (بدون حجم)
             if features:
                 cols = base_cols + ", " + ", ".join(features.keys())
                 vals.extend(features.values())
@@ -66,25 +69,29 @@ def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2, **
             cursor.execute(query, vals)
             signal_id = cursor.lastrowid
             
+            # ثبت تارگت‌ها
             for i, tp in enumerate([tp1, tp2], 1):
                 if tp: 
                     cursor.execute("INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, ?, ?)", (signal_id, i, tp))
     except Exception as e:
         print(f"❌ خطا در ثبت سیگنال دیتابیس: {e}")
 
-def log_scan(symbol, result):
-    try:
-        with sqlite3.connect(DB_NAME) as conn:
-            conn.execute("INSERT INTO scan_logs (timestamp, symbol, result) VALUES (?, ?, ?)", (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), symbol, result))
-    except Exception as e:
-        print(f"❌ خطا در ثبت لاگ اسکن: {e}")
-
 def manage_open_positions():
+    """🔍 بررسی پوزیشن‌های باز (برای جلوگیری از توقف سیستم)"""
     try:
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id, symbol, direction, entry_price, stop_loss FROM signals WHERE status = 'OPEN'")
             open_positions = cursor.fetchall()
             if not open_positions: return
+            # در اینجا منطق مانیتورینگ لایو پوزیشن‌ها اضافه می‌شود
     except Exception as e:
         print(f"❌ خطا در مدیریت پوزیشن‌ها: {e}")
+
+def log_scan(symbol, result):
+    """ثبت لاگ عملیات اسکن"""
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            conn.execute("INSERT INTO scan_logs (timestamp, symbol, result) VALUES (?, ?, ?)", (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), symbol, result))
+    except Exception as e:
+        print(f"❌ خطا در ثبت لاگ اسکن: {e}")
