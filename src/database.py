@@ -1,7 +1,7 @@
+# FILE PATH: /src/database.py
 import sqlite3
 import os
 
-# مسیر مطلق برای جلوگیری از گم شدن فایل در سرور
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_NAME = os.path.join(BASE_DIR, "data", "trading_bot.db")
 
@@ -11,7 +11,6 @@ def init_db():
     
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
-        # ساخت جدول پایه
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY,
@@ -20,19 +19,25 @@ def init_db():
                 direction TEXT,
                 entry_price REAL,
                 stop_loss REAL,
+                tp1 REAL,
+                tp2 REAL,
                 status TEXT DEFAULT 'OPEN'
             )
         """)
-        # اصلاح ستون‌ها اگر قبلاً ساخته شده ولی ناقص هستند
-        cursor.execute("PRAGMA table_info(signals)")
-        cols = [row[1] for row in cursor.fetchall()]
-        if 'stop_loss' not in cols:
-            cursor.execute("ALTER TABLE signals ADD COLUMN stop_loss REAL")
         conn.commit()
 
-# توابعی که main.py شما به آن‌ها نیاز دارد
+def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2):
+    """ذخیره سیگنال با ثبت قطعی در دیتابیس"""
+    with sqlite3.connect(DB_NAME) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO signals (timestamp, symbol, direction, entry_price, stop_loss, tp1, tp2, status)
+            VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, 'OPEN')
+        """, (symbol, direction, entry_price, stop_loss, tp1, tp2))
+        conn.commit() # ثبت نهایی برای جلوگیری از گم شدن داده‌ها
+
 def manage_open_positions():
-    init_db() # تضمین سلامت دیتابیس قبل از خواندن
+    init_db()
     with sqlite3.connect(DB_NAME) as conn:
         return conn.execute("SELECT id, symbol, entry_price, stop_loss FROM signals WHERE status = 'OPEN'").fetchall()
 
