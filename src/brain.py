@@ -1,52 +1,50 @@
-# ---------------------------------------------------------
-# FILE PATH: /src/brain.py
-# ---------------------------------------------------------
-
+# File Path: src/brain.py
 import os
-import jobpath
+import joblib  # اصلاح شد: استفاده از joblib استاندارد پایتون به جای اشتباه تایپی قبلی
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
-
-MODEL_PATH = "ml_models/rf_trading_model.pkl"
+import numpy as np
+from config import ML_MODEL_PATH
 
 class TradingBrain:
     def __init__(self):
         self.model = None
-        self.feature_order = ['atr', 'adx', 'rsi', 'ema_diff']
         self.load_model()
 
     def load_model(self):
-        """بارگذاری مدل هوش مصنوعی در صورت وجود"""
-        if os.path.exists(MODEL_PATH):
+        """بارگذاری مدل هوش مصنوعی از مسیر تعیین شده"""
+        if os.path.exists(ML_MODEL_PATH):
             try:
-                with open(MODEL_PATH, 'rb') as f:
-                    self.model = jobpath.load(f)
-                print("🧠 مدل هوش مصنوعی با موفقیت بارگذاری شد.")
+                # اصلاح شد: تصحیح متد بارگذاری فایل مدل
+                self.model = joblib.load(ML_MODEL_PATH)
+                print("🧠 [Brain] مدل هوش مصنوعی با موفقیت بارگذاری شد.")
             except Exception as e:
-                print(f"⚠️ خطا در بارگذاری مدل هوش مصنوعی: {e}")
+                print(f"⚠️ [Brain] خطا در بارگذاری مدل هوش مصنوعی: {e}")
                 self.model = None
         else:
-            print("ℹ️ فیلتر هوش مصنوعی فعال نیست (مدل یافت نشد). تایید خودکار اعمال می‌شود.")
+            print("ℹ️ [Brain] مدل هوش مصنوعی یافت نشد. فیلتر ML غیرفعال است.")
+            self.model = None
 
-    def approve_signal(self, indicators_dict):
-        """بررسی سیگنال صادر شده توسط مدل هوش مصنوعی"""
+    def predict_signal_quality(self, atr, adx, rsi, ema_diff):
+        """
+        پیش‌بینی سودده بودن یا زیان‌ده بودن سیگنال بر اساس داده‌های تکنیکال
+        خروجی: True (تایید سیگنال) یا False (رد سیگنال)
+        """
         if self.model is None:
-            return True  # اگر مدلی آموزش ندیده باشد، سیگنال استراتژی را مسدود نمی‌کند
+            # اگر مدلی آموزش داده نشده باشد، به صورت پیش‌فرض تمام سیگنال‌های پرایس‌اکشن تایید می‌شوند
+            return True
             
         try:
-            # تبدیل کلیدها به حروف کوچک برای یکپارچگی با نام ستون‌های دیتابیس
-            input_data = {
-                'atr': indicators_dict.get('ATR', 0.0),
-                'adx': indicators_dict.get('ADX', 0.0),
-                'rsi': indicators_dict.get('RSI', 0.0),
-                'ema_diff': indicators_dict.get('EMA_diff', 0.0)
-            }
+            # ساخت دیتافریم منطبق با ویژگی‌های زمان آموزش
+            features = pd.DataFrame([{
+                'atr': float(atr),
+                'adx': float(adx),
+                'rsi': float(rsi),
+                'ema_diff': float(ema_diff)
+            }])
             
-            # چیدمان دقیق ویژگی‌ها بر اساس ترتیب تعریف شده
-            df_features = pd.DataFrame([input_data], columns=self.feature_order)
-            
-            prediction = self.model.predict(df_features)[0]
+            prediction = self.model.predict(features)[0]
+            # فرض بر این است که خروجی ۱ یعنی معامله موفق و خروجی ۰ یعنی ناموفق
             return bool(prediction == 1)
         except Exception as e:
-            print(f"❌ خطا در پردازش فیلتر هوش مصنوعی: {e}")
+            print(f"❌ [Brain] خطا در پیش‌بینی مدل هوش مصنوعی: {e}")
             return True
