@@ -1,13 +1,17 @@
 import sqlite3
 import os
 
-DB_NAME = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "trading_bot.db")
+# مسیر مطلق برای جلوگیری از گم شدن فایل در سرور
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_NAME = os.path.join(BASE_DIR, "data", "trading_bot.db")
 
 def init_db():
-    """راه‌اندازی و تعمیر خودکار ساختار دیتابیس"""
+    if not os.path.exists(os.path.dirname(DB_NAME)):
+        os.makedirs(os.path.dirname(DB_NAME))
+    
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
-        # ایجاد جدول در صورت نبودن
+        # ساخت جدول پایه
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY,
@@ -19,30 +23,20 @@ def init_db():
                 status TEXT DEFAULT 'OPEN'
             )
         """)
-        
-        # بررسی و اضافه کردن ستون‌های گمشده (رفع خطای no such column)
+        # اصلاح ستون‌ها اگر قبلاً ساخته شده ولی ناقص هستند
         cursor.execute("PRAGMA table_info(signals)")
-        columns = [row[1] for row in cursor.fetchall()]
-        if 'stop_loss' not in columns:
+        cols = [row[1] for row in cursor.fetchall()]
+        if 'stop_loss' not in cols:
             cursor.execute("ALTER TABLE signals ADD COLUMN stop_loss REAL")
-        if 'status' not in columns:
-            cursor.execute("ALTER TABLE signals ADD COLUMN status TEXT DEFAULT 'OPEN'")
         conn.commit()
 
+# توابعی که main.py شما به آن‌ها نیاز دارد
 def manage_open_positions():
-    """واکشی پوزیشن‌های باز بدون نیاز به ورودی conn"""
-    init_db() # اطمینان از سلامت دیتابیس قبل از خواندن
+    init_db() # تضمین سلامت دیتابیس قبل از خواندن
     with sqlite3.connect(DB_NAME) as conn:
-        try:
-            return conn.execute("SELECT id, symbol, entry_price, stop_loss FROM signals WHERE status = 'OPEN'").fetchall()
-        except sqlite3.OperationalError:
-            return []
+        return conn.execute("SELECT id, symbol, entry_price, stop_loss FROM signals WHERE status = 'OPEN'").fetchall()
 
 def get_open_positions_count():
-    """شمارش پوزیشن‌های باز"""
+    init_db()
     with sqlite3.connect(DB_NAME) as conn:
-        try:
-            result = conn.execute("SELECT COUNT(*) FROM signals WHERE status = 'OPEN'").fetchone()
-            return result[0] if result else 0
-        except:
-            return 0
+        return conn.execute("SELECT COUNT(*) FROM signals WHERE status = 'OPEN'").fetchone()[0]
