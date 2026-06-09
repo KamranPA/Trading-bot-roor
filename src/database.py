@@ -2,15 +2,15 @@
 import sqlite3
 import os
 
-# تعیین مسیر دقیق (فایل دیتابیس همیشه در پوشه data در روت پروژه است)
+# تعیین مسیر دقیق و استاندارد برای پوشه data در روت پروژه
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 DB_NAME = os.path.join(DATA_DIR, "trading_bot.db")
 
 def init_db():
-    """تضمین سلامت دیتابیس و جدول بدون آسیب به داده‌های قبلی"""
+    """ایجاد دیتابیس و جدول signals به صورت خودکار"""
     if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
+        os.makedirs(DATA_DIR, exist_ok=True)
     
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
@@ -24,13 +24,13 @@ def init_db():
                 stop_loss REAL,
                 tp1 REAL,
                 tp2 REAL,
-                status TEXT
+                status TEXT DEFAULT 'OPEN'
             )
         """)
         conn.commit()
 
 def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2):
-    """ذخیره سیگنال (این همان تابعی است که در main.py استفاده می‌کنید)"""
+    """ذخیره سیگنال جدید در دیتابیس (فراخوانی شده در main.py)"""
     init_db()
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
@@ -41,13 +41,22 @@ def save_signal_advanced(symbol, direction, entry_price, stop_loss, tp1, tp2):
         conn.commit()
 
 def manage_open_positions():
-    """خوانش پوزیشن‌های باز (بدون نیاز به آرگومان ورودی)"""
+    """فراخوانی پوزیشن‌های باز برای ربات (فراخوانی شده در main.py)"""
     init_db()
     with sqlite3.connect(DB_NAME) as conn:
         return conn.execute("SELECT id, symbol, entry_price, stop_loss FROM signals WHERE status = 'OPEN'").fetchall()
 
 def get_open_positions_count():
-    """شمارش پوزیشن‌ها"""
+    """شمارش پوزیشن‌های باز جهت مدیریت ریسک (فراخوانی شده در strategy.py)"""
     init_db()
     with sqlite3.connect(DB_NAME) as conn:
         return conn.execute("SELECT COUNT(*) FROM signals WHERE status = 'OPEN'").fetchone()[0]
+
+def update_position_status(position_id, status, exit_price=None):
+    """به‌روزرسانی وضعیت معامله (بستن پوزیشن)"""
+    init_db()
+    with sqlite3.connect(DB_NAME) as conn:
+        cursor = conn.cursor()
+        # استفاده از ? برای جلوگیری از تزریق SQL
+        cursor.execute("UPDATE signals SET status = ?, entry_price = ? WHERE id = ?", (status, exit_price, position_id))
+        conn.commit()
