@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: /src/strategy.py
+# FILE PATH: src/strategy.py
 # ---------------------------------------------------------
 import config
 from src import database, strategy_utils
@@ -17,8 +17,8 @@ def generate_signal(df, pair):
         return None
 
     # ۲. حذف فیلترهای حجمی و سخت‌گیرانه
-    # فقط فیلترهای جهت‌گیری کلی (EMA) و قدرت روند (ADX) برای جلوگیری از بازارهای رنج باقی می‌مانند
-    if float(candle['feat_adx']) < config.ADX_THRESHOLD:
+    # فقط فیلترهای جهت‌گیری کلی (EMA) و قدرت روند (ADX)
+    if float(candle.get('feat_adx', 0)) < config.ADX_THRESHOLD:
         return None
 
     # ۳. شناسایی سطوح Swing
@@ -28,19 +28,21 @@ def generate_signal(df, pair):
     if last_swing_high is None or last_swing_low is None:
         return None
 
-    # ۴. ویژگی‌های هوش مصنوعی (بدون فیلترهای حجم)
+    # ۴. ویژگی‌های هوش مصنوعی
     features = {
-        'feat_adx': float(candle['feat_adx']),
-        'feat_rsi': float(candle['feat_rsi']),
-        'feat_trend_line': float(candle['feat_trend_line']),
-        'feat_ema_deviation': float(candle['feat_ema_deviation']),
-        'feat_rsi_momentum': float(candle['feat_rsi_momentum']),
-        'feat_body_ratio': float(candle['feat_body_ratio'])
+        'feat_adx': float(candle.get('feat_adx', 0)),
+        'feat_rsi': float(candle.get('feat_rsi', 0)),
+        'feat_trend_line': float(candle.get('feat_trend_line', 0)),
+        'feat_ema_deviation': float(candle.get('feat_ema_deviation', 0)),
+        'feat_rsi_momentum': float(candle.get('feat_rsi_momentum', 0)),
+        'feat_body_ratio': float(candle.get('feat_body_ratio', 0))
     }
 
     # ۵. مدیریت سرمایه
     risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0)
-    sl_dist = 1.5 * float(candle['ATR'])
+    
+    # رفع باگ حساسیت به حروف (KeyError): ATR به atr تغییر یافت
+    sl_dist = 1.5 * float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
     close_price = float(candle['Close'])
     
     if close_price <= 0: return None
@@ -49,9 +51,8 @@ def generate_signal(df, pair):
     position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL) if sl_percent > 0 else 0
 
     # ۶. منطق شکست (Breakout Logic)
-    # اضافه کردن فیلتر مومنتوم RSI برای تایید شکست
-    is_bullish_momentum = float(candle['feat_rsi']) > 50
-    is_bearish_momentum = float(candle['feat_rsi']) < 50
+    is_bullish_momentum = float(candle.get('feat_rsi', 50)) > 50
+    is_bearish_momentum = float(candle.get('feat_rsi', 50)) < 50
 
     if close_price > last_swing_high and is_bullish_momentum:
         return {
