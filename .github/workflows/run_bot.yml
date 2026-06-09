@@ -1,21 +1,18 @@
-# ---------------------------------------------------------
-# FILE NAME: main.yml
-# FILE PATH: .github/workflows/main.yml
-# ---------------------------------------------------------
-name: Trading Bot Engine
+name: Run Trading Bot
 
 on:
-  push:
-    branches: [ main ]
   schedule:
-    - cron: '0 */4 * * *' 
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 jobs:
-  run-bot:
+  build:
     runs-on: ubuntu-latest
+    
+    # ⚠️ دسترسی نوشتن برای کامیت کردن دیتابیس در گیت‌هاب
     permissions:
-      contents: write 
+      contents: write
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -23,24 +20,35 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10' # ارتقا به نسخه ۳.۱۰ برای سازگاری بهتر با کتابخانه‌ها
+          python-version: '3.9'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas requests scikit-learn joblib
-          pip install pandas-ta --use-deprecated=legacy-resolver || pip install pandas-ta
+          pip install pandas requests ccxt scikit-learn numpy joblib
 
       - name: Run Trading Engine
-        run: python main.py
-
-      - name: Commit and Push Results
+        env:
+          # اینجا مسیر پروژه را به عنوان ریشه قرار می‌دهیم
+          PYTHONPATH: ${{ github.workspace }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          python main.py
+
+      # 💾 بخش جدید: کامیت و پوش کردن دیتابیس پس از اجرای ربات
+      - name: Commit and Push Database
+        run: |
+          git config --global user.name 'github-actions'
+          git config --global user.email 'github-actions@github.com'
           
-          # اضافه کردن فایل‌های نتایج به محیط گیت
-          git add backtest_summary.txt best_params.json data/trading_bot.db
+          # اضافه کردن فایل دیتابیس به لیست تغییرات
+          git add data/trading_bot.db
           
-          # تایید تغییرات و ارسال به سرور در صورت وجود تغییر جدید
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update: Bot results and database" && git push)
+          # بررسی اینکه آیا سیگنال جدیدی ثبت شده و دیتابیس تغییر کرده است یا خیر
+          if git diff --staged --quiet; then
+            echo "تغییری در دیتابیس وجود نداشت. از کامیت صرف‌نظر شد."
+          else
+            git commit -m "Auto-update: Save new trades and signals to DB"
+            git push
+          fi
