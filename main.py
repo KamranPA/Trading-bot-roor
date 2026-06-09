@@ -40,10 +40,10 @@ def run_bot():
     logging.info("🤖 اسکنر هوشمند v7.2 فعال شد.")
     database.init_db()
     
-    try:
-        database.manage_open_positions()
-    except Exception as e:
-        logging.error(f"⚠️ خطا در مدیریت پوزیشن‌ها: {e}")
+   # try:
+      #  database.manage_open_positions()
+   # except Exception as e:
+       # logging.error(f"⚠️ خطا در مدیریت پوزیشن‌ها: {e}")
     
     run_auto_optimization()
     
