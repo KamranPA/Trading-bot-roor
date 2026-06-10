@@ -27,14 +27,14 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # بازیابی دیتابیس از آخرین اجرای موفق
+    # بازیابی وضعیت دیتابیس و مدل‌ها از اجرای قبلی
     - name: Restore Previous Session State
       uses: dawidd6/action-download-artifact@v3
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         name: bot-runtime-state
         path: .
-      continue-on-error: true # اگر اولین بار باشد، خطا نگیرد و ادامه دهد
+      continue-on-error: true
 
     - name: Run Trading Bot Logic
       env:
@@ -42,17 +42,17 @@ jobs:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
-        # اطمینان از اینکه اسکریپت در مسیر درست اجرا می‌شود
+        # اجرای ربات (با استفاده از ساختار جدید پوشه data)
         python main.py
 
-    # آپلود مجدد دیتابیس برای اجرای بعدی
+    # آپلود وضعیت جدید شامل دیتابیس در پوشه data و مدل‌ها
     - name: Upload and Preserve Updated State
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: bot-runtime-state
         path: |
-          trading_bot.db
+          data/
           best_params.json
           src/models/
         retention-days: 7
