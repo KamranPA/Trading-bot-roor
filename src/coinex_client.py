@@ -1,50 +1,42 @@
 # ---------------------------------------------------------
-# FILE PATH: /src/coinex_client.py
+# FILE PATH: src/coinex_client.py
 # ---------------------------------------------------------
-
 import ccxt
 import pandas as pd
-import time
-import config
+import logging
 
-def get_coinex_candles(pair):
+def get_coinex_candles(pair, timeframe="4h", limit=500):
     """
-    دریافت کندل‌ها با مدیریت نرخ درخواست برای جلوگیری از بلاک شدن در واچ‌لیست ۱۵ تایی
+    دریافت کندل‌های بازار از طریق API عمومی کوین‌اکس بدون نیاز به کلید خصوصی
     """
     try:
-        # تنظیمات بهینه برای ارتباط پایدار با کوین‌اکس
+        # اتصال عمومی و بدون نیاز به API Key برای مانیتورینگ بازار
         exchange = ccxt.coinex({
-            'timeout': 20000,
+            'timeout': 30000,
             'enableRateLimit': True,
-            'options': {
-                'defaultType': 'spot',
-            }
         })
         
-        # وقفه کوچک برای جلوگیری از فشار همزمان روی API صرافی (بسیار مهم برای ۱۵ ارز)
-        time.sleep(0.6) 
+        # هماهنگ‌سازی فرمت جفت ارز (مثلاً تبدیل BTC/USDT به فرمت استاندارد ccxt)
+        symbol = pair.upper()
         
-        ohlcv = exchange.fetch_ohlcv(
-            symbol=pair, 
-            timeframe=config.TIMEFRAME, 
-            limit=config.CANDLES_LIMIT
-        )
+        logging.info(f"🔄 در حال دریافت {limit} کندل برای {symbol} در تایم‌فریم {timeframe}...")
         
-        if not ohlcv or len(ohlcv) < config.CANDLES_LIMIT:
-            print(f"⚠️ داده‌های ناقص برای {pair} دریافت شد.")
+        # دریافت دیتای OHLCV از صرافی
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+        
+        if not ohlcv or len(ohlcv) == 0:
+            logging.warning(f"⚠️ هیچ دیتایی برای {symbol} دریافت نشد.")
             return None
             
-        columns = ['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume']
-        df = pd.DataFrame(ohlcv, columns=columns)
+        # تبدیل به DataFrame استاندارد پانداز
+        df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
         
-        # تبدیل تمامی ستون‌های عددی به float برای محاسبات ریاضی دقیق در سیستم ۱۰‌بعدی
-        numeric_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-        df[numeric_cols] = df[numeric_cols].astype(float)
-        
-        df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')
-        
+        # تبدیل انواع داده‌ها به عدد اعشاری برای جلوگیری از خطای محاسباتی اندیکاتورها
+        for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+            df[col] = df[col].astype(float)
+            
         return df
 
     except Exception as e:
-        print(f"❌ خطای ارتباط با API کوئینکس برای ارز {pair}: {e}")
+        logging.error(f"❌ خطا در دریافت دیتا از کوین‌اکس برای {pair}: {e}")
         return None
