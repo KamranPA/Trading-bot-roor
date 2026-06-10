@@ -1,6 +1,5 @@
 name: Monthly AI Retrain Pipeline
 
-# ۱. اضافه کردن مجوزهای لازم برای نوشتن در مخزن (ضروری برای Push)
 permissions:
   contents: write
 
@@ -13,11 +12,18 @@ jobs:
   retrain:
     runs-on: ubuntu-latest
     steps:
-    # ۲. ارتقا به نسخه v4 برای پایداری بیشتر
     - name: Checkout Repository
       uses: actions/checkout@v4
+
+    # مرحله کلیدی: دانلود دیتابیس از ورک‌فلوی اصلی
+    - name: Download Latest Database
+      uses: dawidd6/action-download-artifact@v3
       with:
-        persist-credentials: true
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        workflow: core_trading_bot.yml
+        name: bot-runtime-state
+        path: .
+      continue-on-error: true
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -37,17 +43,12 @@ jobs:
       run: |
         python src/train_model.py
 
-    - name: Commit and Push Updated Model Binary
+    - name: Commit and Push Updated Model
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action Bot"
-        
-        # بررسی اینکه آیا فایل مدل تغییر کرده یا خیر
         if [ -f "src/models/trading_filter_model.pkl" ]; then
           git add src/models/trading_filter_model.pkl
-          # بررسی تغییرات و کامیت کردن
-          git diff --quiet && git diff --staged --quiet || git commit -m "🤖 آپدیت خودکار لایه هوش مصنوعی ربات (Monthly Retrain)"
+          git diff --quiet && git diff --staged --quiet || git commit -m "🤖 آپدیت مدل هوش مصنوعی"
           git push
-        else
-          echo "No model changes found."
         fi
