@@ -1,26 +1,36 @@
-name: Trading Bot Pipeline
+name: Trading Bot - Live DB Update
 on:
   schedule:
     - cron: '*/30 * * * *'
   workflow_dispatch:
+
 jobs:
   trade:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # برای اجازه Push کردن فایل
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.10'}
       - run: pip install -r requirements.txt
+      
       - name: Run Bot
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           mkdir -p data
           python main.py
-      - name: Upload DB
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: db-artifact
-          path: data/trading_bot.db
-          retention-days: 7
+          
+      - name: Commit and Push Database
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          # فقط اگر فایلی تغییر کرده، Push کن
+          if [ -n "$(git status --porcelain data/trading_bot.db)" ]; then
+            git add data/trading_bot.db
+            git commit -m "Update DB for Backtest: $(date)"
+            git push
+          else
+            echo "No changes to DB."
+          fi
