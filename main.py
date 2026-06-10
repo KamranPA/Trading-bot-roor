@@ -1,69 +1,59 @@
-# ---------------------------------------------------------
-# FILE PATH: main.py
-# ---------------------------------------------------------
-
 import os
 import sys
 import logging
-import time
-import joblib
 import sqlite3
+import joblib
+from concurrent.futures import ThreadPoolExecutor
 
-# ۱. تنظیم هوشمند مسیرها (بدون وابستگی به محل اجرا)
+# تنظیم مسیرها
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SRC_DIR = os.path.join(BASE_DIR, 'src')
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
-# افزودن مسیرها به ابتدای لیست جستجوی پایتون (اولویت بالا)
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
-
-# ۲. واردات ماژول‌ها - استفاده از Try/Except برای دیباگ سریع‌تر
 try:
     import config
     from src import database, coinex_client, strategy, telegram_bot, indicators, optimizer
 except ImportError as e:
-    logging.critical(f"خطای بحرانی در وارد کردن ماژول‌ها: {e}")
+    print(f"CRITICAL IMPORT ERROR: {e}")
     sys.exit(1)
 
-# ۳. تنظیم لاگ‌گیری استاندارد (ذخیره در فایل برای بررسی در گیت‌هاب)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()] # لاگ‌ها در گیت‌هاب اکشن مستقیم چاپ می‌شوند
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-MODEL_PATH = os.path.join(SRC_DIR, "models", "trading_filter_model.pkl")
+# لود مدل در زمان شروع (Global) برای کاهش بار پردازشی
+MODEL = joblib.load(os.path.join(BASE_DIR, "src", "models", "trading_filter_model.pkl")) \
+        if os.path.exists(os.path.join(BASE_DIR, "src", "models", "trading_filter_model.pkl")) else None
 
-def get_model():
-    """لود مدل با بررسی وجود فایل و مدیریت حافظه"""
-    if not os.path.exists(MODEL_PATH):
-        logging.warning("فایل مدل یافت نشد. بدون هوش مصنوعی ادامه می‌دهیم.")
-        return None
+def process_pair(pair):
+    """پردازش تک‌جفت ارز برای استفاده در مولتی‌تریدینگ"""
     try:
-        return joblib.load(MODEL_PATH)
+        df = coinex_client.get_coinex_candles(pair)
+        if df is None or df.empty: return
+
+        df = indicators.calculate_indicators(df)
+        signal = strategy.generate_signal(df, pair, model=MODEL) # پاس دادن مدل به استراتژی
+        
+        if signal:
+            database.save_signal_advanced(pair=pair, **signal)
+            telegram_bot.format_and_send_signal(signal)
+            logging.info(f"✅ سیگنال برای {pair} ارسال شد.")
     except Exception as e:
-        logging.error(f"خطا در بارگذاری مدل: {e}")
-        return None
+        logging.error(f"خطا در پردازش {pair}: {e}")
 
 def run_auto_optimization():
-    """فراخوانی بهینه‌ساز با چک کردن مسیر یکپارچه دیتابیس از کانفیگ"""
     try:
-        db_path = config.DB_NAME
-        if os.path.exists(db_path):
-            with sqlite3.connect(db_path) as conn:
+        if os.path.exists(config.DB_NAME):
+            with sqlite3.connect(config.DB_NAME) as conn:
                 count = conn.execute("SELECT count(*) FROM signals").fetchone()[0]
-            
             if count > 0 and count % 50 == 0:
-                logging.info(f"🚀 رسیدن به {count} معامله؛ شروع ارتقای هوشمند...")
+                logging.info(f"🚀 شروع ارتقای هوشمند (تعداد کل سیگنال‌ها: {count})")
                 optimizer.optimize()
     except Exception as e:
         logging.error(f"خطا در پروسه خودارتقایی: {e}")
 
 def run_bot():
-    logging.info("🤖 اسکنر هوشمند v7.2 فعال شد.")
+    logging.info("🤖 اسکنر هوشمند v7.3 فعال شد.")
     database.init_db()
     
-    # مدیریت پوزیشن‌های باز
     try:
         database.manage_open_positions()
     except Exception as e:
@@ -71,24 +61,10 @@ def run_bot():
     
     run_auto_optimization()
     
-    # اسکن بازار
+    # استفاده از تردینگ برای اجرای موازی اسکن‌ها (بسیار سریع‌تر)
     watchlist = getattr(config, 'WATCHLIST', [])
-    for pair in watchlist:
-        try:
-            df = coinex_client.get_coinex_candles(pair)
-            if df is None or df.empty: continue
-                
-            df = indicators.calculate_indicators(df)
-            signal_result = strategy.generate_signal(df, pair)
-            
-            if signal_result:
-                database.save_signal_advanced(pair=pair, **signal_result)
-                telegram_bot.format_and_send_signal(signal_result)
-                logging.info(f"✅ سیگنال برای {pair} ارسال شد.")
-        
-        except Exception as e:
-            logging.error(f"خطا در پردازش {pair}: {e}")
-            time.sleep(1)
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        executor.map(process_pair, watchlist)
 
 if __name__ == "__main__":
     run_bot()
