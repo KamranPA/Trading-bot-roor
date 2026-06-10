@@ -11,27 +11,16 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.10'}
       - run: pip install -r requirements.txt
-      
-      - name: Restore DB
-        uses: dawidd6/action-download-artifact@v3
-        with:
-          name: bot-runtime-state
-          path: .
-          continue-on-error: true
-
-      - name: Setup Path
-        run: mkdir -p data && if [ -f trading_bot.db ]; then mv trading_bot.db data/; fi
-
       - name: Run Bot
-        run: python main.py
-
-      - name: Prepare Upload
-        if: always()
-        run: if [ -f data/trading_bot.db ]; then mv data/trading_bot.db .; fi
-
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          mkdir -p data
+          python main.py
       - name: Upload DB
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bot-runtime-state
-          path: trading_bot.db
+          name: db-artifact
+          path: data/trading_bot.db
+          retention-days: 7
