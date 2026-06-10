@@ -6,10 +6,10 @@ import sqlite3
 import os
 import logging
 import pandas as pd
-import config  # ایمپورت فایل کانفیگ برای دسترسی به مسیر صحیح دیتابیس
+import config  
 
-# مسیر ذخیره پارامترها در ریشه پروژه
-PARAMS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "best_params.json")
+# مسیر ذخیره پارامترها به صورت یکپارچه در ریشه پروژه
+PARAMS_FILE = os.path.join(config.BASE_DIR, "best_params.json")
 
 def optimize():
     """
@@ -34,17 +34,18 @@ def optimize():
 
         avg_pnl = df['pnl_percent'].mean()
         
-        # خواندن پارامترهای فعلی
+        # خواندن پارامترهای فعلی (همگام‌سازی کلیدها با best_params.json)
         if os.path.exists(PARAMS_FILE):
             with open(PARAMS_FILE, 'r') as f:
                 params = json.load(f)
         else:
-            params = {"adx_threshold": 25.0, "tp": 0.03, "sl": 0.015}
+            params = {"adx_threshold": 25.0, "tp_ratio": 1.5, "sl_ratio": 1.0}
 
         # منطقِ خودارتقایی (Self-Optimization Logic)
         if avg_pnl < 0:
             params['adx_threshold'] += 1.0 
-            if 'tp' in params: params['tp'] += 0.002
+            # اصلاح کلید tp به tp_ratio
+            if 'tp_ratio' in params: params['tp_ratio'] += 0.1
             logging.info("📉 عملکرد منفی: پارامترها سخت‌گیرانه‌تر شدند.")
         else:
             params['adx_threshold'] = max(20.0, params['adx_threshold'] - 0.5)
