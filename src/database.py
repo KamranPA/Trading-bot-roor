@@ -1,16 +1,21 @@
 # ---------------------------------------------------------
-# FILE PATH: src/database.py
+# FILE PATH: src/database.py (اصلاح شده)
 # ---------------------------------------------------------
 import sqlite3
 from datetime import datetime
+import os
 import config 
 
+# تعیین مسیر دقیق پروژه برای جلوگیری از ساخت دیتابیس در مکان‌های اشتباه
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.path.join(BASE_DIR, config.DB_NAME)
+
 def init_db():
-    """🛡️ مقداردهی اولیه دیتابیس با ساختار ۹ فیلتره"""
-    with sqlite3.connect(config.DB_NAME) as conn:
+    """🛡️ مقداردهی اولیه دیتابیس با ساختار ۹ فیلتره در مسیر مطلق پروژه"""
+    with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         
-        # جدول اصلی سیگنال‌ها (بدون ولوم)
+        # جدول اصلی سیگنال‌ها
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY,
@@ -37,14 +42,14 @@ def init_db():
 
 def get_open_positions_count():
     try:
-        with sqlite3.connect(config.DB_NAME) as conn:
+        with sqlite3.connect(DB_PATH) as conn:
             return conn.execute("SELECT COUNT(*) FROM signals WHERE status = 'OPEN'").fetchone()[0]
     except: 
         return 0
 
 def manage_open_positions():
     try:
-        with sqlite3.connect(config.DB_NAME) as conn:
+        with sqlite3.connect(DB_PATH) as conn:
             now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
             conn.execute("""
                 UPDATE signals 
@@ -57,7 +62,7 @@ def manage_open_positions():
 
 def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1, tp2, position_size, **features):
     """ذخیره سیگنال به همراه فیچرهای ۹گانه"""
-    with sqlite3.connect(config.DB_NAME) as conn:
+    with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         
         allowed_features = [
@@ -66,10 +71,8 @@ def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1, tp2, posi
             'feat_body_ratio', 'feat_high_volume_session'
         ]
         
-        # استخراج مقادیر فیچرها (مقدار پیش‌فرض 0.0)
         values = [features.get(f, 0.0) for f in allowed_features]
         
-        # درج در دیتابیس
         query = f"""
             INSERT INTO signals (
                 timestamp, symbol, direction, entry_price, stop_loss, 
@@ -80,7 +83,6 @@ def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1, tp2, posi
         timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute(query, [timestamp, pair, direction, entry_price, stop_loss] + values)
         
-        # ذخیره تارگت‌ها
         signal_id = cursor.lastrowid
         cursor.execute("INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, 1, ?)", (signal_id, tp1))
         cursor.execute("INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, 2, ?)", (signal_id, tp2))
@@ -88,9 +90,8 @@ def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1, tp2, posi
         conn.commit()
 
 def log_scan_status(symbol, status):
-    """ذخیره وضعیت اسکن هر ارز برای بررسی‌های بعدی"""
-    db_path = config.DB_NAME
-    with sqlite3.connect(db_path) as conn:
+    """ذخیره وضعیت اسکن هر ارز"""
+    with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("INSERT INTO scan_logs (timestamp, symbol, result) VALUES (datetime('now'), ?, ?)", 
                        (symbol, status))
