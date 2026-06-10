@@ -1,17 +1,23 @@
 # ---------------------------------------------------------
-# FILE PATH: src/database.py (اصلاح شده)
+# FILE PATH: src/database.py (نهایی و استاندارد شده)
 # ---------------------------------------------------------
 import sqlite3
 from datetime import datetime
 import os
 import config 
 
-# تعیین مسیر دقیق پروژه برای جلوگیری از ساخت دیتابیس در مکان‌های اشتباه
+# ۱. تعیین مسیر دقیق و مطلق پروژه
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, config.DB_NAME)
+
+# ۲. تعریف پوشه data و اطمینان از ساخت آن
+DATA_DIR = os.path.join(BASE_DIR, "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# ۳. مسیر نهایی فایل دیتابیس
+DB_PATH = os.path.join(DATA_DIR, config.DB_NAME)
 
 def init_db():
-    """🛡️ مقداردهی اولیه دیتابیس با ساختار ۹ فیلتره در مسیر مطلق پروژه"""
+    """🛡️ مقداردهی اولیه دیتابیس در پوشه data/"""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         
@@ -90,7 +96,7 @@ def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1, tp2, posi
         conn.commit()
 
 def log_scan_status(symbol, status):
-    """ذخیره وضعیت اسکن هر ارز"""
+    """ذخیره وضعیت اسکن هر ارز در پوشه data/"""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("INSERT INTO scan_logs (timestamp, symbol, result) VALUES (datetime('now'), ?, ?)", 
