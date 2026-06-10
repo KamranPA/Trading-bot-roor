@@ -86,3 +86,12 @@ def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1, tp2, posi
         cursor.execute("INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, 2, ?)", (signal_id, tp2))
         
         conn.commit()
+
+def log_scan_status(symbol, status):
+    """ذخیره وضعیت اسکن هر ارز برای بررسی‌های بعدی"""
+    db_path = config.DB_NAME
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO scan_logs (timestamp, symbol, result) VALUES (datetime('now'), ?, ?)", 
+                       (symbol, status))
+        conn.commit()
