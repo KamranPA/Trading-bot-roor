@@ -3,8 +3,9 @@
 # ---------------------------------------------------------
 import config
 from src import database, strategy_utils
+import pandas as pd # اطمینان از وارد کردن پانداز برای کار با دیتافریم
 
-def generate_signal(df, pair):
+def generate_signal(df, pair, model=None):
     # اطمینان از وجود دیتای کافی برای محاسبه اندیکاتورها (به ویژه EMA 200)
     if df is None or len(df) < 200:
         return None
@@ -20,15 +21,15 @@ def generate_signal(df, pair):
     if float(candle.get('feat_adx', 0)) < config.ADX_THRESHOLD:
         return None
 
-    # ۳. شناسایی سطوح سویینگ قیمتی (حمایت و مقاومت محلی)
+    # ۳. شناسایی سطوح سویینگ قیمتی
     last_swing_high = strategy_utils.find_last_swing(df, 'high', config.SWING_WINDOW)
     last_swing_low = strategy_utils.find_last_swing(df, 'low', config.SWING_WINDOW)
 
     if last_swing_high is None or last_swing_low is None:
         return None
 
-    # ۴. استخراج کامل ۹ ویژگی هوش مصنوعی هماهنگ با ساختار دیتابیس و مدل
-    features = {
+    # ۴. آماده‌سازی ویژگی‌ها
+    features_dict = {
         'feat_adx': float(candle.get('feat_adx', 0)),
         'feat_vol_ratio': float(candle.get('feat_vol_ratio', 0)),
         'feat_atr_percent': float(candle.get('feat_atr_percent', 0)),
@@ -40,10 +41,21 @@ def generate_signal(df, pair):
         'feat_high_volume_session': float(candle.get('feat_high_volume_session', 0))
     }
 
-    # ۵. مدیریت سرمایه و محاسبه حجم پوزیشن بر اساس ریسک
+    # ۵. اعمال فیلتر هوش مصنوعی (در صورت وجود مدل)
+    if model is not None:
+        # استخراج همان ۶ ویژگی مورد نظر برای مدل
+        features_df = pd.DataFrame([features_dict])
+        subset = features_df[['feat_adx', 'feat_rsi', 'feat_trend_line', 
+                              'feat_ema_deviation', 'feat_rsi_momentum', 'feat_body_ratio']]
+        
+        prediction = model.predict(subset)
+        
+        # اگر پیش‌بینی مدل منفی (۰) بود، سیگنال صادر نشود
+        if prediction[0] == 0:
+            return None
+
+    # ۶. مدیریت سرمایه
     risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0)
-    
-    # رفع باگ حساسیت به حروف (استفاده از مقادیر محاسبه شده در indicators.py)
     sl_dist = 1.5 * float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
     close_price = float(candle['Close'])
     
@@ -53,11 +65,10 @@ def generate_signal(df, pair):
     sl_percent = (sl_dist / close_price) * 100
     position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL) if sl_percent > 0 else 0
 
-    # ۶. منطق شکست سطوح (Breakout Logic) و تاییدیه مومنتوم RSI
+    # ۷. منطق شکست سطوح (Breakout Logic)
     is_bullish_momentum = float(candle.get('feat_rsi', 50)) > 50
     is_bearish_momentum = float(candle.get('feat_rsi', 50)) < 50
 
-    # سیگنال خرید (Breakout صعودی)
     if close_price > last_swing_high and is_bullish_momentum:
         return {
             'pair': pair, 
@@ -67,10 +78,9 @@ def generate_signal(df, pair):
             'tp1': round(close_price + sl_dist, 4),
             'tp2': round(close_price + (sl_dist * 2), 4),
             'position_size': round(position_size, 2), 
-            **features
+            **features_dict
         }
     
-    # سیگنال فروش (Breakout نزولی)
     elif close_price < last_swing_low and is_bearish_momentum:
         return {
             'pair': pair, 
@@ -80,7 +90,7 @@ def generate_signal(df, pair):
             'tp1': round(close_price - sl_dist, 4),
             'tp2': round(close_price - (sl_dist * 2), 4),
             'position_size': round(position_size, 2), 
-            **features
+            **features_dict
         }
 
     return None
