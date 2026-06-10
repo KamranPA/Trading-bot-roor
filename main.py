@@ -30,12 +30,23 @@ def process_pair(pair):
         if df is None or df.empty: return
 
         df = indicators.calculate_indicators(df)
-        signal = strategy.generate_signal(df, pair, model=MODEL) # پاس دادن مدل به استراتژی
+        
+        # ۱. چک کردن فیلترهای زمانی (مثلاً ۸ ساعته)
+        if strategy.is_blocked_by_8h_filter(pair):
+            database.log_scan_status(pair, "blocked for 8h filter")
+            return
+
+        # ۲. تولید سیگنال
+        signal = strategy.generate_signal(df, pair, model=MODEL)
         
         if signal:
             database.save_signal_advanced(pair=pair, **signal)
             telegram_bot.format_and_send_signal(signal)
+            database.log_scan_status(pair, "SIGNAL SENT")
             logging.info(f"✅ سیگنال برای {pair} ارسال شد.")
+        else:
+            database.log_scan_status(pair, "nosignal")
+            
     except Exception as e:
         logging.error(f"خطا در پردازش {pair}: {e}")
 
@@ -68,3 +79,4 @@ def run_bot():
 
 if __name__ == "__main__":
     run_bot()
+
