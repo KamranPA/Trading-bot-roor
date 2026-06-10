@@ -1,37 +1,37 @@
-# ---------------------------------------------------------
-# FILE PATH: .github/workflows/monthly_brain.yml
-# ---------------------------------------------------------
 name: Monthly AI Retrain Pipeline
+
+# ۱. اضافه کردن مجوزهای لازم برای نوشتن در مخزن (ضروری برای Push)
+permissions:
+  contents: write
 
 on:
   schedule:
-    # اجرا در ساعت 00:00 اولین روز هر ماه میلادی
     - cron: '0 0 1 * *'
-  workflow_dispatch: # امکان اجرای دستی از تب Actions در گیت‌هاب
+  workflow_dispatch:
 
 jobs:
   retrain:
     runs-on: ubuntu-latest
     steps:
+    # ۲. ارتقا به نسخه v4 برای پایداری بیشتر
     - name: Checkout Repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         persist-credentials: true
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
         cache: 'pip'
 
     - name: Install Dependencies
       run: |
-        python -msip install --upgrade pip
+        python -m pip install --upgrade pip
         pip install -r requirements.txt
 
     - name: Execute Machine Learning Training
       env:
-        # برای بخش آموزش فقط به دیتابیس لوکال نیاز است و نیازی به API صرافی نیست
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
@@ -45,8 +45,9 @@ jobs:
         # بررسی اینکه آیا فایل مدل تغییر کرده یا خیر
         if [ -f "src/models/trading_filter_model.pkl" ]; then
           git add src/models/trading_filter_model.pkl
-          git diff-index --quiet HEAD || git commit -m "🤖 آپدیت خودکار لایه هوش مصنوعی ربات (Monthly Retrain)"
+          # بررسی تغییرات و کامیت کردن
+          git diff --quiet && git diff --staged --quiet || git commit -m "🤖 آپدیت خودکار لایه هوش مصنوعی ربات (Monthly Retrain)"
           git push
         else
-          echo "No model changes found or data threshold not met."
+          echo "No model changes found."
         fi
