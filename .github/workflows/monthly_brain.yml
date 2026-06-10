@@ -1,37 +1,52 @@
-name: Monthly AI Brain Update
+# ---------------------------------------------------------
+# FILE PATH: .github/workflows/monthly_brain.yml
+# ---------------------------------------------------------
+name: Monthly AI Retrain Pipeline
 
 on:
   schedule:
+    # اجرا در ساعت 00:00 اولین روز هر ماه میلادی
     - cron: '0 0 1 * *'
-  workflow_dispatch:
+  workflow_dispatch: # امکان اجرای دستی از تب Actions در گیت‌هاب
 
 jobs:
-  train:
+  retrain:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+      with:
+        persist-credentials: true
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        cache: 'pip'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pandas requests ccxt scikit-learn numpy joblib
+    - name: Install Dependencies
+      run: |
+        python -msip install --upgrade pip
+        pip install -r requirements.txt
 
-      - name: Run AI Training
-        env:
-          PYTHONPATH: ${{ github.workspace }}/src
-        run: |
-          python -c "from train_model import train_all; train_all()"
+    - name: Execute Machine Learning Training
+      env:
+        # برای بخش آموزش فقط به دیتابیس لوکال نیاز است و نیازی به API صرافی نیست
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: |
+        python src/train_model.py
 
-      - name: Commit and Push
-        run: |
-          git config --global user.name 'github-actions'
-          git config --global user.email 'github-actions@github.com'
-          git add src/models/
-          git commit -m "Auto-update AI model" || echo "No changes to commit"
+    - name: Commit and Push Updated Model Binary
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action Bot"
+        
+        # بررسی اینکه آیا فایل مدل تغییر کرده یا خیر
+        if [ -f "src/models/trading_filter_model.pkl" ]; then
+          git add src/models/trading_filter_model.pkl
+          git diff-index --quiet HEAD || git commit -m "🤖 آپدیت خودکار لایه هوش مصنوعی ربات (Monthly Retrain)"
           git push
+        else
+          echo "No model changes found or data threshold not met."
+        fi
