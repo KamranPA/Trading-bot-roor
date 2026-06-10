@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (نسخه اصلاح شده و استاندارد)
+# FILE PATH: main.py
 # ---------------------------------------------------------
 import os
 import sys
@@ -9,7 +9,7 @@ import joblib
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-# تنظیم دقیق مسیر ریشه پروژه
+# تنظیم دقیق مسیر ریشه پروژه برای اطمینان از Import شدن ماژول‌ها
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
@@ -21,13 +21,14 @@ except ImportError as e:
     print(f"CRITICAL IMPORT ERROR: {e}")
     sys.exit(1)
 
+# تنظیمات لاگینگ
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # بارگذاری مدل هوش مصنوعی
 MODEL_PATH = os.path.join(BASE_DIR, "src", "models", "trading_filter_model.pkl")
 MODEL = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
 
-# تعریف قفل سراسری برای امنیت دیتابیس در محیط مولتی‌ترد
+# تعریف قفل سراسری برای جلوگیری از تداخل در دیتابیس (Thread Safety)
 db_lock = threading.Lock()
 
 def process_pair(pair):
@@ -64,7 +65,7 @@ def process_pair(pair):
 
 def run_auto_optimization():
     """بررسی خودکار برای بهینه‌سازی پارامترها"""
-    # مسیر استاندارد دیتابیس از ماژول database فراخوانی می‌شود
+    # فراخوانی مسیر دیتابیس از ماژول database (منبع حقیقت)
     db_path = database.DB_PATH 
     try:
         if os.path.exists(db_path):
@@ -80,7 +81,7 @@ def run_bot():
     """تابع اصلی اجرای ربات"""
     logging.info("🤖 اسکنر هوشمند v7.3 فعال شد.")
     
-    # مقداردهی اولیه دیتابیس
+    # اطمینان از ایجاد دیتابیس و جداول پیش از هر عملیات
     database.init_db()
     
     try:
@@ -90,7 +91,7 @@ def run_bot():
     
     run_auto_optimization()
     
-    # اجرای موازی برای تمام ارزهای لیست شده
+    # اجرای موازی برای تمام ارزهای لیست شده در config
     watchlist = getattr(config, 'WATCHLIST', [])
     with ThreadPoolExecutor(max_workers=5) as executor:
         executor.map(process_pair, watchlist)
