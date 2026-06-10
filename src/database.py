@@ -10,10 +10,9 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ۲. تعریف دقیق پوشه دیتا و اطمینان از ایجاد آن
 DATA_DIR = os.path.join(BASE_DIR, "data")
-    os.makedirs(DATA_DIR, exist_ok=true)
+os.makedirs(DATA_DIR, exist_ok=True) # اصلاح تورفتگی و اصلاح True
 
 # ۳. ترکیب مسیر پوشه دیتا با نام دیتابیس از config
-# خروجی نهایی: /project_root/data/trading_bot.db
 DB_PATH = os.path.join(DATA_DIR, config.DB_NAME)
 
 def init_db():
