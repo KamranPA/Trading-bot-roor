@@ -1,6 +1,5 @@
 # ---------------------------------------------------------
-# FILE NAME: fetcher.py
-# FILE PATH: /src/fetcher.py
+# FILE PATH: fetcher.py
 # ---------------------------------------------------------
 import pandas as pd
 import os
@@ -50,11 +49,11 @@ def fetch_all_data():
     print(f"🚀 شروع دانلود دیتا برای {len(symbols)} ارز...")
 
     for s in symbols:
-        # ۱. دیتای 4H: افزایش limit به 200 برای پوشش کامل EMA 200
-        fetch_kline(s, "4h", "4hour", limit=200)
+        # ۱. دیتای 4H: اتصال لیمیت به تنظیمات کانفیگ برای پوشش کامل EMA 200
+        fetch_kline(s, "4h", "4hour", limit=config.CANDLES_LIMIT)
         time.sleep(1.5)
         
-        # ۲. دیتای 30m: افزایش limit به 1000 برای دیتای غنی‌تر
+        # ۲. دیتای 30m: دریافت دیتای غنی‌تر برای تایم‌فریم پایین
         fetch_kline(s, "30m", "30min", limit=1000)
         time.sleep(1.5)
 
