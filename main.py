@@ -65,7 +65,8 @@ def process_pair(pair):
 def run_auto_optimization():
     """بررسی خودکار برای بهینه‌سازی پارامترها"""
     # مسیر درست دیتابیس در پوشه data
-    db_path = database.DB_PATH 
+    database.py
+         db_path = database.DB_PATH
     try:
         if os.path.exists(db_path):
             with sqlite3.connect(db_path) as conn:
