@@ -1,9 +1,17 @@
+
 # ---------------------------------------------------------
 # FILE PATH: src/strategy.py
 # ---------------------------------------------------------
 import config
 from src import database, strategy_utils
 import pandas as pd # اطمینان از وارد کردن پانداز برای کار با دیتافریم
+
+def is_blocked_by_8h_filter(pair):
+    """
+    بررسی اینکه آیا ارز مورد نظر توسط فیلتر ۸ ساعته مسدود شده است یا خیر.
+    فعلاً به صورت پیش‌فرض False برمی‌گرداند تا ربات متوقف نشود.
+    """
+    return False 
 
 def generate_signal(df, pair, model=None):
     # اطمینان از وجود دیتای کافی برای محاسبه اندیکاتورها (به ویژه EMA 200)
@@ -13,22 +21,26 @@ def generate_signal(df, pair, model=None):
     idx = len(df) - 1
     candle = df.iloc[idx]
     
-    # ۱. مدیریت ریسک: کنترل سقف تعداد پوزیشن‌های باز
+    # ۱. فیلتر ۸ ساعته (بررسی مسدود بودن ارز)
+    if is_blocked_by_8h_filter(pair):
+        return None
+
+    # ۲. مدیریت ریسک: کنترل سقف تعداد پوزیشن‌های باز
     if database.get_open_positions_count() >= config.MAX_OPEN_POSITIONS:
         return None
 
-    # ۲. فیلتر جهت‌گیری و شتاب روند کلان (ADX)
+    # ۳. فیلتر جهت‌گیری و شتاب روند کلان (ADX)
     if float(candle.get('feat_adx', 0)) < config.ADX_THRESHOLD:
         return None
 
-    # ۳. شناسایی سطوح سویینگ قیمتی
+    # ۴. شناسایی سطوح سویینگ قیمتی
     last_swing_high = strategy_utils.find_last_swing(df, 'high', config.SWING_WINDOW)
     last_swing_low = strategy_utils.find_last_swing(df, 'low', config.SWING_WINDOW)
 
     if last_swing_high is None or last_swing_low is None:
         return None
 
-    # ۴. آماده‌سازی ویژگی‌ها
+    # ۵. آماده‌سازی ویژگی‌ها
     features_dict = {
         'feat_adx': float(candle.get('feat_adx', 0)),
         'feat_vol_ratio': float(candle.get('feat_vol_ratio', 0)),
@@ -41,7 +53,7 @@ def generate_signal(df, pair, model=None):
         'feat_high_volume_session': float(candle.get('feat_high_volume_session', 0))
     }
 
-    # ۵. اعمال فیلتر هوش مصنوعی (در صورت وجود مدل)
+    # ۶. اعمال فیلتر هوش مصنوعی (در صورت وجود مدل)
     if model is not None:
         # استخراج همان ۶ ویژگی مورد نظر برای مدل
         features_df = pd.DataFrame([features_dict])
@@ -54,7 +66,7 @@ def generate_signal(df, pair, model=None):
         if prediction[0] == 0:
             return None
 
-    # ۶. مدیریت سرمایه
+    # ۷. مدیریت سرمایه
     risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0)
     sl_dist = 1.5 * float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
     close_price = float(candle['Close'])
@@ -65,7 +77,7 @@ def generate_signal(df, pair, model=None):
     sl_percent = (sl_dist / close_price) * 100
     position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL) if sl_percent > 0 else 0
 
-    # ۷. منطق شکست سطوح (Breakout Logic)
+    # ۸. منطق شکست سطوح (Breakout Logic)
     is_bullish_momentum = float(candle.get('feat_rsi', 50)) > 50
     is_bearish_momentum = float(candle.get('feat_rsi', 50)) < 50
 
