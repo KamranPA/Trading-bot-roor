@@ -2,9 +2,13 @@ name: Core Trading Bot Pipeline
 
 on:
   schedule:
-    # اجرا هر ۳۰ دقیقه یکبار
     - cron: '*/30 * * * *'
   workflow_dispatch:
+
+# ۱. اضافه شدن دسترسی‌ها: این بخش برای جلوگیری از ارور ۴۰۴ و اجازه خواندن فایل‌ها ضروری است
+permissions:
+  actions: read
+  contents: write
 
 jobs:
   trade:
@@ -23,12 +27,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # 🟢 تغییر اصلی اینجاست: استفاده از اکشن مخصوص برای دریافت فایل از ران‌های قبلی
     - name: Restore Previous Session State
       uses: dawidd6/action-download-artifact@v3
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
-        workflow: core_trading_bot.yml
+        # ۲. پارامتر workflow حذف شد تا سیستم به صورت خودکار تاریخچه همین فایل را پیدا کند
         name: bot-runtime-state
         path: .
       continue-on-error: true
@@ -39,7 +42,6 @@ jobs:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
-        # پاکسازی کش برای اطمینان از اجرای کدهای جدید
         find . -name "*.pyc" -delete
         python main.py
 
