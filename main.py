@@ -3,10 +3,10 @@ import sys
 import logging
 import sqlite3
 import joblib
-import threading  # این کتابخانه برای مدیریت همزمانی ضروری است
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
-# تنظیم مسیرها
+# تنظیم دقیق مسیر ریشه پروژه
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
@@ -20,24 +20,24 @@ except ImportError as e:
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# لود مدل در زمان شروع (Global) برای کاهش بار پردازشی
-MODEL = joblib.load(os.path.join(BASE_DIR, "src", "models", "trading_filter_model.pkl")) \
-        if os.path.exists(os.path.join(BASE_DIR, "src", "models", "trading_filter_model.pkl")) else None
+# استفاده از مسیر مطلق برای مدل
+MODEL_PATH = os.path.join(BASE_DIR, "src", "models", "trading_filter_model.pkl")
+MODEL = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
 
-# تعریف یک قفل سراسری برای جلوگیری از تداخل و کرش دیتابیس
+# تعریف قفل سراسری برای دیتابیس
 db_lock = threading.Lock()
 
 def process_pair(pair):
-    """پردازش تک‌جفت ارز برای استفاده در مولتی‌تریدینگ"""
+    """پردازش تک‌جفت ارز با مدیریت خطا"""
     try:
         df = coinex_client.get_coinex_candles(pair)
         if df is None or df.empty: return
 
         df = indicators.calculate_indicators(df)
         
-        # ۱. چک کردن فیلترهای زمانی (مثلاً ۸ ساعته)
+        # ۱. فیلتر ۸ ساعته
         if strategy.is_blocked_by_8h_filter(pair):
-            with db_lock:  # قفل کردن دیتابیس فقط برای همین ارز در زمان نوشتن
+            with db_lock:
                 database.log_scan_status(pair, "blocked for 8h filter")
             logging.info(f"⛔️ مسدود توسط فیلتر ۸ ساعته: {pair}")
             return
@@ -45,24 +45,25 @@ def process_pair(pair):
         # ۲. تولید سیگنال
         signal = strategy.generate_signal(df, pair, model=MODEL)
         
-        if signal:
-            with db_lock:  # قفل کردن دیتابیس هنگام ذخیره سیگنال جدید
+        with db_lock:
+            if signal:
                 database.save_signal_advanced(pair=pair, **signal)
                 database.log_scan_status(pair, "SIGNAL SENT")
-            telegram_bot.format_and_send_signal(signal)
-            logging.info(f"✅ سیگنال برای {pair} ارسال شد.")
-        else:
-            with db_lock:  # قفل کردن دیتابیس برای ثبت وضعیت بدون سیگنال
+                telegram_bot.format_and_send_signal(signal)
+                logging.info(f"✅ سیگنال برای {pair} ارسال شد.")
+            else:
                 database.log_scan_status(pair, "nosignal")
-            logging.info(f"⚪️ فاقد سیگنال برای {pair} (nosignal)") # لاگ برای نمایش در کنسول گیت‌هاب
+                logging.info(f"⚪️ فاقد سیگنال برای {pair}")
             
     except Exception as e:
         logging.error(f"خطا در پردازش {pair}: {e}")
 
 def run_auto_optimization():
+    # اصلاح مسیر مطلق برای دیتابیس در بخش بهینه‌ساز
+    db_path = os.path.join(BASE_DIR, config.DB_NAME)
     try:
-        if os.path.exists(config.DB_NAME):
-            with sqlite3.connect(config.DB_NAME) as conn:
+        if os.path.exists(db_path):
+            with sqlite3.connect(db_path) as conn:
                 count = conn.execute("SELECT count(*) FROM signals").fetchone()[0]
             if count > 0 and count % 50 == 0:
                 logging.info(f"🚀 شروع ارتقای هوشمند (تعداد کل سیگنال‌ها: {count})")
@@ -72,6 +73,8 @@ def run_auto_optimization():
 
 def run_bot():
     logging.info("🤖 اسکنر هوشمند v7.3 فعال شد.")
+    
+    # اطمینان از وجود دیتابیس در مسیر درست
     database.init_db()
     
     try:
@@ -81,7 +84,6 @@ def run_bot():
     
     run_auto_optimization()
     
-    # استفاده از تردینگ برای اجرای موازی اسکن‌ها (بسیار سریع‌تر)
     watchlist = getattr(config, 'WATCHLIST', [])
     with ThreadPoolExecutor(max_workers=5) as executor:
         executor.map(process_pair, watchlist)
