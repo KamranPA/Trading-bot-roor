@@ -20,7 +20,7 @@ except ImportError as e:
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# استفاده از مسیر مطلق برای مدل
+# مسیر مطلق برای مدل
 MODEL_PATH = os.path.join(BASE_DIR, "src", "models", "trading_filter_model.pkl")
 MODEL = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
 
@@ -59,8 +59,8 @@ def process_pair(pair):
         logging.error(f"خطا در پردازش {pair}: {e}")
 
 def run_auto_optimization():
-    # اصلاح مسیر مطلق برای دیتابیس در بخش بهینه‌ساز
-    db_path = os.path.join(BASE_DIR, config.DB_NAME)
+    # اصلاح مسیر برای دیتابیس: استفاده از مسیر دقیق داخل پوشه data
+    db_path = os.path.join(BASE_DIR, "data", config.DB_NAME)
     try:
         if os.path.exists(db_path):
             with sqlite3.connect(db_path) as conn:
@@ -74,7 +74,7 @@ def run_auto_optimization():
 def run_bot():
     logging.info("🤖 اسکنر هوشمند v7.3 فعال شد.")
     
-    # اطمینان از وجود دیتابیس در مسیر درست
+    # مقداردهی اولیه دیتابیس (خودش پوشه data را می‌سازد)
     database.init_db()
     
     try:
