@@ -9,8 +9,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # نام فایل دیتابیس (بدون مسیر مطلق در اینجا)
 DB_NAME = "trading_bot.db"
 
-# مسیر پوشه data که دیتابیس باید در آن قرار بگیرد
-DATA_DIR = os.path.join(BASE_DIR, "data")
 
 # تنظیمات فچ دیتای صرافی
 TIMEFRAME = "4h"        
