@@ -3,6 +3,7 @@ import sys
 import logging
 import sqlite3
 import joblib
+import threading  # این کتابخانه برای مدیریت همزمانی ضروری است
 from concurrent.futures import ThreadPoolExecutor
 
 # تنظیم مسیرها
@@ -23,6 +24,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 MODEL = joblib.load(os.path.join(BASE_DIR, "src", "models", "trading_filter_model.pkl")) \
         if os.path.exists(os.path.join(BASE_DIR, "src", "models", "trading_filter_model.pkl")) else None
 
+# تعریف یک قفل سراسری برای جلوگیری از تداخل و کرش دیتابیس
+db_lock = threading.Lock()
+
 def process_pair(pair):
     """پردازش تک‌جفت ارز برای استفاده در مولتی‌تریدینگ"""
     try:
@@ -33,19 +37,24 @@ def process_pair(pair):
         
         # ۱. چک کردن فیلترهای زمانی (مثلاً ۸ ساعته)
         if strategy.is_blocked_by_8h_filter(pair):
-            database.log_scan_status(pair, "blocked for 8h filter")
+            with db_lock:  # قفل کردن دیتابیس فقط برای همین ارز در زمان نوشتن
+                database.log_scan_status(pair, "blocked for 8h filter")
+            logging.info(f"⛔️ مسدود توسط فیلتر ۸ ساعته: {pair}")
             return
 
         # ۲. تولید سیگنال
         signal = strategy.generate_signal(df, pair, model=MODEL)
         
         if signal:
-            database.save_signal_advanced(pair=pair, **signal)
+            with db_lock:  # قفل کردن دیتابیس هنگام ذخیره سیگنال جدید
+                database.save_signal_advanced(pair=pair, **signal)
+                database.log_scan_status(pair, "SIGNAL SENT")
             telegram_bot.format_and_send_signal(signal)
-            database.log_scan_status(pair, "SIGNAL SENT")
             logging.info(f"✅ سیگنال برای {pair} ارسال شد.")
         else:
-            database.log_scan_status(pair, "nosignal")
+            with db_lock:  # قفل کردن دیتابیس برای ثبت وضعیت بدون سیگنال
+                database.log_scan_status(pair, "nosignal")
+            logging.info(f"⚪️ فاقد سیگنال برای {pair} (nosignal)") # لاگ برای نمایش در کنسول گیت‌هاب
             
     except Exception as e:
         logging.error(f"خطا در پردازش {pair}: {e}")
@@ -79,4 +88,3 @@ def run_bot():
 
 if __name__ == "__main__":
     run_bot()
-
