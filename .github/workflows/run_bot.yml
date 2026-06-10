@@ -1,6 +1,3 @@
-# ---------------------------------------------------------
-# FILE PATH: .github/workflows/core_trading_bot.yml
-# ---------------------------------------------------------
 name: Core Trading Bot Pipeline
 
 on:
@@ -26,9 +23,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    # 🟢 تغییر اصلی اینجاست: استفاده از اکشن مخصوص برای دریافت فایل از ران‌های قبلی
     - name: Restore Previous Session State
-      uses: actions/download-artifact@v4
+      uses: dawidd6/action-download-artifact@v3
       with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        workflow: core_trading_bot.yml
         name: bot-runtime-state
         path: .
       continue-on-error: true
