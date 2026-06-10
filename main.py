@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: /main.py
+# FILE PATH: main.py
 # ---------------------------------------------------------
 
 import os
@@ -46,10 +46,9 @@ def get_model():
         return None
 
 def run_auto_optimization():
-    """فراخوانی بهینه‌ساز با چک کردن مسیر دیتابیس"""
+    """فراخوانی بهینه‌ساز با چک کردن مسیر یکپارچه دیتابیس از کانفیگ"""
     try:
-        # استفاده از مسیر مطلق برای دیتابیس
-        db_path = getattr(database, 'DB_NAME', os.path.join(BASE_DIR, 'data', 'trading_bot.db'))
+        db_path = config.DB_NAME
         if os.path.exists(db_path):
             with sqlite3.connect(db_path) as conn:
                 count = conn.execute("SELECT count(*) FROM signals").fetchone()[0]
