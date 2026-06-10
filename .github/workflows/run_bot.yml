@@ -1,59 +1,37 @@
 name: Trading Bot Pipeline
-
 on:
   schedule:
     - cron: '*/30 * * * *'
   workflow_dispatch:
-
-permissions:
-  actions: write
-  contents: write
-
 jobs:
   trade:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install Dependencies
-        run: pip install -r requirements.txt
-
-      - name: Restore Previous Database
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.10'}
+      - run: pip install -r requirements.txt
+      
+      - name: Restore DB
         uses: dawidd6/action-download-artifact@v3
         with:
-          name: db-artifact
+          name: bot-runtime-state
           path: .
           continue-on-error: true
 
-      - name: Prepare Data Directory
-        run: |
-          mkdir -p data
-          # اگر فایل دیتابیس دانلود شده، آن را به پوشه دیتا منتقل کن
-          if [ -f trading_bot.db ]; then mv trading_bot.db data/; fi
+      - name: Setup Path
+        run: mkdir -p data && if [ -f trading_bot.db ]; then mv trading_bot.db data/; fi
 
-      - name: Run Trading Bot
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      - name: Run Bot
         run: python main.py
 
-      - name: Prepare Artifact for Upload
+      - name: Prepare Upload
         if: always()
-        run: |
-          # فایل را از پوشه دیتا به ریشه برگردان تا برای آپلود آماده باشد
-          if [ -f data/trading_bot.db ]; then mv data/trading_bot.db .; fi
+        run: if [ -f data/trading_bot.db ]; then mv data/trading_bot.db .; fi
 
-      - name: Upload Updated Database
+      - name: Upload DB
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: db-artifact
+          name: bot-runtime-state
           path: trading_bot.db
-          retention-days: 7
