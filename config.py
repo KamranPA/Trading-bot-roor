@@ -1,17 +1,20 @@
 # ---------------------------------------------------------
-# FILE PATH: config.py
+# FILE PATH: config.py (اصلاح شده)
 # ---------------------------------------------------------
 import os
 
 # تعیین مسیر پایه پروژه (Root Directory)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# دیتابیس به صورت یکپارچه در ریشه پروژه قرار می‌گیرد
-DB_NAME = os.path.join(BASE_DIR, "trading_bot.db")
+# نام فایل دیتابیس (بدون مسیر مطلق در اینجا)
+DB_NAME = "trading_bot.db"
+
+# مسیر پوشه data که دیتابیس باید در آن قرار بگیرد
+DATA_DIR = os.path.join(BASE_DIR, "data")
 
 # تنظیمات فچ دیتای صرافی
-TIMEFRAME = "4h"        # تایم‌فریم مورد نیاز ربات
-CANDLES_LIMIT = 500    # تعداد کندل‌های مورد نیاز برای تحلیل دقیق اندیکاتورها
+TIMEFRAME = "4h"        
+CANDLES_LIMIT = 500    
 
 # تنظیمات معاملاتی و ریسک
 MAX_OPEN_POSITIONS = 3
@@ -25,7 +28,7 @@ WATCHLIST = [
     "BTC/USDT", "ETH/USDT", "SOL/USDT", "POL/USDT", 
     "ADA/USDT", "DOT/USDT", "LINK/USDT", "UNI/USDT", 
     "AVAX/USDT", "XRP/USDT", "LTC/USDT", "BCH/USDT", 
-    "ATOM/USDT", "NEAR/USDT", "POL/USDT"
+    "ATOM/USDT", "NEAR/USDT"
 ]
 
 # تنظیمات تلگرام (از متغیرهای محیطی خوانده می‌شود)
