@@ -3,19 +3,23 @@ name: Run Backtester and Optimizer
 on:
   workflow_dispatch: 
 
+# اضافه کردن دسترسی write برای اینکه ربات بتواند فایل‌های جدید را در مخزن ذخیره کند
+permissions:
+  contents: write
+
 jobs:
   backtest:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.10' # هماهنگی با ربات اصلی
 
       - name: Install dependencies
         run: |
@@ -43,11 +47,10 @@ jobs:
           git config --global user.email 'github-actions@github.com'
           
           # اضافه کردن فایل‌های گزارش و پارامترها
-          git add backtest_summary.txt
-          git add best_params.json
+          git add backtest_summary.txt best_params.json
           
-          # بررسی وضعیت تغییرات و اعمال کامیت در صورت وجود تغییر
-          if git diff --staged --quiet; then
+          # بررسی وضعیت تغییرات و اعمال کامیت
+          if git diff --cached --quiet; then
             echo "No changes detected, skipping commit."
           else
             git commit -m "Auto-update: Backtest results and optimized parameters"
