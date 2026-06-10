@@ -5,7 +5,6 @@ on:
     - cron: '*/30 * * * *'
   workflow_dispatch:
 
-# ۱. اضافه شدن دسترسی‌ها: این بخش برای جلوگیری از ارور ۴۰۴ و اجازه خواندن فایل‌ها ضروری است
 permissions:
   actions: read
   contents: write
@@ -21,20 +20,21 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
+        cache: 'pip'
 
-    - name: Install System Dependencies
+    - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    # بازیابی دیتابیس از آخرین اجرای موفق
     - name: Restore Previous Session State
       uses: dawidd6/action-download-artifact@v3
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
-        # ۲. پارامتر workflow حذف شد تا سیستم به صورت خودکار تاریخچه همین فایل را پیدا کند
         name: bot-runtime-state
         path: .
-      continue-on-error: true
+      continue-on-error: true # اگر اولین بار باشد، خطا نگیرد و ادامه دهد
 
     - name: Run Trading Bot Logic
       env:
@@ -42,9 +42,10 @@ jobs:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
-        find . -name "*.pyc" -delete
+        # اطمینان از اینکه اسکریپت در مسیر درست اجرا می‌شود
         python main.py
 
+    # آپلود مجدد دیتابیس برای اجرای بعدی
     - name: Upload and Preserve Updated State
       if: always()
       uses: actions/upload-artifact@v4
