@@ -1,27 +1,28 @@
 # ---------------------------------------------------------
-# FILE PATH: src/database.py (نهایی و استاندارد شده)
+# FILE PATH: src/database.py
 # ---------------------------------------------------------
 import sqlite3
-from datetime import datetime
 import os
 import config 
 
-# ۱. تعیین مسیر دقیق و مطلق پروژه
+# ۱. تعیین مسیر مطلق پروژه (Base Directory)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# ۲. تعریف پوشه data و اطمینان از ساخت آن
+# ۲. تعریف دقیق پوشه دیتا و اطمینان از ایجاد آن
 DATA_DIR = os.path.join(BASE_DIR, "data")
-os.makedirs(DATA_DIR, exist_ok=True)
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
 
-# ۳. مسیر نهایی فایل دیتابیس
+# ۳. ترکیب مسیر پوشه دیتا با نام دیتابیس از config
+# خروجی نهایی: /project_root/data/trading_bot.db
 DB_PATH = os.path.join(DATA_DIR, config.DB_NAME)
 
 def init_db():
-    """🛡️ مقداردهی اولیه دیتابیس در پوشه data/"""
+    """🛡️ مقداردهی اولیه دیتابیس در مسیر data/"""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         
-        # جدول اصلی سیگنال‌ها
+        # ایجاد جدول اصلی سیگنال‌ها
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY,
@@ -56,6 +57,7 @@ def get_open_positions_count():
 def manage_open_positions():
     try:
         with sqlite3.connect(DB_PATH) as conn:
+            from datetime import datetime
             now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
             conn.execute("""
                 UPDATE signals 
@@ -86,6 +88,7 @@ def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1, tp2, posi
             ) VALUES (?, ?, ?, ?, ?, {', '.join(['?'] * len(allowed_features))})
         """
         
+        from datetime import datetime
         timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute(query, [timestamp, pair, direction, entry_price, stop_loss] + values)
         
@@ -96,7 +99,7 @@ def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1, tp2, posi
         conn.commit()
 
 def log_scan_status(symbol, status):
-    """ذخیره وضعیت اسکن هر ارز در پوشه data/"""
+    """ذخیره وضعیت اسکن"""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("INSERT INTO scan_logs (timestamp, symbol, result) VALUES (datetime('now'), ?, ?)", 
