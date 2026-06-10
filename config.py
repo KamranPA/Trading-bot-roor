@@ -25,7 +25,7 @@ WATCHLIST = [
     "BTC/USDT", "ETH/USDT", "SOL/USDT", "POL/USDT", 
     "ADA/USDT", "DOT/USDT", "LINK/USDT", "UNI/USDT", 
     "AVAX/USDT", "XRP/USDT", "LTC/USDT", "BCH/USDT", 
-    "ATOM/USDT", "NEAR/USDT", "MATIC/USDT"
+    "ATOM/USDT", "NEAR/USDT", "POL/USDT"
 ]
 
 # تنظیمات تلگرام (از متغیرهای محیطی خوانده می‌شود)
