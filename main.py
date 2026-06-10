@@ -1,3 +1,6 @@
+# ---------------------------------------------------------
+# FILE PATH: main.py (نسخه کامل و اصلاح شده)
+# ---------------------------------------------------------
 import os
 import sys
 import logging
@@ -20,29 +23,30 @@ except ImportError as e:
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# مسیر مطلق برای مدل
+# بارگذاری مدل هوش مصنوعی
 MODEL_PATH = os.path.join(BASE_DIR, "src", "models", "trading_filter_model.pkl")
 MODEL = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
 
-# تعریف قفل سراسری برای دیتابیس
+# تعریف قفل سراسری برای امنیت دیتابیس در محیط مولتی‌ترد
 db_lock = threading.Lock()
 
 def process_pair(pair):
-    """پردازش تک‌جفت ارز با مدیریت خطا"""
+    """پردازش تک‌جفت ارز و مدیریت جریان سیگنال‌دهی"""
     try:
         df = coinex_client.get_coinex_candles(pair)
-        if df is None or df.empty: return
+        if df is None or df.empty: 
+            return
 
         df = indicators.calculate_indicators(df)
         
-        # ۱. فیلتر ۸ ساعته
+        # ۱. بررسی فیلترهای استراتژی
         if strategy.is_blocked_by_8h_filter(pair):
             with db_lock:
                 database.log_scan_status(pair, "blocked for 8h filter")
             logging.info(f"⛔️ مسدود توسط فیلتر ۸ ساعته: {pair}")
             return
 
-        # ۲. تولید سیگنال
+        # ۲. تولید سیگنال با مدل
         signal = strategy.generate_signal(df, pair, model=MODEL)
         
         with db_lock:
@@ -59,8 +63,9 @@ def process_pair(pair):
         logging.error(f"خطا در پردازش {pair}: {e}")
 
 def run_auto_optimization():
-    # اصلاح مسیر برای دیتابیس: استفاده از مسیر دقیق داخل پوشه data
-    db_path = os.path.join(BASE_DIR, "data", config.DB_NAME)
+    """بررسی خودکار برای بهینه‌سازی پارامترها"""
+    # مسیر درست دیتابیس در پوشه data
+    db_path = database.DB_PATH 
     try:
         if os.path.exists(db_path):
             with sqlite3.connect(db_path) as conn:
@@ -72,9 +77,10 @@ def run_auto_optimization():
         logging.error(f"خطا در پروسه خودارتقایی: {e}")
 
 def run_bot():
+    """تابع اصلی اجرای ربات"""
     logging.info("🤖 اسکنر هوشمند v7.3 فعال شد.")
     
-    # مقداردهی اولیه دیتابیس (خودش پوشه data را می‌سازد)
+    # مقداردهی اولیه دیتابیس
     database.init_db()
     
     try:
@@ -84,6 +90,7 @@ def run_bot():
     
     run_auto_optimization()
     
+    # اجرای موازی برای تمام ارزهای لیست شده
     watchlist = getattr(config, 'WATCHLIST', [])
     with ThreadPoolExecutor(max_workers=5) as executor:
         executor.map(process_pair, watchlist)
