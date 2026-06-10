@@ -1,6 +1,3 @@
-# ---------------------------------------------------------
-# FILE PATH: src/database.py
-# ---------------------------------------------------------
 import sqlite3
 import os
 import config 
@@ -8,22 +5,23 @@ import config
 # ۱. تعیین مسیر مطلق پروژه (Base Directory)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# ۲. تعریف دقیق پوشه دیتا و اطمینان از ایجاد آن
+# ۲. تعریف مسیر پوشه دیتا (data/) و اطمینان از ساخت آن
 DATA_DIR = os.path.join(BASE_DIR, "data")
-os.makedirs(DATA_DIR, exist_ok=True) # اصلاح تورفتگی و اصلاح True
+os.makedirs(DATA_DIR, exist_ok=True)
 
-# ۳. ترکیب مسیر پوشه دیتا با نام دیتابیس از config
+# ۳. تعیین مسیر نهایی دیتابیس (همیشه در پوشه data)
+# نکته: در config.py فقط نام فایل یعنی "trading_bot.db" را قرار دهید.
 DB_PATH = os.path.join(DATA_DIR, config.DB_NAME)
 
 def init_db():
-    """🛡️ مقداردهی اولیه دیتابیس در مسیر data/"""
+    """🛡️ مقداردهی اولیه دیتابیس و ایجاد جداول در صورت عدم وجود"""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         
-        # ایجاد جدول اصلی سیگنال‌ها
+        # جدول اصلی سیگنال‌ها
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signals (
-                id INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
                 symbol TEXT NOT NULL,
                 direction TEXT NOT NULL,
@@ -39,35 +37,17 @@ def init_db():
         """)
         
         # جداول کمکی
-        cursor.execute("CREATE TABLE IF NOT EXISTS signal_targets (id INTEGER PRIMARY KEY, signal_id INTEGER, target_number INTEGER, target_price REAL, status TEXT DEFAULT 'PENDING')")
-        cursor.execute("CREATE TABLE IF NOT EXISTS scan_logs (id INTEGER PRIMARY KEY, timestamp TEXT, symbol TEXT, result TEXT)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS signal_targets (id INTEGER PRIMARY KEY AUTOINCREMENT, signal_id INTEGER, target_number INTEGER, target_price REAL, status TEXT DEFAULT 'PENDING')")
+        cursor.execute("CREATE TABLE IF NOT EXISTS scan_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, symbol TEXT, result TEXT)")
         cursor.execute("CREATE TABLE IF NOT EXISTS bot_settings (setting_key TEXT PRIMARY KEY, setting_value TEXT)")
+        
+        # مقداردهی اولیه تنظیمات
         cursor.execute("INSERT OR IGNORE INTO bot_settings (setting_key, setting_value) VALUES ('bot_status', 'ACTIVE')")
+        
         conn.commit()
 
-def get_open_positions_count():
-    try:
-        with sqlite3.connect(DB_PATH) as conn:
-            return conn.execute("SELECT COUNT(*) FROM signals WHERE status = 'OPEN'").fetchone()[0]
-    except: 
-        return 0
-
-def manage_open_positions():
-    try:
-        with sqlite3.connect(DB_PATH) as conn:
-            from datetime import datetime
-            now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-            conn.execute("""
-                UPDATE signals 
-                SET status = 'CLOSED', pnl_percent = -1.0, closed_at = ?
-                WHERE status = 'OPEN' AND timestamp <= datetime('now', '-2 days')
-            """, (now,))
-            conn.commit()
-    except Exception as e:
-        print(f"❌ خطا در مدیریت پوزیشن‌ها: {e}")
-
-def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1, tp2, position_size, **features):
-    """ذخیره سیگنال به همراه فیچرهای ۹گانه"""
+def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1, tp2, **features):
+    """ذخیره سیگنال به همراه فیچرهای تحلیلی"""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         
@@ -83,23 +63,29 @@ def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1, tp2, posi
             INSERT INTO signals (
                 timestamp, symbol, direction, entry_price, stop_loss, 
                 {', '.join(allowed_features)}
-            ) VALUES (?, ?, ?, ?, ?, {', '.join(['?'] * len(allowed_features))})
+            ) VALUES (datetime('now'), ?, ?, ?, ?, {', '.join(['?'] * len(allowed_features))})
         """
         
-        from datetime import datetime
-        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        cursor.execute(query, [timestamp, pair, direction, entry_price, stop_loss] + values)
-        
+        cursor.execute(query, [pair, direction, entry_price, stop_loss] + values)
         signal_id = cursor.lastrowid
+        
+        # ثبت تارگت‌ها
         cursor.execute("INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, 1, ?)", (signal_id, tp1))
         cursor.execute("INSERT INTO signal_targets (signal_id, target_number, target_price) VALUES (?, 2, ?)", (signal_id, tp2))
         
         conn.commit()
 
-def log_scan_status(symbol, status):
-    """ذخیره وضعیت اسکن"""
+def manage_open_positions():
+    """بستن پوزیشن‌های قدیمی‌تر از ۲ روز"""
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO scan_logs (timestamp, symbol, result) VALUES (datetime('now'), ?, ?)", 
-                       (symbol, status))
+        conn.execute("""
+            UPDATE signals 
+            SET status = 'CLOSED', pnl_percent = -1.0, closed_at = datetime('now')
+            WHERE status = 'OPEN' AND timestamp <= datetime('now', '-2 days')
+        """)
+        conn.commit()
+
+def log_scan_status(symbol, status):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("INSERT INTO scan_logs (timestamp, symbol, result) VALUES (datetime('now'), ?, ?)", (symbol, status))
         conn.commit()
