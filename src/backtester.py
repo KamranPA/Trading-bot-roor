@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: backtester.py
+# FILE PATH: backtester.py (اصلاح شده و ایزوله)
 # ---------------------------------------------------------
 import os
 import sqlite3
@@ -9,7 +9,7 @@ from src import indicators, strategy_utils
 
 def run_backtest_for_symbol(symbol):
     """
-    اجرای تست گذشته و تزریق مستقیم معاملات به دیتابیس برای آموزش هوش مصنوعی
+    اجرای تست گذشته و تزریق مستقیم معاملات به دیتابیس اختصاصی بکتست برای آموزش هوش مصنوعی
     """
     safe_name = symbol.replace('/', '_')
     file_path = os.path.join(config.BASE_DIR, "data", "4h", f"{safe_name}_history.csv")
@@ -39,8 +39,9 @@ def run_backtest_for_symbol(symbol):
     # دیکشنری برای نگهداری مقادیر سنسورها در لحظه ورود
     entry_features = {}
 
-    # اتصال به دیتابیس اصلی پروژه
-    conn = sqlite3.connect(config.DB_NAME)
+    # اتصال به دیتابیس اختصاصی بکتست (تفکیک کامل از محیط لایو)
+    db_path = os.path.join(config.BASE_DIR, "data", config.DB_NAME_BACKTEST)
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
     for i in range(200, len(df)):
@@ -73,7 +74,7 @@ def run_backtest_for_symbol(symbol):
                     winning_trades += 1
                     closed = True
 
-            # اگر معامله بسته شد، آن را در دیتابیس برای هوش مصنوعی ذخیره کن
+            # اگر معامله بسته شد، آن را در دیتابیس بکتست برای هوش مصنوعی ذخیره کن
             if closed:
                 total_pnl += pnl
                 total_trades += 1
@@ -145,9 +146,9 @@ def run_backtest_for_symbol(symbol):
     return {"symbol": symbol, "total_trades": total_trades, "win_rate": round(win_rate, 2), "total_pnl_percent": round(total_pnl, 2)}
 
 def run_all_backtests():
-    # اطمینان از وجود دیتابیس قبل از بکتست
+    # مقداردهی اولیه دیتابیس اختصاصی بکتست قبل از شروع عملیات
     from src import database
-    database.init_db()
+    database.init_db(mode="backtest")
     
     print("📊 شروع فرآیند بکتست و پر کردن دیتابیس برای هوش مصنوعی...")
     for symbol in config.WATCHLIST:
