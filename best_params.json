@@ -5,23 +5,23 @@
         "sl_ratio": 1.0
     },
     "BTC/USDT": {
-        "adx_threshold": 28.0,
-        "tp_ratio": 2.3000000000000007,
+        "adx_threshold": 29.0,
+        "tp_ratio": 2.400000000000001,
         "sl_ratio": 1.0
     },
     "ETH/USDT": {
-        "adx_threshold": 16.0,
+        "adx_threshold": 15.5,
         "tp_ratio": 1.5,
         "sl_ratio": 1.0
     },
     "SOL/USDT": {
-        "adx_threshold": 28.0,
-        "tp_ratio": 2.3000000000000007,
+        "adx_threshold": 29.0,
+        "tp_ratio": 2.400000000000001,
         "sl_ratio": 1.0
     },
     "POL/USDT": {
-        "adx_threshold": 28.0,
-        "tp_ratio": 2.3000000000000007,
+        "adx_threshold": 29.0,
+        "tp_ratio": 2.400000000000001,
         "sl_ratio": 1.0
     },
     "ADA/USDT": {
@@ -30,13 +30,13 @@
         "sl_ratio": 1.0
     },
     "DOT/USDT": {
-        "adx_threshold": 28.0,
-        "tp_ratio": 2.3000000000000007,
+        "adx_threshold": 29.0,
+        "tp_ratio": 2.400000000000001,
         "sl_ratio": 1.0
     },
     "LINK/USDT": {
-        "adx_threshold": 28.0,
-        "tp_ratio": 2.3000000000000007,
+        "adx_threshold": 29.0,
+        "tp_ratio": 2.400000000000001,
         "sl_ratio": 1.0
     },
     "UNI/USDT": {
@@ -45,27 +45,27 @@
         "sl_ratio": 1.0
     },
     "AVAX/USDT": {
-        "adx_threshold": 28.0,
-        "tp_ratio": 2.3000000000000007,
+        "adx_threshold": 29.0,
+        "tp_ratio": 2.400000000000001,
         "sl_ratio": 1.0
     },
     "XRP/USDT": {
-        "adx_threshold": 28.0,
-        "tp_ratio": 2.3000000000000007,
+        "adx_threshold": 29.0,
+        "tp_ratio": 2.400000000000001,
         "sl_ratio": 1.0
     },
     "LTC/USDT": {
-        "adx_threshold": 28.0,
-        "tp_ratio": 2.3000000000000007,
+        "adx_threshold": 29.0,
+        "tp_ratio": 2.400000000000001,
         "sl_ratio": 1.0
     },
     "BCH/USDT": {
-        "adx_threshold": 28.0,
-        "tp_ratio": 2.3000000000000007,
+        "adx_threshold": 29.0,
+        "tp_ratio": 2.400000000000001,
         "sl_ratio": 1.0
     },
     "ATOM/USDT": {
-        "adx_threshold": 16.0,
+        "adx_threshold": 15.5,
         "tp_ratio": 1.5,
         "sl_ratio": 1.0
     }
