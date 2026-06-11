@@ -6,6 +6,8 @@ import os
 # --- تنظیمات عمومی ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
+# این خط را به config.py اضافه کنید
+DB_NAME = "trading_bot.db"
 DB_PATH_LIVE = os.path.join(DATA_DIR, "trading_bot.db")
 DB_PATH_BACKTEST = os.path.join(DATA_DIR, "trading_bot_backtest.db")
 
