@@ -26,7 +26,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas requests ccxt scikit-learn numpy joblib
 
-      # ۱. ابتدا دانلود داده‌های تاریخی بازار تا فایل‌های CSV ساخته شوند
+      # ۱. ابتدا دانلود داده‌های تاریخی بازار تا فایل‌های CSV برای ۱۱ ارز ساخته شوند
       - name: Fetch Market Historical Data
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -40,14 +40,14 @@ jobs:
         run: |
           python src/backtester.py
 
-      # ۳. اجرای بهینه‌ساز پارامترها
+      # ۳. اجرای بهینه‌ساز پارامترها (به صورت تفکیک‌شده برای تک‌تک ارزها)
       - name: Run Optimizer
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/optimizer.py
 
-      # ۴. اجرای آموزش هوش مصنوعی (یادگیری از دیتابیس بکتست و بروزرسانی مدل)
+      # ۴. اجرای آموزش هوش مصنوعی (یادگیری تفکیک‌شده و ساخت ۱۱ مدل اختصاصی pkl)
       - name: Train AI Model
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -69,12 +69,12 @@ jobs:
             git add -f data/trading_bot.db
           fi
           
-          # اجبار گیت به افزودن مدل هوش مصنوعی
-          if [ -f "src/models/trading_filter_model.pkl" ]; then 
-            git add -f src/models/trading_filter_model.pkl
+          # 🌟 ارتقای کلیدی: اجبار گیت به افزودن تمام مدل‌های هوش مصنوعی اختصاصی ارزها (*.pkl)
+          if [ -d "src/models" ]; then 
+            git add -f src/models/*.pkl
           fi
           
-          # افزودن فایل تنظیمات بهینه شده
+          # افزودن فایل تنظیمات بهینه شده چند ارزی
           if [ -f "best_params.json" ]; then 
             git add best_params.json
           fi
@@ -83,6 +83,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes detected or files not generated yet, skipping commit."
           else
-            git commit -m "Auto-update: Forced Backtest DB, AI Model, and optimized parameters"
+            git commit -m "Auto-update: Forced Multi-Models (v8.0), Backtest DB, and optimized parameters"
             git push
           fi
