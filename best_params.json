@@ -15,7 +15,7 @@
         "sl_ratio": 1.0
     },
     "SOL/USDT": {
-        "adx_threshold": 35.0,
+        "adx_threshold": 34.5,
         "tp_ratio": 2.5,
         "sl_ratio": 1.0
     },
@@ -35,7 +35,7 @@
         "sl_ratio": 1.0
     },
     "LINK/USDT": {
-        "adx_threshold": 33.5,
+        "adx_threshold": 33.0,
         "tp_ratio": 2.5,
         "sl_ratio": 1.0
     },
@@ -50,7 +50,7 @@
         "sl_ratio": 1.0
     },
     "XRP/USDT": {
-        "adx_threshold": 33.5,
+        "adx_threshold": 34.5,
         "tp_ratio": 2.5,
         "sl_ratio": 1.0
     },
@@ -65,8 +65,8 @@
         "sl_ratio": 1.0
     },
     "ATOM/USDT": {
-        "adx_threshold": 16.0,
-        "tp_ratio": 1.6,
+        "adx_threshold": 17.0,
+        "tp_ratio": 1.7000000000000002,
         "sl_ratio": 1.0
     }
 }
