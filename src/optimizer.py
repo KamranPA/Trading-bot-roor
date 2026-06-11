@@ -1,23 +1,37 @@
 # ---------------------------------------------------------
-# FILE PATH: src/optimizer.py
+# FILE PATH: src/optimizer.py (اصلاح شده و هوشمند)
 # ---------------------------------------------------------
 import json
 import sqlite3
 import os
+import sys
 import logging
 import pandas as pd
+
+# اضافه کردن مسیر ریشه پروژه به پایتون برای جلوگیری از خطای ایمپورت در گیت‌هاب
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
 import config  
 
 # مسیر ذخیره پارامترها به صورت یکپارچه در ریشه پروژه
 PARAMS_FILE = os.path.join(config.BASE_DIR, "best_params.json")
 
-def optimize():
+def optimize(mode="live"):
     """
     تحلیل عملکرد ۵۰ معامله آخر و بازنویسیِ هوشمندِ فیلترها
+    mode="live"     -> تحلیل عملکرد معاملات واقعی (پیش‌فرض برای ربات اصلی)
+    mode="backtest" -> تحلیل عملکرد معاملات بکتست
     """
     try:
-        # استفاده از مسیر دیتابیسِ موجود در فایل config
-        db_path = config.DB_NAME
+        # تفکیک هوشمند مسیر دیتابیس بر اساس متغیرهای مطلق کانفیگ جدید
+        if mode == "backtest":
+            db_path = config.DB_PATH_BACKTEST
+            logging.info(f"⚙️ [Optimizer] در حال تحلیل داده‌های بکتست: {db_path}")
+        else:
+            db_path = config.DB_PATH_LIVE
+            logging.info(f"⚙️ [Optimizer] در حال تحلیل داده‌های لایو: {db_path}")
         
         if not os.path.exists(db_path):
             logging.error(f"⚠️ دیتابیس در مسیر {db_path} پیدا نشد.")
@@ -29,7 +43,7 @@ def optimize():
         conn.close()
 
         if len(df) < 50:
-            logging.info("تعداد معاملات کافی نیست (حداقل ۵۰ مورد نیاز است).")
+            logging.info(f"تعداد معاملات کافی نیست (حداقل ۵۰ مورد نیاز است). تعداد فعلی: {len(df)}")
             return
 
         avg_pnl = df['pnl_percent'].mean()
@@ -59,3 +73,8 @@ def optimize():
 
     except Exception as e:
         logging.error(f"⚠️ خطا در پروسه ارتقای خودکار: {e}")
+
+if __name__ == "__main__":
+    # در محیط گیت‌هاب اکشنز (هنگام اجرای بکتست) این فایل به صورت مستقیم اجرا می‌شود
+    # بنابراین حالت را روی بکتست قرار می‌دهیم تا دیتای بکتست را تحلیل کند
+    optimize(mode="backtest")
