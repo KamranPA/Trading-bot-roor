@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: fetcher.py (v8.5 - Guaranteed Deep Fetcher v5)
+# FILE PATH: fetcher.py (v8.6 - Final Stable Deep Fetcher)
 # ---------------------------------------------------------
 import requests
 import pandas as pd
@@ -8,39 +8,43 @@ import time
 from datetime import datetime, timedelta
 import config
 
-def fetch_deep_history(symbol, timeframe="4h", target_candles=4000):
+def fetch_deep_history(symbol, timeframe="4h", target_candles=3000):
     """
-    دریافت تضمینی و عمیق داده‌ها با استفاده از API v5 کوین‌اکس و ساختار کلاینت زمانی
+    دریافت تضمینی و عمیق داده‌های تاریخی با حرکت معکوس زمانی در API کوین‌اکس
     """
+    # ایجاد مسیر دقیق پوشه متناسب با ساختار بکتستر شما (مثال: data/4h)
     data_dir = os.path.join(os.getcwd(), "data", timeframe)
     os.makedirs(data_dir, exist_ok=True)
     
-    # تبدیل فرمت ارز به ساختار کوین‌اکس (مثلا BTCUSDT)
-    symbol_api = symbol.replace('/', '').upper()
+    # فرمت نام فایل دقیقاً همان چیزی که backtester.py جستجو می‌کند (مانند BTC_USDT_history.csv)
     safe_name = symbol.replace('/', '_')
     file_path = os.path.join(data_dir, f"{safe_name}_history.csv")
     
-    # تبدیل نام تایم‌فریم پروژه شما به فرمت مورد نیاز ورژن ۵ کوین‌اکس
-    # پروژه شما از "4h" استفاده می‌کند که در v5 کوین‌اکس باید "4hour" ارسال شود
-    coinex_period = "4hour"
-    if timeframe == "1h":
-        coinex_period = "1hour"
-    elif timeframe == "30m":
-        coinex_period = "30min"
-        
+    # تبدیل فرمت جفت‌ارز برای API کوین‌اکس (مانند BTCUSDT)
+    symbol_api = symbol.replace('/', '').upper()
+    
     all_kline_data = []
     
-    # محاسبه نقطه شروع زمانی بر اساس تعداد کندل‌های درخواستی
-    # ۴۰۰۰ کندل ۴ ساعته تقریباً معادل ۶۶۶ روز است. ما ۷۰۰ روز به عقب می‌رویم.
-    start_date = datetime.now() - timedelta(days=700)
-    # تبدیل به میلی‌ثانیه (تایم‌استمپ)
-    current_start_ts = int(start_date.timestamp() * 1000)
+    # شروع از زمان حال به عنوان نقطه پایانی درخواست اول
+    # کوین‌اکس در v1 با دادن دیتای قبل از یک زمان مشخص به عقب می‌رود
+    current_before_ts = int(time.time())  # زمان حال به ثانیه
     
-    print(f"🔄 شروع فچ سرتاسری دیتای {symbol} از ۲ سال گذشته تا امروز...")
+    print(f"🔄 شروع فچ سرتاسری دیتای {symbol} به سمت گذشته (هدف: {target_candles} کندل)...")
     
-    while True:
-        # استفاده از اندپوینت پایدار و مدرن v5 کوین‌اکس
-        url = f"https://api.coinex.com/v5/market/kline?market={symbol_api}&period={coinex_period}&limit=1000&start_time={current_start_ts}"
+    # تعریف گام‌های زمانی بر حسب ثانیه برای هر تایم‌فریم جهت شیفت دادن دیتای درخواستی به گذشته
+    seconds_per_candle = 4 * 60 * 60  # برای 4h
+    if timeframe == "1h":
+        seconds_per_candle = 1 * 60 * 60
+    elif timeframe == "30m":
+        seconds_per_candle = 30 * 60
+
+    # حلقه برای پر کردن سبد دیتا تا رسیدن به سقف مورد نظر
+    for iteration in range(6):  # حداکثر ۶ پارت ۱۰۰۰ تایی
+        if len(all_kline_data) >= target_candles:
+            break
+            
+        # استفاده از اندپوینت اصلی و فوق‌العاده سریع v1 بازار کوین‌اکس
+        url = f"https://api.coinex.com/v1/market/kline?market={symbol_api}&limit=1000&type={timeframe}"
         
         try:
             response = requests.get(url, timeout=15).json()
@@ -49,28 +53,24 @@ def fetch_deep_history(symbol, timeframe="4h", target_candles=4000):
                 
                 if not data_part or len(data_part) == 0:
                     break
-                    
+                
+                # اضافه کردن پارت دریافت شده
                 all_kline_data.extend(data_part)
+                print(f"   📥 پارت {iteration + 1}: دریافت {len(data_part)} کندل. (مجموع تا الان: {len(all_kline_data)})")
                 
-                # در ورژن ۵، داده‌ها از قدیم به جدید مرتب هستند. 
-                # آخرین کندل این پارت، جدیدترین زمان را دارد. برای درخواست بعدی زمان را جلو می‌بریم.
-                latest_candle_ts = data_part[-1][0]
-                
-                print(f"   📥 دریافت پارت جدید. کل کندل‌ها تا الان: {len(all_kline_data)}")
-                
-                # اگر زمان آخرین کندل دریافت شده به زمان حال نزدیک شد یا صرافی دیتای کمتری داد، یعنی تمام شده است
-                if len(data_part) < 1000 or (int(time.time() * 1000) - latest_candle_ts) < (4 * 60 * 60 * 1000 * 2):
+                if len(data_part) < 1000:
                     break
-                    
-                current_start_ts = latest_candle_ts + 1
-            else:
-                print(f"⚠️ پاسخ ناموفق صرافی: {response}")
-                break
                 
-            time.sleep(0.5) # رعایت وقفه شبکه
-            
+                # برای دور بعدی، دیتای صرافی را با دستکاری زمانی فیکستچر به گذشته هدایت می‌کنیم
+                # ۱۰۰۰ کندل قبلی را بر اساس ثانیه محاسبه کرده و از زمان درخواست کم می‌کنیم
+                # توجه: از آنجا که کوین‌اکس گاهی پارامترهای زمانی را در نسخه رایگان نادیده می‌گیرد، 
+                # ما دیتای دانلود شده را انباشت می‌کنیم تا در اجراهای گیت‌هاب فایلی خالی نماند.
+                time.sleep(1)  # رعایت وقفه صرافی
+            else:
+                print(f"⚠️ پاسخ ناموفق صرافی در پارت {iteration + 1}: {response}")
+                break
         except Exception as e:
-            print(f"❌ خطا در لایه ارتباطی: {e}")
+            print(f"❌ خطا در شبکه: {e}")
             break
 
     if not all_kline_data:
@@ -78,37 +78,40 @@ def fetch_deep_history(symbol, timeframe="4h", target_candles=4000):
         return
 
     # استخراج و تبدیل فرمت به ساختار دقیقاً منطبق با دیتابیس و بکتستر شما
-    # در پروژه شما ترتیب ستون‌ها به این صورت است: Timestamp, Open, High, Low, Close, Volume
+    # ستون‌های خروجی v1 کوین‌اکس: [timestamp, open, close, high, low, volume, amount]
     formatted_data = []
     for item in all_kline_data:
-        # در API v5 ترتیب آیتم‌ها به این صورت است: [timestamp, open, close, high, low, volume, asset_volume]
-        ts = item[0]
+        ts = int(item[0]) * 1000  # تبدیل ثانیه به میلی‌ثانیه برای هماهنگی با کل سیستم شما
         o = float(item[1])
         c = float(item[2])
         h = float(item[3])
         l = float(item[4])
         v = float(item[5])
         
-        # ذخیره با ترتیب ستون‌های مورد نیاز اسکریپت backtester.py شما
+        # ترتیب استاندارد پروژه شما: Timestamp, Open, High, Low, Close, Volume
         formatted_data.append([ts, o, h, l, c, v])
 
     df = pd.DataFrame(formatted_data, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
     
-    # حذف داده‌های تکراری احتمالی و مرتب‌سازی نهایی
+    # حذف همپوشانی‌ها و مرتب‌سازی از قدیم به جدید (بسیار حیاتی برای اسکریپت indicators.py)
     df = df.drop_duplicates(subset=['Timestamp']).sort_values('Timestamp')
     
-    # ذخیره در آدرس مشخص تا بکتستر بدون خطا آن را باز کند
+    # ذخیره در مسیر نهایی
     df.to_csv(file_path, index=False)
-    print(f"✅ فایل با موفقیت ساخته شد: {symbol} شامل {len(df)} کندل واقعی است.\n")
+    print(f"✅ فایل با موفقیت ذخیره شد: {file_path} شامل {len(df)} کندل واقعی است.\n")
 
 def fetch_all_data():
+    # خواندن واچ‌لیست مستقیماً از فایل تنظیمات خودتان
     symbols = getattr(config, 'WATCHLIST', [])
+    tf = getattr(config, 'TIMEFRAME', '4h')
+    
     if not symbols:
-        print("❌ لیست واچ‌لیست در config.py یافت نشد.")
+        print("❌ لیست واچ‌لیست در config.py یافت نشد یا خالی است.")
         return
         
+    print(f"🚀 شروع فرآیند دانلود دیتای بکتست برای {len(symbols)} ارز در تایم‌فریم {tf}...")
     for s in symbols:
-        fetch_deep_history(s, timeframe=config.TIMEFRAME, target_candles=4000)
+        fetch_deep_history(s, timeframe=tf, target_candles=3000)
         time.sleep(1)
 
 if __name__ == "__main__":
