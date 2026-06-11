@@ -24,6 +24,6 @@ Thumbs.db
 src/models/*.pkl
 
 # --- خروجی‌های موقت و آرشیوها ---
-backtest_summary.txt
+# backtest_summary.txt
 all_project_files.txt
 *.log
