@@ -26,44 +26,53 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas requests ccxt scikit-learn numpy joblib
 
-      # 🌟 گام مفقوده: ابتدا دانلود داده‌های تاریخی بازار تا فایل‌های CSV ساخته شوند
+      # ۱. ابتدا دانلود داده‌های تاریخی بازار تا فایل‌های CSV ساخته شوند
       - name: Fetch Market Historical Data
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python fetcher.py
 
-      # ۱. اجرای بک‌تستر (داده‌ها در data/trading_bot_backtest.db ذخیره می‌شوند)
+      # ۲. اجرای بک‌تستر (داده‌های شبیه‌سازی در دیتابیس ذخیره می‌شوند)
       - name: Run Backtest
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/backtester.py
 
-      # ۲. اجرای بهینه‌ساز پارامترها
+      # ۳. اجرای بهینه‌ساز پارامترها
       - name: Run Optimizer
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/optimizer.py
 
-      # ۳. اجرای آموزش هوش مصنوعی (یادگیری از دیتابیس بکتست و بروزرسانی مدل)
+      # ۴. اجرای آموزش هوش مصنوعی (یادگیری از دیتابیس بکتست و بروزرسانی مدل)
       - name: Train AI Model
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/train_model.py
 
-      # ۴. کامیت و پوش کردن تغییرات به مخزن (کاملاً ایمن و داینامیک)
+      # ۵. کامیت و پوش کردن تغییرات به مخزن (کاملاً ایمن و داینامیک)
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # بررسی وجود هر فایل قبل از اضافه کردن به گیت برای جلوگیری از خطای pathspec
-          if [ -f "data/trading_bot_backtest.db" ]; then git add data/trading_bot_backtest.db; fi
-          if [ -f "src/models/trading_filter_model.pkl" ]; then git add src/models/trading_filter_model.pkl; fi
-          if [ -f "best_params.json" ]; then git add best_params.json; fi
+          # بررسی وجود فایل دیتابیس اصلی/بکتست و افزودن آن
+          if [ -f "data/trading_bot.db" ]; then 
+            git add data/trading_bot.db
+          fi
+          
+          # استفاده از فلگ -f برای اجبار گیت به نادیده گرفتن محدودیت .gitignore برای فایل pkl
+          if [ -f "src/models/trading_filter_model.pkl" ]; then 
+            git add -f src/models/trading_filter_model.pkl
+          fi
+          
+          if [ -f "best_params.json" ]; then 
+            git add best_params.json
+          fi
           
           # بررسی وضعیت تغییرات و اعمال کامیت
           if git diff --cached --quiet; then
