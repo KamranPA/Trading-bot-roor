@@ -1,63 +1,56 @@
-import ccxt
+# ---------------------------------------------------------
+# FILE PATH: fetcher.py (Final Intelligence-Driven Solution)
+# ---------------------------------------------------------
+import yfinance as yf
 import pandas as pd
 import os
 import time
 import config
 
-def fetch_data_full(symbol, timeframe="4h"):
+def fetch_data_intel(symbol, timeframe="4h"):
     """
-    دریافت ۴۰۰۰ کندل به صورت مرحله‌ای (۱۰۰۰ تایی) برای دور زدن محدودیت‌های صرافی
+    روش نهایی: استفاده از دیتای یاهو به جای صرافی‌ها
+    این روش تنها راهی است که در محیط گیت‌هاب اکشنز تحریم نمی‌شود.
     """
+    # تبدیل نماد به فرمت یاهو: BTC/USDT -> BTC-USD
+    yahoo_symbol = symbol.replace('/', '-').replace('USDT', 'USD')
+    
     data_dir = os.path.join(os.getcwd(), "data", timeframe)
     os.makedirs(data_dir, exist_ok=True)
     file_path = os.path.join(data_dir, f"{symbol.replace('/', '_')}_history.csv")
     
-    # تعریف دو صرافی برای سیستم جایگزین (Fallback)
-    exchanges = {
-        'binance': ccxt.binance({'enableRateLimit': True}),
-        'coinex': ccxt.coinex({'enableRateLimit': True})
-    }
+    print(f"🧠 در حال دریافت هوشمند دیتا برای {symbol} از منبع جایگزین...")
     
-    all_data = []
-    # تاریخ شروع: حدود ۶۶۰ روز قبل
-    since = int((time.time() - (4000 * 4 * 60 * 60)) * 1000)
-    
-    print(f"🔄 شروع فرآیند دانلود برای {symbol}...")
+    # یاهو فایننس در محیط گیت‌هاب تحریم نیست. 
+    # برای ۴۰۰۰ کندل ۴ ساعته، حدود ۲ سال دیتا نیاز داریم.
+    try:
+        # دریافت دیتا
+        df = yf.download(yahoo_symbol, period="2y", interval="1h")
+        
+        if df.empty:
+            print(f"❌ شکست: دیتا برای {yahoo_symbol} یافت نشد.")
+            return
 
-    for ex_name, ex_obj in exchanges.items():
-        try:
-            # تنظیم نماد (بایننس بدون اسلش، کوین‌اکس با اسلش)
-            symbol_fmt = symbol.replace('/', '') if ex_name == 'binance' else symbol
-            
-            current_since = since
-            for i in range(4): # ۴ مرحله برای رسیدن به ۴۰۰۰ کندل
-                ohlcv = ex_obj.fetch_ohlcv(symbol_fmt, timeframe, since=current_since, limit=1000)
-                if not ohlcv: break
-                
-                all_data.extend(ohlcv)
-                current_since = ohlcv[-1][0] + 1
-                time.sleep(0.6) # جلوگیری از بلاک شدن توسط صرافی
-            
-            if all_data:
-                print(f"✅ دریافت موفقیت‌آمیز از {ex_name}")
-                break # اگر دیتا گرفتیم، دیگر به صرافی بعدی نمی‌رویم
-        except Exception as e:
-            print(f"⚠️ تلاش از {ex_name} ناموفق بود: {str(e)[:50]}...")
-            continue
+        # استانداردسازی ستون‌ها برای مدل شما
+        df = df.reset_index()
+        # تبدیل Timestamp به فرمت میلی‌ثانیه برای هماهنگی با ربات
+        df['Timestamp'] = (df['Date'].astype('int64') // 10**6)
+        
+        # انتخاب و مرتب‌سازی ستون‌ها
+        final_df = df[['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume']]
+        final_df = final_df.sort_values('Timestamp')
+        
+        final_df.to_csv(file_path, index=False)
+        print(f"✅ موفقیت: {len(final_df)} ردیف دیتا برای {symbol} ذخیره شد.")
+        
+    except Exception as e:
+        print(f"❌ خطای حیاتی در لایه هوشمند: {e}")
 
-    if all_data:
-        df = pd.DataFrame(all_data, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
-        df = df.drop_duplicates(subset=['Timestamp']).sort_values('Timestamp')
-        df.to_csv(file_path, index=False)
-        print(f"🚀 مجموع {len(df)} کندل برای {symbol} نهایی شد.")
-    else:
-        print(f"❌ شکست نهایی در دریافت دیتای {symbol}")
-
-def fetch_all_data():
+def run():
     symbols = getattr(config, 'WATCHLIST', [])
-    tf = getattr(config, 'TIMEFRAME', '4h')
     for s in symbols:
-        fetch_data_full(s, tf)
+        fetch_data_intel(s)
+        time.sleep(1)
 
 if __name__ == "__main__":
-    fetch_all_data()
+    run()
