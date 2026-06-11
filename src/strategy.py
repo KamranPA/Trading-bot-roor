@@ -6,7 +6,7 @@ import json
 import config
 from src import database, strategy_utils
 import pandas as pd
-from src.telegram_bot import send_signal
+from src.telegram_bot import send_telegram_message
 
 def is_too_frequent(pair, direction):
     """
