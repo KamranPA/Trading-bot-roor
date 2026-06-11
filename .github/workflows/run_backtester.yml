@@ -47,18 +47,20 @@ jobs:
         run: |
           python src/train_model.py
 
-      # ۴. کامیت و پوش کردن تغییرات به مخزن (اصلاح مسیر دیتابیس و حذف فایل‌های فرضی)
+      # ۴. کامیت و پوش کردن تغییرات به مخزن (کاملاً ایمن و داینامیک)
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # اصلاح مسیر دیتابیس بکتست به پوشه data و حذف فایل غیرموجود backtest_summary.txt
-          git add data/trading_bot_backtest.db src/models/trading_filter_model.pkl best_params.json
+          # بررسی وجود هر فایل قبل از اضافه کردن به گیت برای جلوگیری از خطای pathspec
+          if [ -f "data/trading_bot_backtest.db" ]; then git add data/trading_bot_backtest.db; fi
+          if [ -f "src/models/trading_filter_model.pkl" ]; then git add src/models/trading_filter_model.pkl; fi
+          if [ -f "best_params.json" ]; then git add best_params.json; fi
           
           # بررسی وضعیت تغییرات و اعمال کامیت
           if git diff --cached --quiet; then
-            echo "No changes detected, skipping commit."
+            echo "No changes detected or files not generated yet, skipping commit."
           else
             git commit -m "Auto-update: Backtest DB, AI Model, and optimized parameters"
             git push
