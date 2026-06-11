@@ -33,7 +33,7 @@ jobs:
         run: |
           python fetcher.py
 
-      # ۲. اجرای بک‌تستر (داده‌های شبیه‌سازی در دیتابیس ذخیره می‌شوند)
+      # ۲. اجرای بک‌تستر (داده‌های شبیه‌سازی در دیتابیس اختصاصی ذخیره می‌شوند)
       - name: Run Backtest
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -54,30 +54,35 @@ jobs:
         run: |
           python src/train_model.py
 
-      # ۵. کامیت و پوش کردن تغییرات به مخزن (کاملاً ایمن و داینامیک)
+      # ۵. کامیت و پوش کردن تغییرات به مخزن (با اعمال فلگ -f برای عبور از گیت‌ایگنور)
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # بررسی وجود فایل دیتابیس اصلی/بکتست و افزودن آن
-          if [ -f "data/trading_bot.db" ]; then 
-            git add data/trading_bot.db
+          # اجبار گیت به افزودن دیتابیس بکتست با وجود قانون گیت‌ایگنور
+          if [ -f "data/trading_bot_backtest.db" ]; then 
+            git add -f data/trading_bot_backtest.db
           fi
           
-          # استفاده از فلگ -f برای اجبار گیت به نادیده گرفتن محدودیت .gitignore برای فایل pkl
+          if [ -f "data/trading_bot.db" ]; then 
+            git add -f data/trading_bot.db
+          fi
+          
+          # اجبار گیت به افزودن مدل هوش مصنوعی
           if [ -f "src/models/trading_filter_model.pkl" ]; then 
             git add -f src/models/trading_filter_model.pkl
           fi
           
+          # افزودن فایل تنظیمات بهینه شده
           if [ -f "best_params.json" ]; then 
             git add best_params.json
           fi
           
-          # بررسی وضعیت تغییرات و اعمال کامیت
+          # بررسی وضعیت تغییرات و اعمال کامیت نهایی
           if git diff --cached --quiet; then
             echo "No changes detected or files not generated yet, skipping commit."
           else
-            git commit -m "Auto-update: Backtest DB, AI Model, and optimized parameters"
+            git commit -m "Auto-update: Forced Backtest DB, AI Model, and optimized parameters"
             git push
           fi
