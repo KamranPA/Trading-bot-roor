@@ -26,33 +26,40 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas requests ccxt scikit-learn numpy joblib
 
-      # ۱. اجرای بک‌تستر
+      # ۱. اجرای بک‌تستر (داده‌ها در trading_bot_backtest.db ذخیره می‌شوند)
       - name: Run Backtest
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/backtester.py
 
-      # ۲. اجرای بهینه‌ساز
+      # ۲. اجرای بهینه‌ساز پارامترها
       - name: Run Optimizer
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/optimizer.py
 
-      # ۳. کامیت و پوش کردن تغییرات به مخزن
+      # ۳. اجرای آموزش هوش مصنوعی (یادگیری از دیتابیس بکتست و بروزرسانی مدل)
+      - name: Train AI Model
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python src/train_model.py
+
+      # ۴. کامیت و پوش کردن تغییرات به مخزن (شامل دیتابیس بکتست و مدل هوش مصنوعی)
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # اضافه کردن فایل‌های گزارش و پارامترها
-          git add backtest_summary.txt best_params.json
+          # اضافه کردن فایل دیتابیس بکتست و فایل‌های مدل آموزش دیده هوش مصنوعی به گیت
+          git add trading_bot_backtest.db src/models/trading_filter_model.pkl backtest_summary.txt best_params.json
           
           # بررسی وضعیت تغییرات و اعمال کامیت
           if git diff --cached --quiet; then
             echo "No changes detected, skipping commit."
           else
-            git commit -m "Auto-update: Backtest results and optimized parameters"
+            git commit -m "Auto-update: Backtest DB, AI Model, and optimized parameters"
             git push
           fi
