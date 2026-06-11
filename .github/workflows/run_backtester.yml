@@ -51,41 +51,70 @@ jobs:
         run: |
           python src/train_model.py
 
-      # --- مرحله جدید: تولید گزارش بکتست ---
       - name: Generate Summary Report
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           python -c "
-          import sqlite3, config
-          conn = sqlite3.connect(config.DB_PATH_BACKTEST)
+          import sqlite3, config, os
+          
+          db_path = config.DB_PATH_BACKTEST
+          if not os.path.exists(db_path):
+              print('⚠️ دیتابیس بکتست یافت نشد!')
+              exit(0)
+              
+          conn = sqlite3.connect(db_path)
           cursor = conn.cursor()
           lines = ['📈 گزارش بکتست Breakout', '================================']
           total = 0
+          
           for symbol in config.WATCHLIST:
               cursor.execute('SELECT COUNT(*), AVG(pnl_percent > 0) * 100 FROM signals WHERE symbol = ?', (symbol,))
               row = cursor.fetchone()
               if row and row[0] > 0:
                   lines.append(f'{symbol} | نرخ برد: {row[1]:.1f} | تعداد معاملات: {row[0]}')
                   total += row[0]
+                  
           lines.append('================================')
           lines.append(f'📊 مجموع معاملات: {total}')
+          conn.close()
+          
           with open('backtest_summary.txt', 'w', encoding='utf-8') as f:
               f.write('\n'.join(lines))
+          print('✅ فایل گزارش با موفقیت ساخته شد.')
           "
 
-      # --- مرحله کامیت و پوش ---
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # افزودن فایل‌های خروجی
-          git add data/trading_bot_backtest.db backtest_summary.txt best_params.json
-          if ls src/models/*.pkl >/dev/null 2>&1; then git add src/models/*.pkl; fi
+          # افزودن دیتابیس بکتست
+          if [ -f "data/trading_bot_backtest.db" ]; then 
+            git add -f data/trading_bot_backtest.db
+          fi
           
+          # افزودن مدل‌های هوش مصنوعی (در صورت وجود)
+          if ls src/models/*.pkl >/dev/null 2>&1; then
+            git add -f src/models/*.pkl
+          fi
+          
+          # افزودن فایل تنظیمات بهینه شده
+          if [ -f "best_params.json" ]; then 
+            git add best_params.json
+          fi
+          
+          # افزودن فایل گزارش متنی جدید
+          if [ -f "backtest_summary.txt" ]; then 
+            git add backtest_summary.txt
+          fi
+          
+          # کامیت و پوش با مدیریت تداخل‌ها
           if git diff --cached --quiet; then
             echo "No changes detected, skipping commit."
           else
-            git commit -m "Auto-update: Backtest results, Report, and AI Models"
+            git commit -m "Auto-update: Backtest DB, Models, and Summary Report"
+            echo "🔄 Pulling latest changes from remote to avoid conflict..."
             git pull origin main --rebase
             git push origin main
           fi
