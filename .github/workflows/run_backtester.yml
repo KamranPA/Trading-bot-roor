@@ -26,7 +26,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas requests ccxt scikit-learn numpy joblib
 
-      # ۱. اجرای بک‌تستر (داده‌ها در trading_bot_backtest.db ذخیره می‌شوند)
+      # ۱. اجرای بک‌تستر (داده‌ها در data/trading_bot_backtest.db ذخیره می‌شوند)
       - name: Run Backtest
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -47,14 +47,14 @@ jobs:
         run: |
           python src/train_model.py
 
-      # ۴. کامیت و پوش کردن تغییرات به مخزن (شامل دیتابیس بکتست و مدل هوش مصنوعی)
+      # ۴. کامیت و پوش کردن تغییرات به مخزن (اصلاح مسیر دیتابیس و حذف فایل‌های فرضی)
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # اضافه کردن فایل دیتابیس بکتست و فایل‌های مدل آموزش دیده هوش مصنوعی به گیت
-          git add trading_bot_backtest.db src/models/trading_filter_model.pkl backtest_summary.txt best_params.json
+          # اصلاح مسیر دیتابیس بکتست به پوشه data و حذف فایل غیرموجود backtest_summary.txt
+          git add data/trading_bot_backtest.db src/models/trading_filter_model.pkl best_params.json
           
           # بررسی وضعیت تغییرات و اعمال کامیت
           if git diff --cached --quiet; then
