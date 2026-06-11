@@ -3,7 +3,7 @@ import os
 import config
 
 # مسیر پیش‌فرض برای دیتابیس لایو
-DB_PATH = os.path.join("data", config.DB_NAME)
+DB_PATH = config.DB_PATH_LIVE
 
 def get_db_path(mode="live"):
     if mode == "backtest":
