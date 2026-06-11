@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: backtester.py (اصلاح شده و ایزوله)
+# FILE PATH: src/backtester.py (اصلاح شده برای تفکیک کامل دیتابیس)
 # ---------------------------------------------------------
 import os
 import sqlite3
@@ -7,9 +7,38 @@ import pandas as pd
 import config
 from src import indicators, strategy_utils
 
-def run_backtest_for_symbol(symbol):
+def init_backtest_db(db_path):
+    """اطمینان از وجود ساختار جدول سیگنال‌ها در دیتابیس بکتست"""
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS signals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                timestamp TEXT, 
+                symbol TEXT, 
+                direction TEXT, 
+                entry_price REAL, 
+                stop_loss REAL, 
+                status TEXT DEFAULT 'OPEN',
+                closed_at TEXT,
+                pnl_percent REAL,
+                feat_adx REAL,
+                feat_vol_ratio REAL,
+                feat_atr_percent REAL,
+                feat_rsi REAL,
+                feat_trend_line REAL,
+                feat_ema_deviation REAL,
+                feat_rsi_momentum REAL,
+                feat_body_ratio REAL,
+                feat_high_volume_session REAL
+            )
+        """)
+        conn.commit()
+
+def run_backtest_for_symbol(symbol, db_path):
     """
-    اجرای تست گذشته و تزریق مستقیم معاملات به دیتابیس اختصاصی بکتست برای آموزش هوش مصنوعی
+    اجرای تست گذشته و تزریق مستقیم معاملات به دیتابیس بکتست برای آموزش هوش مصنوعی
     """
     safe_name = symbol.replace('/', '_')
     file_path = os.path.join(config.BASE_DIR, "data", "4h", f"{safe_name}_history.csv")
@@ -28,19 +57,15 @@ def run_backtest_for_symbol(symbol):
     winning_trades = 0
     total_pnl = 0.0
     
-    # متغیرهای وضعیت پوزیشن
     is_in_position = False
     entry_price = 0.0
     direction = ""
     stop_loss = 0.0
     tp2 = 0.0
     entry_time = ""
-    
-    # دیکشنری برای نگهداری مقادیر سنسورها در لحظه ورود
     entry_features = {}
 
-    # اتصال به دیتابیس اختصاصی بکتست (تفکیک کامل از محیط لایو)
-    db_path = os.path.join(config.BASE_DIR, "data", config.DB_NAME_BACKTEST)
+    # اتصال به دیتابیس اختصاصی بکتست
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
@@ -51,7 +76,6 @@ def run_backtest_for_symbol(symbol):
         low_price = float(current_candle['Low'])
         current_time = str(current_candle['Timestamp'])
 
-        # الف) مدیریت پوزیشن باز
         if is_in_position:
             pnl = 0.0
             closed = False
@@ -74,7 +98,6 @@ def run_backtest_for_symbol(symbol):
                     winning_trades += 1
                     closed = True
 
-            # اگر معامله بسته شد، آن را در دیتابیس بکتست برای هوش مصنوعی ذخیره کن
             if closed:
                 total_pnl += pnl
                 total_trades += 1
@@ -95,7 +118,6 @@ def run_backtest_for_symbol(symbol):
                 conn.commit()
             continue
 
-        # ب) منطق ورود به معامله
         if float(current_candle.get('feat_adx', 0)) < config.ADX_THRESHOLD:
             continue
 
@@ -110,7 +132,6 @@ def run_backtest_for_symbol(symbol):
         is_bullish_momentum = float(current_candle.get('feat_rsi', 50)) > 50
         is_bearish_momentum = float(current_candle.get('feat_rsi', 50)) < 50
 
-        # فریز کردن ویژگی‌های کندل فعلی برای دیتابیس
         features_snapshot = {
             'feat_adx': float(current_candle.get('feat_adx', 0)),
             'feat_vol_ratio': float(current_candle.get('feat_vol_ratio', 0)),
@@ -146,13 +167,13 @@ def run_backtest_for_symbol(symbol):
     return {"symbol": symbol, "total_trades": total_trades, "win_rate": round(win_rate, 2), "total_pnl_percent": round(total_pnl, 2)}
 
 def run_all_backtests():
-    # مقداردهی اولیه دیتابیس اختصاصی بکتست قبل از شروع عملیات
-    from src import database
-    database.init_db(mode="backtest")
+    # استفاده از مسیر مطلق تعریف‌شده در کانفیگ جدید
+    db_path = config.DB_PATH_BACKTEST
+    init_backtest_db(db_path)
     
-    print("📊 شروع فرآیند بکتست و پر کردن دیتابیس برای هوش مصنوعی...")
+    print("📊 شروع فرآیند بکتست و پر کردن دیتابیس اختصاصی بکتست...")
     for symbol in config.WATCHLIST:
-        res = run_backtest_for_symbol(symbol)
+        res = run_backtest_for_symbol(symbol, db_path)
         if res:
             print(f"📈 ارز {res['symbol']} | تعداد معامله: {res['total_trades']} | صدمه/سود کل: {res['total_pnl_percent']}% | وین‌ریت: {res['win_rate']}%")
 
