@@ -1,80 +1,77 @@
 # ---------------------------------------------------------
-# FILE PATH: src/optimizer.py (اصلاح شده و هوشمند)
+# FILE PATH: src/optimizer.py (v8.0 - Multi-Asset Optimizer)
 # ---------------------------------------------------------
 import json
 import sqlite3
 import os
 import sys
 import logging
-import pandas as pd
 
-# اضافه کردن مسیر ریشه پروژه به پایتون برای جلوگیری از خطای ایمپورت در گیت‌هاب
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 import config  
 
-# مسیر ذخیره پارامترها به صورت یکپارچه در ریشه پروژه
 PARAMS_FILE = os.path.join(config.BASE_DIR, "best_params.json")
 
-def optimize(mode="live"):
-    """
-    تحلیل عملکرد ۵۰ معامله آخر و بازنویسیِ هوشمندِ فیلترها
-    mode="live"     -> تحلیل عملکرد معاملات واقعی (پیش‌فرض برای ربات اصلی)
-    mode="backtest" -> تحلیل عملکرد معاملات بکتست
-    """
+def optimize_for_symbol(symbol, mode="backtest"):
+    """تحلیل عملکرد ۵۰ معامله آخر یک ارز خاص و بهینه‌سازی پارامترهای همان ارز"""
     try:
-        # تفکیک هوشمند مسیر دیتابیس بر اساس متغیرهای مطلق کانفیگ جدید
-        if mode == "backtest":
-            db_path = config.DB_PATH_BACKTEST
-            logging.info(f"⚙️ [Optimizer] در حال تحلیل داده‌های بکتست: {db_path}")
-        else:
-            db_path = config.DB_PATH_LIVE
-            logging.info(f"⚙️ [Optimizer] در حال تحلیل داده‌های لایو: {db_path}")
-        
+        db_path = config.DB_PATH_BACKTEST if mode == "backtest" else config.DB_PATH_LIVE
         if not os.path.exists(db_path):
-            logging.error(f"⚠️ دیتابیس در مسیر {db_path} پیدا نشد.")
             return
 
         conn = sqlite3.connect(db_path)
-        # دریافت ۵۰ معامله آخر
-        df = pd.read_sql("SELECT pnl_percent FROM signals WHERE status = 'CLOSED' ORDER BY id DESC LIMIT 50", conn)
+        cursor = conn.cursor()
+        
+        # استخراج ۵۰ معامله آخر فقط برای همین ارز خاص
+        cursor.execute(
+            "SELECT pnl_percent FROM signals WHERE symbol = ? AND status = 'CLOSED' ORDER BY id DESC LIMIT 50", 
+            (symbol,)
+        )
+        rows = cursor.fetchall()
         conn.close()
 
-        if len(df) < 50:
-            logging.info(f"تعداد معاملات کافی نیست (حداقل ۵۰ مورد نیاز است). تعداد فعلی: {len(df)}")
+        if len(rows) < 15: # حد نصاب کمتر برای هر ارز (حداقل ۱۵ معامله برای بهینه‌سازی هر ارز کافیست)
             return
 
-        avg_pnl = df['pnl_percent'].mean()
+        avg_pnl = sum([r[0] for r in rows]) / len(rows)
         
-        # خواندن پارامترهای فعلی (همگام‌سازی کلیدها با best_params.json)
+        # بارگذاری پارامترهای فعلی
         if os.path.exists(PARAMS_FILE):
             with open(PARAMS_FILE, 'r') as f:
-                params = json.load(f)
+                all_params = json.load(f)
         else:
-            params = {"adx_threshold": 25.0, "tp_ratio": 1.5, "sl_ratio": 1.0}
+            all_params = {}
 
-        # منطقِ خودارتقایی (Self-Optimization Logic)
+        if "DEFAULT" not in all_params:
+            all_params["DEFAULT"] = {"adx_threshold": config.ADX_THRESHOLD, "tp_ratio": 1.5, "sl_ratio": 1.0}
+
+        # اگر ارز هنوز کلیدی ندارد، از پیش‌فرض کپی کن
+        if symbol not in all_params:
+            all_params[symbol] = all_params["DEFAULT"].copy()
+
+        # منطق خودارتقایی اختصاصی برای هر ارز
         if avg_pnl < 0:
-            params['adx_threshold'] += 1.0 
-            # اصلاح کلید tp به tp_ratio
-            if 'tp_ratio' in params: params['tp_ratio'] += 0.1
-            logging.info("📉 عملکرد منفی: پارامترها سخت‌گیرانه‌تر شدند.")
+            all_params[symbol]['adx_threshold'] = min(35.0, all_params[symbol]['adx_threshold'] + 1.0)
+            all_params[symbol]['tp_ratio'] = min(2.5, all_params[symbol]['tp_ratio'] + 0.1)
+            logging.info(f"📉 عملکرد {symbol} منفی بود: فیلترها سخت‌گیرانه‌تر شدند.")
         else:
-            params['adx_threshold'] = max(20.0, params['adx_threshold'] - 0.5)
-            logging.info("🚀 عملکرد مثبت: پارامترها بهینه باقی ماندند.")
+            all_params[symbol]['adx_threshold'] = max(15.0, all_params[symbol]['adx_threshold'] - 0.5)
+            logging.info(f"🚀 عملکرد {symbol} مثبت بود: پارامترها بهینه باقی ماندند.")
 
-        # بازنویسی مستقیم در فایل
         with open(PARAMS_FILE, 'w') as f:
-            json.dump(params, f, indent=4)
-            
-        logging.info(f"✅ فایل {PARAMS_FILE} با موفقیت آپدیت شد.")
+            json.dump(all_params, f, indent=4)
 
     except Exception as e:
-        logging.error(f"⚠️ خطا در پروسه ارتقای خودکار: {e}")
+        logging.error(f"⚠️ خطا در پروسه ارتقای خودکار {symbol}: {e}")
+
+def optimize_all(mode="backtest"):
+    logging.info(f"⚙️ [Optimizer v8.0] شروع بهینه‌سازی تفکیک‌شده تفکیکی برای تک‌تک ارزها...")
+    for symbol in config.WATCHLIST:
+        optimize_for_symbol(symbol, mode=mode)
+    logging.info("✅ بهینه‌سازی تمام ارزها پایان یافت.")
 
 if __name__ == "__main__":
-    # در محیط گیت‌هاب اکشنز (هنگام اجرای بکتست) این فایل به صورت مستقیم اجرا می‌شود
-    # بنابراین حالت را روی بکتست قرار می‌دهیم تا دیتای بکتست را تحلیل کند
-    optimize(mode="backtest")
+    optimize_all(mode="backtest")
