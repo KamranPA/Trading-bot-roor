@@ -1,60 +1,63 @@
-# ---------------------------------------------------------
-# FILE PATH: fetcher.py (Final Optimized Version)
-# ---------------------------------------------------------
 import ccxt
 import pandas as pd
 import os
 import time
 import config
 
-def save_data(df, symbol, timeframe):
-    """ذخیره دیتای استاندارد شده در مسیر بکتستر"""
+def fetch_data_full(symbol, timeframe="4h"):
+    """
+    دریافت ۴۰۰۰ کندل به صورت مرحله‌ای (۱۰۰۰ تایی) برای دور زدن محدودیت‌های صرافی
+    """
     data_dir = os.path.join(os.getcwd(), "data", timeframe)
     os.makedirs(data_dir, exist_ok=True)
     file_path = os.path.join(data_dir, f"{symbol.replace('/', '_')}_history.csv")
-    df.to_csv(file_path, index=False)
-    print(f"✅ فایل نهایی برای {symbol} با {len(df)} کندل ذخیره شد.")
+    
+    # تعریف دو صرافی برای سیستم جایگزین (Fallback)
+    exchanges = {
+        'binance': ccxt.binance({'enableRateLimit': True}),
+        'coinex': ccxt.coinex({'enableRateLimit': True})
+    }
+    
+    all_data = []
+    # تاریخ شروع: حدود ۶۶۰ روز قبل
+    since = int((time.time() - (4000 * 4 * 60 * 60)) * 1000)
+    
+    print(f"🔄 شروع فرآیند دانلود برای {symbol}...")
 
-def fetch_data(symbol, timeframe="4h"):
-    # 1. تلاش برای دانلود از بایننس (موتور اصلی)
-    try:
-        binance = ccxt.binance({'enableRateLimit': True})
-        # دریافت ۴۰۰۰ کندل در ۴ مرحله ۱۰۰۰ تایی
-        all_ohlcv = []
-        since = binance.parse8601('2024-01-01T00:00:00Z') # شروع از ابتدای ۲۰۲۴
-        
-        for _ in range(4):
-            ohlcv = binance.fetch_ohlcv(symbol, timeframe, since=since, limit=1000)
-            if not ohlcv: break
-            all_ohlcv.extend(ohlcv)
-            since = ohlcv[-1][0] + 1
-            time.sleep(0.5)
+    for ex_name, ex_obj in exchanges.items():
+        try:
+            # تنظیم نماد (بایننس بدون اسلش، کوین‌اکس با اسلش)
+            symbol_fmt = symbol.replace('/', '') if ex_name == 'binance' else symbol
             
-        if all_ohlcv:
-            df = pd.DataFrame(all_ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
-            save_data(df, symbol, timeframe)
-            return
-    except Exception as e:
-        print(f"⚠️ بایننس در دسترس نیست برای {symbol}: {e}")
+            current_since = since
+            for i in range(4): # ۴ مرحله برای رسیدن به ۴۰۰۰ کندل
+                ohlcv = ex_obj.fetch_ohlcv(symbol_fmt, timeframe, since=current_since, limit=1000)
+                if not ohlcv: break
+                
+                all_data.extend(ohlcv)
+                current_since = ohlcv[-1][0] + 1
+                time.sleep(0.6) # جلوگیری از بلاک شدن توسط صرافی
+            
+            if all_data:
+                print(f"✅ دریافت موفقیت‌آمیز از {ex_name}")
+                break # اگر دیتا گرفتیم، دیگر به صرافی بعدی نمی‌رویم
+        except Exception as e:
+            print(f"⚠️ تلاش از {ex_name} ناموفق بود: {str(e)[:50]}...")
+            continue
 
-    # 2. موتور جایگزین (کوین‌اکس) در صورت شکست بایننس
-    try:
-        print(f"🔄 استفاده از موتور جایگزین کوین‌اکس برای {symbol}")
-        coinex = ccxt.coinex({'enableRateLimit': True})
-        ohlcv = coinex.fetch_ohlcv(symbol, timeframe, limit=1000)
-        df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
-        save_data(df, symbol, timeframe)
-    except Exception as e:
-        print(f"❌ شکست کامل برای {symbol}: {e}")
+    if all_data:
+        df = pd.DataFrame(all_data, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
+        df = df.drop_duplicates(subset=['Timestamp']).sort_values('Timestamp')
+        df.to_csv(file_path, index=False)
+        print(f"🚀 مجموع {len(df)} کندل برای {symbol} نهایی شد.")
+    else:
+        print(f"❌ شکست نهایی در دریافت دیتای {symbol}")
 
 def fetch_all_data():
     symbols = getattr(config, 'WATCHLIST', [])
     tf = getattr(config, 'TIMEFRAME', '4h')
-    
-    print(f"🚀 شروع فرآیند دانلود هیبریدی برای {len(symbols)} ارز...")
     for s in symbols:
-        fetch_data(s, tf)
-        time.sleep(1)
+        fetch_data_full(s, tf)
 
 if __name__ == "__main__":
     fetch_all_data()
