@@ -5,8 +5,9 @@ permissions:
 
 on:
   schedule:
+    # اجرا در روز اول هر ماه در ساعت ۰۰:۰۰ نیمه‌شب
     - cron: '0 0 1 * *'
-  workflow_dispatch:
+  workflow_dispatch: # امکان اجرای دستی برای تست
 
 jobs:
   retrain:
@@ -14,16 +15,8 @@ jobs:
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
-
-    # مرحله کلیدی: دانلود دیتابیس از ورک‌فلوی اصلی
-    - name: Download Latest Database
-      uses: dawidd6/action-download-artifact@v3
       with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        workflow: core_trading_bot.yml
-        name: bot-runtime-state
-        path: .
-      continue-on-error: true
+        token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -34,21 +27,31 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install pandas scikit-learn numpy joblib
 
-    - name: Execute Machine Learning Training
+    - name: Execute Machine Learning Training (Monthly Mode)
       env:
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        PYTHONPATH: ${{ github.workspace }}
       run: |
-        python src/train_model.py
+        # فراخوانی اسکریپت با آرگومان --monthly برای ترکیب تجربه‌های لایو و گذشته
+        python src/train_model.py --monthly
 
-    - name: Commit and Push Updated Model
+    - name: Commit and Push Upgraded Models
       run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action Bot"
-        if [ -f "src/models/trading_filter_model.pkl" ]; then
-          git add src/models/trading_filter_model.pkl
-          git diff --quiet && git diff --staged --quiet || git commit -m "🤖 آپدیت مدل هوش مصنوعی"
+        git config --global user.name 'github-actions'
+        git config --global user.email 'github-actions@github.com'
+        
+        # اجبار گیت به افزودن تمام مدل‌های هوش مصنوعی ارتقا یافته
+        if ls src/models/*.pkl >/dev/null 2>&1; then
+          git add -f src/models/*.pkl
+          echo "✅ Upgraded AI Models detected and added to git stash."
+        else
+          echo "⚠️ No AI models (.pkl) generated. Skipping."
+        fi
+        
+        if git diff --cached --quiet; then
+          echo "No changes detected, skipping commit."
+        else
+          git commit -m "🧠 Monthly Brain Upgrade: AI models learned from recent live mistakes & successes."
           git push
         fi
