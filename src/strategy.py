@@ -1,10 +1,11 @@
-
 # ---------------------------------------------------------
-# FILE PATH: src/strategy.py
+# FILE PATH: src/strategy.py (v8.0 - Multi-Model & Dynamic Params)
 # ---------------------------------------------------------
+import os
+import json
 import config
 from src import database, strategy_utils
-import pandas as pd # اطمینان از وارد کردن پانداز برای کار با دیتافریم
+import pandas as pd
 
 def is_blocked_by_8h_filter(pair):
     """
@@ -29,8 +30,28 @@ def generate_signal(df, pair, model=None):
     if database.get_open_positions_count() >= config.MAX_OPEN_POSITIONS:
         return None
 
-    # ۳. فیلتر جهت‌گیری و شتاب روند کلان (ADX)
-    if float(candle.get('feat_adx', 0)) < config.ADX_THRESHOLD:
+    # --- خواندن پارامترهای اختصاصی ارز از best_params.json ---
+    adx_thresh = config.ADX_THRESHOLD
+    tp_ratio = 1.5  # ضریب پیش‌فرض سود
+    sl_ratio = 1.0  # ضریب پیش‌فرض ضرر
+    
+    try:
+        params_file = os.path.join(config.BASE_DIR, "best_params.json")
+        if os.path.exists(params_file):
+            with open(params_file, 'r') as f:
+                all_params = json.load(f)
+                
+                # خواندن تنظیمات اختصاصی یا استفاده از DEFAULT به عنوان جایگزین
+                pair_params = all_params.get(pair, all_params.get("DEFAULT", {}))
+                
+                adx_thresh = pair_params.get('adx_threshold', adx_thresh)
+                tp_ratio = pair_params.get('tp_ratio', tp_ratio)
+                sl_ratio = pair_params.get('sl_ratio', sl_ratio)
+    except Exception as e:
+        pass # در صورت بروز خطا، با همان مقادیر پیش‌فرض ادامه می‌دهد
+
+    # ۳. فیلتر جهت‌گیری و شتاب روند کلان با حد آستانه اختصاصی این ارز
+    if float(candle.get('feat_adx', 0)) < adx_thresh:
         return None
 
     # ۴. شناسایی سطوح سویینگ قیمتی
@@ -40,7 +61,7 @@ def generate_signal(df, pair, model=None):
     if last_swing_high is None or last_swing_low is None:
         return None
 
-    # ۵. آماده‌سازی ویژگی‌ها
+    # ۵. آماده‌سازی ویژگی‌ها برای هوش مصنوعی
     features_dict = {
         'feat_adx': float(candle.get('feat_adx', 0)),
         'feat_vol_ratio': float(candle.get('feat_vol_ratio', 0)),
@@ -53,22 +74,26 @@ def generate_signal(df, pair, model=None):
         'feat_high_volume_session': float(candle.get('feat_high_volume_session', 0))
     }
 
-    # ۶. اعمال فیلتر هوش مصنوعی (در صورت وجود مدل)
+    # ۶. اعمال فیلتر هوش مصنوعی اختصاصی (Multi-Model)
     if model is not None:
-        # استخراج همان ۶ ویژگی مورد نظر برای مدل
-        features_df = pd.DataFrame([features_dict])
-        subset = features_df[['feat_adx', 'feat_rsi', 'feat_trend_line', 
-                              'feat_ema_deviation', 'feat_rsi_momentum', 'feat_body_ratio']]
-        
-        prediction = model.predict(subset)
-        
-        # اگر پیش‌بینی مدل منفی (۰) بود، سیگنال صادر نشود
-        if prediction[0] == 0:
-            return None
+        # در معماری جدید، مدل همان شیء BRAIN است که جفت‌ارز را دریافت می‌کند
+        try:
+            if not model.predict(pair, features_dict):
+                return None
+        except Exception as e:
+            print(f"خطا در مدل هوش مصنوعی {pair}: {e}")
+            # در صورت قطعی یا ارور مدل، فرض را بر تایید می‌گیریم تا ربات متوقف نشود
+            pass
 
-    # ۷. مدیریت سرمایه
+    # ۷. مدیریت سرمایه و محاسبه تارگت‌ها بر اساس ضرایب بهینه‌شده
     risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0)
-    sl_dist = 1.5 * float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
+    atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
+    
+    # اعمال ضرایب هوشمند روی حد سود و ضرر
+    base_sl_dist = 1.5 * atr_val
+    sl_dist = base_sl_dist * sl_ratio
+    tp_dist = sl_dist * tp_ratio
+    
     close_price = float(candle['Close'])
     
     if close_price <= 0: 
@@ -87,8 +112,8 @@ def generate_signal(df, pair, model=None):
             'direction': 'LONG', 
             'entry_price': round(close_price, 4),
             'stop_loss': round(close_price - sl_dist, 4), 
-            'tp1': round(close_price + sl_dist, 4),
-            'tp2': round(close_price + (sl_dist * 2), 4),
+            'tp1': round(close_price + (tp_dist / 2), 4), # تارگت اول نصف مسیر
+            'tp2': round(close_price + tp_dist, 4),       # تارگت دوم مسیر کامل بهینه
             'position_size': round(position_size, 2), 
             **features_dict
         }
@@ -99,8 +124,8 @@ def generate_signal(df, pair, model=None):
             'direction': 'SHORT', 
             'entry_price': round(close_price, 4),
             'stop_loss': round(close_price + sl_dist, 4), 
-            'tp1': round(close_price - sl_dist, 4),
-            'tp2': round(close_price - (sl_dist * 2), 4),
+            'tp1': round(close_price - (tp_dist / 2), 4),
+            'tp2': round(close_price - tp_dist, 4),
             'position_size': round(position_size, 2), 
             **features_dict
         }
