@@ -1,85 +1,87 @@
 # ---------------------------------------------------------
-# FILE PATH: fetcher.py (v8.3 - Reverse Pagination for CoinEx)
+# FILE PATH: fetcher.py (v8.4 - Fully Fixed CoinEx Deep Fetcher)
 # ---------------------------------------------------------
-import ccxt
+import requests
 import pandas as pd
 import os
 import time
-from datetime import datetime, timedelta
 import config
 
-def fetch_deep_history(symbol, timeframe="4h", days_back=1000):
+def fetch_deep_history(symbol, timeframe="4h", target_candles=4000):
     """
-    دریافت دیتای عمیق با حرکت معکوس در زمان (ویژه محدودیت‌های صرافی کوین‌اکس)
+    دریافت دیتای عمیق از کوین‌اکس با استفاده از مکانیزم اختصاصی last_id (تضمینی)
     """
     data_dir = os.path.join(os.getcwd(), "data", timeframe)
     os.makedirs(data_dir, exist_ok=True)
     
+    # تبدیل فرمت ارز به ساختار کوین‌اکس (مثلا BTCUSDT)
+    symbol_api = symbol.replace('/', '').upper()
     safe_name = symbol.replace('/', '_')
     file_path = os.path.join(data_dir, f"{safe_name}_history.csv")
     
-    exchange = ccxt.coinex({
-        'timeout': 30000,
-        'enableRateLimit': True,
-    })
+    all_kline_data = []
+    last_id = 0 # صفر یعنی از جدیدترین کندل‌ها شروع کن و به عقب برو
     
-    # محاسبه قدیمی‌ترین زمان مدنظر (نقطه پایان دانلود به سمت گذشته)
-    target_end_time = int((datetime.now() - timedelta(days=days_back)).timestamp() * 1000)
+    print(f"🔄 شروع فچ قطعی دیتای {symbol} (هدف: {target_candles} کندل)...")
     
-    # شروع دانلود از همین لحظه (زمان حال)
-    current_since = None 
-    all_ohlcv = []
-    
-    print(f"🔄 شروع دانلود معکوس دیتای {symbol} برای {days_back} روز گذشته...")
-    
-    # برای جلوگیری از حلقه بی‌نهایت، سقف ۵ مرحله درخواست می‌گذاریم (معادل ۵۰۰۰ کندل)
-    for iteration in range(5):
+    # اجرای حلقه برای گرفتن پارت‌های ۱۰۰۰ تایی به سمت گذشته
+    while len(all_kline_data) < target_candles:
+        url = f"https://api.coinex.com/v1/market/kline?market={symbol_api}&limit=1000&type={timeframe}"
+        if last_id > 0:
+            url += f"&last_id={last_id}" # هل دادن صرافی به زمان‌های دورتر
+            
         try:
-            # دریافت دیتا (کوین‌اکس همیشه از زمان حال یا از since به قبل را می‌دهد)
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe, since=current_since, limit=1000)
-            
-            if not ohlcv or len(ohlcv) == 0:
+            response = requests.get(url, timeout=15).json()
+            if response.get('code') == 0 and response.get('data'):
+                data_part = response['data']
+                
+                if not data_part or len(data_part) == 0:
+                    break
+                    
+                all_kline_data.extend(data_part)
+                
+                # کلید حل معما: شناسایی شناسه اولین (قدیمی‌ترین) کندل در این پارت برای پارت بعدی
+                last_id = data_part[0][0] 
+                
+                print(f"   📥 دریافت پارت جدید. کل کندل‌های انباشته شده تا الان: {len(all_kline_data)}")
+                
+                # اگر صرافی دیتای کمتری داد یعنی به انتهای تاریخچه رسیده‌ایم
+                if len(data_part) < 1000:
+                    break
+            else:
+                print(f"⚠️ خطای صرافی در پاسخ: {response}")
                 break
                 
-            all_ohlcv.extend(ohlcv)
-            
-            # پیدا کردن قدیمی‌ترین کندل در این پارت دانلود شده
-            oldest_candle_timestamp = ohlcv[0][0]
-            
-            print(f"   📥 پارت {iteration + 1}: دریافت {len(ohlcv)} کندل. (قدیمی‌ترین کندل این پارت: {exchange.iso8601(oldest_candle_timestamp)[:10]})")
-            
-            # اگر به بازه زمانی مورد نظرمان رسیده‌ایم، کار تمام است
-            if oldest_candle_timestamp <= target_end_time:
-                print("   🎯 به عمق زمانی مورد نظر رسیدیم.")
-                break
-                
-            # 🔥 نکته کلیدی: تغییر لیمیت زمانی به قبل از قدیمی‌ترین کندل دریافت شده برای درخواست بعدی
-            # در تایم‌فریم ۴ ساعته، ۱۰۰۰ کندل معادل حدود ۱۶۶ روز است. زمان را ۱۶۷ روز به عقب می‌کشیم.
-            current_since = oldest_candle_timestamp - (1000 * 4 * 60 * 60 * 1000)
-            
-            time.sleep(exchange.rateLimit / 1000.0)
+            time.sleep(1) # رعایت محدودیت درخواست صرافی
             
         except Exception as e:
-            print(f"❌ خطا در لایه دانلود: {e}")
-            time.sleep(2)
+            print(f"❌ خطا در شبکه یا پردازش: {e}")
             break
 
-    if not all_ohlcv:
-        print(f"⚠️ دیتایی دریافت نشد.")
+    if not all_kline_data:
+        print(f"⚠️ هیچ دیتایی برای {symbol} دریافت نشد.")
         return
 
-    # تبدیل به دیتافریم، حذف همپوشانی‌ها و مرتب‌سازی از قدیم به جدید
-    df = pd.DataFrame(all_ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
+    # تبدیل به دیتافریم با ستون‌های استاندارد پروژه شما
+    df = pd.DataFrame(all_kline_data, columns=['Timestamp', 'Open', 'Close', 'High', 'Low', 'Volume', 'Amount'])
+    df = df[['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume']]
+    
+    # حذف همپوشانی‌های احتمالی و مرتب‌سازی نهایی از قدیم به جدید
     df = df.drop_duplicates(subset=['Timestamp']).sort_values('Timestamp')
     
-    # ذخیره نهایی
+    # ذخیره در فایل
     df.to_csv(file_path, index=False)
-    print(f"✅ موفقیت: {symbol} با موفقیت به {len(df)} کندل ارتقا یافت.\n")
+    print(f"✅ با موفقیت ذخیره شد: {symbol} اکنون دارای {len(df)} کندل واقعی در بکتست است.\n")
 
 def fetch_all_data():
     symbols = getattr(config, 'WATCHLIST', [])
+    if not symbols:
+        print("❌ لیست واچ‌لیست در config.py یافت نشد.")
+        return
+        
     for s in symbols:
-        fetch_deep_history(s, timeframe="4h", days_back=1000)
+        # درخواست ۴۰۰0 کندل (معادل حدود ۲ سال دیتای عمیق ۴ ساعته)
+        fetch_deep_history(s, timeframe="4h", target_candles=4000)
         time.sleep(1)
 
 if __name__ == "__main__":
