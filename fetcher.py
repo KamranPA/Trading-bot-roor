@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: fetcher.py (v8.6 - Final Stable Deep Fetcher)
+# FILE PATH: fetcher.py (v9.0 - Binance Deep API Integration)
 # ---------------------------------------------------------
 import requests
 import pandas as pd
@@ -8,110 +8,105 @@ import time
 from datetime import datetime, timedelta
 import config
 
-def fetch_deep_history(symbol, timeframe="4h", target_candles=3000):
+def fetch_deep_history_binance(symbol, timeframe="4h", target_candles=4000):
     """
-    دریافت تضمینی و عمیق داده‌های تاریخی با حرکت معکوس زمانی در API کوین‌اکس
+    دریافت دیتای عمیق و نامحدود از سرورهای عمومی بایننس برای بکتست قدرتمند
     """
-    # ایجاد مسیر دقیق پوشه متناسب با ساختار بکتستر شما (مثال: data/4h)
     data_dir = os.path.join(os.getcwd(), "data", timeframe)
     os.makedirs(data_dir, exist_ok=True)
     
-    # فرمت نام فایل دقیقاً همان چیزی که backtester.py جستجو می‌کند (مانند BTC_USDT_history.csv)
+    # فرمت نام فایل برای شناسایی توسط بکتستر (مثلاً BTC_USDT_history.csv)
     safe_name = symbol.replace('/', '_')
     file_path = os.path.join(data_dir, f"{safe_name}_history.csv")
     
-    # تبدیل فرمت جفت‌ارز برای API کوین‌اکس (مانند BTCUSDT)
+    # تبدیل نام جفت‌ارز به فرمت بایننس (مثلاً BTCUSDT)
     symbol_api = symbol.replace('/', '').upper()
     
     all_kline_data = []
     
-    # شروع از زمان حال به عنوان نقطه پایانی درخواست اول
-    # کوین‌اکس در v1 با دادن دیتای قبل از یک زمان مشخص به عقب می‌رود
-    current_before_ts = int(time.time())  # زمان حال به ثانیه
+    # محاسبه نقطه شروع: ۴۰۰۰ کندل ۴ ساعته یعنی حدود ۶۶۰ روز پیش
+    start_date = datetime.now() - timedelta(days=700)
+    current_start_ts = int(start_date.timestamp() * 1000)
     
-    print(f"🔄 شروع فچ سرتاسری دیتای {symbol} به سمت گذشته (هدف: {target_candles} کندل)...")
+    print(f"🔄 شروع دانلود عمیق دیتای {symbol} از سرورهای بایننس (هدف: {target_candles} کندل)...")
     
-    # تعریف گام‌های زمانی بر حسب ثانیه برای هر تایم‌فریم جهت شیفت دادن دیتای درخواستی به گذشته
-    seconds_per_candle = 4 * 60 * 60  # برای 4h
-    if timeframe == "1h":
-        seconds_per_candle = 1 * 60 * 60
-    elif timeframe == "30m":
-        seconds_per_candle = 30 * 60
-
-    # حلقه برای پر کردن سبد دیتا تا رسیدن به سقف مورد نظر
-    for iteration in range(6):  # حداکثر ۶ پارت ۱۰۰۰ تایی
-        if len(all_kline_data) >= target_candles:
-            break
-            
-        # استفاده از اندپوینت اصلی و فوق‌العاده سریع v1 بازار کوین‌اکس
-        url = f"https://api.coinex.com/v1/market/kline?market={symbol_api}&limit=1000&type={timeframe}"
+    while len(all_kline_data) < target_candles:
+        # آدرس API عمومی بایننس با پشتیبانی قطعی از startTime
+        url = f"https://api.binance.com/api/v3/klines?symbol={symbol_api}&interval={timeframe}&limit=1000&startTime={current_start_ts}"
         
         try:
-            response = requests.get(url, timeout=15).json()
-            if response.get('code') == 0 and response.get('data'):
-                data_part = response['data']
+            response = requests.get(url, timeout=15)
+            
+            # اگر بایننس ارز POL را با نام جدید نشناخت، به نام قدیمی آن (MATIC) سوییچ می‌کنیم
+            if response.status_code == 400 and symbol_api == "POLUSDT":
+                print("🔄 تغییر موقت نام POL به MATIC برای هماهنگی با سرورهای بایننس...")
+                symbol_api = "MATICUSDT"
+                continue
+                
+            if response.status_code == 200:
+                data_part = response.json()
                 
                 if not data_part or len(data_part) == 0:
                     break
-                
-                # اضافه کردن پارت دریافت شده
+                    
                 all_kline_data.extend(data_part)
-                print(f"   📥 پارت {iteration + 1}: دریافت {len(data_part)} کندل. (مجموع تا الان: {len(all_kline_data)})")
+                
+                # دریافت زمان آخرین کندل این پارت برای شروع پارت بعدی
+                latest_candle_ts = data_part[-1][0]
+                
+                print(f"   📥 دریافت {len(data_part)} کندل جدید. (مجموع ذخیره شده: {len(all_kline_data)})")
                 
                 if len(data_part) < 1000:
                     break
-                
-                # برای دور بعدی، دیتای صرافی را با دستکاری زمانی فیکستچر به گذشته هدایت می‌کنیم
-                # ۱۰۰۰ کندل قبلی را بر اساس ثانیه محاسبه کرده و از زمان درخواست کم می‌کنیم
-                # توجه: از آنجا که کوین‌اکس گاهی پارامترهای زمانی را در نسخه رایگان نادیده می‌گیرد، 
-                # ما دیتای دانلود شده را انباشت می‌کنیم تا در اجراهای گیت‌هاب فایلی خالی نماند.
-                time.sleep(1)  # رعایت وقفه صرافی
+                    
+                current_start_ts = latest_candle_ts + 1
+                time.sleep(0.5) # رعایت محدودیت بایننس
             else:
-                print(f"⚠️ پاسخ ناموفق صرافی در پارت {iteration + 1}: {response}")
+                print(f"⚠️ خطای سرور بایننس: {response.text}")
                 break
+                
         except Exception as e:
-            print(f"❌ خطا در شبکه: {e}")
+            print(f"❌ خطا در ارتباط با بایننس: {e}")
             break
 
     if not all_kline_data:
         print(f"⚠️ هیچ دیتایی برای {symbol} دریافت نشد!")
         return
 
-    # استخراج و تبدیل فرمت به ساختار دقیقاً منطبق با دیتابیس و بکتستر شما
-    # ستون‌های خروجی v1 کوین‌اکس: [timestamp, open, close, high, low, volume, amount]
+    # استخراج و مرتب‌سازی دقیق مطابق با ساختار پروژه شما
+    # خروجی بایننس: [Open time, Open, High, Low, Close, Volume, ...]
     formatted_data = []
     for item in all_kline_data:
-        ts = int(item[0]) * 1000  # تبدیل ثانیه به میلی‌ثانیه برای هماهنگی با کل سیستم شما
+        ts = int(item[0])
         o = float(item[1])
-        c = float(item[2])
-        h = float(item[3])
-        l = float(item[4])
+        h = float(item[2])
+        l = float(item[3])
+        c = float(item[4])
         v = float(item[5])
         
-        # ترتیب استاندارد پروژه شما: Timestamp, Open, High, Low, Close, Volume
+        # ترتیب بکتستر شما: Timestamp, Open, High, Low, Close, Volume
         formatted_data.append([ts, o, h, l, c, v])
 
     df = pd.DataFrame(formatted_data, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
     
-    # حذف همپوشانی‌ها و مرتب‌سازی از قدیم به جدید (بسیار حیاتی برای اسکریپت indicators.py)
+    # حذف همپوشانی‌ها و مرتب‌سازی از قدیم به جدید
     df = df.drop_duplicates(subset=['Timestamp']).sort_values('Timestamp')
     
-    # ذخیره در مسیر نهایی
+    # ذخیره فایل در مسیر مشخص
     df.to_csv(file_path, index=False)
-    print(f"✅ فایل با موفقیت ذخیره شد: {file_path} شامل {len(df)} کندل واقعی است.\n")
+    print(f"✅ فایل با موفقیت ذخیره شد: {symbol} اکنون دارای {len(df)} کندل تاریخی واقعی است.\n")
 
 def fetch_all_data():
-    # خواندن واچ‌لیست مستقیماً از فایل تنظیمات خودتان
     symbols = getattr(config, 'WATCHLIST', [])
     tf = getattr(config, 'TIMEFRAME', '4h')
     
     if not symbols:
-        print("❌ لیست واچ‌لیست در config.py یافت نشد یا خالی است.")
+        print("❌ لیست واچ‌لیست در config.py یافت نشد.")
         return
         
-    print(f"🚀 شروع فرآیند دانلود دیتای بکتست برای {len(symbols)} ارز در تایم‌فریم {tf}...")
+    print("🚀 اتصال به سرورهای بایننس برقرار شد...")
     for s in symbols:
-        fetch_deep_history(s, timeframe=tf, target_candles=3000)
+        fetch_deep_history_binance(s, timeframe=tf, target_candles=4000)
         time.sleep(1)
 
 if __name__ == "__main__":
