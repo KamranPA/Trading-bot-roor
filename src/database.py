@@ -106,3 +106,27 @@ def manage_open_positions():
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("UPDATE signals SET status = 'CLOSED' WHERE status = 'OPEN'")
         conn.commit()
+        def get_last_signals(symbol, limit=3):
+    """
+    دریافت آخرین سیگنال‌های ثبت شده برای یک ارز خاص جهت فیلترینگ تکرار.
+    """
+    if not os.path.exists(DB_PATH):
+        return []
+    
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row  # این باعث می‌شود خروجی به صورت دیکشنری باشد
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM signals 
+                WHERE symbol = ? 
+                ORDER BY timestamp DESC LIMIT ?
+            """, (symbol, limit))
+            
+            # تبدیل نتایج به لیست دیکشنری
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+    except Exception as e:
+        print(f"خطا در خواندن سیگنال‌های اخیر: {e}")
+        return []
+
