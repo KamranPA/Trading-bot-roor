@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/train_model.py
+# FILE PATH: src/train_model.py (اصلاح شده)
 # ---------------------------------------------------------
 import sqlite3
 import pandas as pd
@@ -18,9 +18,20 @@ if BASE_DIR not in sys.path:
 
 import config
 
-def train_filter_model():
-    # ۱. استفاده از مسیرهای یکپارچه و استاندارد
-    db_path = config.DB_NAME
+def train_filter_model(mode="backtest"):
+    """
+    آموزش مدل هوش مصنوعی بر اساس داده‌های ذخیره شده.
+    mode="backtest" -> آموزش از روی دیتابیس بکتست (پیش‌فرض و ایمن)
+    mode="live"     -> آموزش از روی دیتابیس معاملات واقعی
+    """
+    # ۱. تفکیک هوشمند مسیر دیتابیس بر اساس Mode ورودی
+    if mode == "backtest":
+        db_path = config.DB_NAME_BACKTEST
+        print("🤖 [AI Train] در حال خواندن داده‌ها از دیتابیس اختصاصی بکتست...")
+    else:
+        db_path = config.DB_NAME
+        print("⚠️ [AI Train] هشدار: در حال خواندن داده‌ها از دیتابیس لایو...")
+
     model_dir = os.path.join(BASE_DIR, "src", "models")
     model_path = os.path.join(model_dir, "trading_filter_model.pkl")
     
@@ -30,7 +41,7 @@ def train_filter_model():
         print(f"❌ دیتابیس یافت نشد: {db_path}")
         return
 
-    # ۲. استخراج داده‌ها با اتصال به دیتابیس اصلی پروژه
+    # ۲. استخراج داده‌ها از دیتابیس تعیین شده
     try:
         conn = sqlite3.connect(db_path)
         df = pd.read_sql_query("SELECT * FROM signals WHERE status = 'CLOSED'", conn)
@@ -82,10 +93,10 @@ def train_filter_model():
 
 def train_all():
     """
-    تابع واسط برای جلوگیری از خطای GitHub Actions
-    در فایل monthly_brain.yml این تابع فراخوانی می‌شود
+    تابع واسط برای جلوگیری از خطای GitHub Actions و پایداری اسکریپت‌های دوره‌ای
+    به صورت پیش‌فرض مدل را با دیتابیس بکتست آموزش می‌دهد.
     """
-    train_filter_model()
+    train_filter_model(mode="backtest")
 
 if __name__ == "__main__":
     train_all()
