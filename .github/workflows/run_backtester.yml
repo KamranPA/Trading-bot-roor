@@ -54,7 +54,7 @@ jobs:
         run: |
           python src/train_model.py
 
-      # ۵. کامیت و پوش کردن تغییرات به مخزن (با اعمال فلگ -f برای عبور از گیت‌ایگنور)
+      # ۵. کامیت و پوش کردن تغییرات به مخزن (کاملاً ایمن و مشروط)
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
@@ -69,9 +69,12 @@ jobs:
             git add -f data/trading_bot.db
           fi
           
-          # 🌟 ارتقای کلیدی: اجبار گیت به افزودن تمام مدل‌های هوش مصنوعی اختصاصی ارزها (*.pkl)
-          if [ -d "src/models" ]; then 
+          # 🔥 رفع باگ تصویر پنجم: بررسی وجود فایل‌های pkl قبل از اجرای دستور git add
+          if ls src/models/*.pkl >/dev/null 2>&1; then
             git add -f src/models/*.pkl
+            echo "✅ AI Models detected and added to git stash."
+          else
+            echo "⚠️ No AI models (.pkl) generated yet due to insufficient trades. Skipping models add."
           fi
           
           # افزودن فایل تنظیمات بهینه شده چند ارزی
