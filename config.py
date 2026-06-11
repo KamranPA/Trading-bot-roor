@@ -1,16 +1,18 @@
 # ---------------------------------------------------------
-# FILE PATH: config.py (اصلاح شده برای تفکیک لایو و بکتست)
+# FILE PATH: config.py (اصلاح شده و هماهنگ با تمام ماژول‌ها)
 # ---------------------------------------------------------
 import os
 
 # تعیین مسیر پایه پروژه (Root Directory)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# دیتابیس اصلی و لایو (بدون تغییر نام برای حفظ پایداری ربات اصلی)
+# دیتابیس اصلی و لایو (تبدیل به مسیر مطلق برای پایداری در گیت‌هاب اکشنز)
 DB_NAME = "trading_bot.db"
+DB_PATH_LIVE = os.path.join(BASE_DIR, "data", DB_NAME)
 
-# دیتابیس مجزا و اختصاصی برای بکتست و آموزش هوش مصنوعی
+# دیتابیس مجزا و اختصاصی برای بکتست و آموزش هوش مصنوعی (مسیر مطلق)
 DB_NAME_BACKTEST = "trading_bot_backtest.db"
+DB_PATH_BACKTEST = os.path.join(BASE_DIR, "data", DB_NAME_BACKTEST)
 
 
 # تنظیمات فچ دیتای صرافی
