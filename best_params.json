@@ -1,5 +1,5 @@
 {
-    "adx_threshold": 29.0,
-    "tp_ratio": 1.6,
+    "adx_threshold": 30.0,
+    "tp_ratio": 1.7000000000000002,
     "sl_ratio": 1.0
 }
