@@ -62,7 +62,7 @@ def train_model_for_symbol(symbol, mode="backtest"):
     
     df = df.dropna(subset=features)
     
-    if len(df) < 30:
+    if len(df) < 10:
         print(f"⚠️ دیتای کافی برای ارتقای {symbol} نیست ({len(df)} معامله).")
         return
 
