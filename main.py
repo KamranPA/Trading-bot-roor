@@ -1,11 +1,10 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py
+# FILE PATH: main.py (v8.0 - Multi-Model Architecture)
 # ---------------------------------------------------------
 import os
 import sys
 import logging
 import sqlite3
-import joblib
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -17,6 +16,7 @@ if BASE_DIR not in sys.path:
 try:
     import config
     from src import database, coinex_client, strategy, telegram_bot, indicators, optimizer
+    from src.brain import TradingBrain
 except ImportError as e:
     print(f"CRITICAL IMPORT ERROR: {e}")
     sys.exit(1)
@@ -24,9 +24,8 @@ except ImportError as e:
 # تنظیمات لاگینگ
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# بارگذاری مدل هوش مصنوعی
-MODEL_PATH = os.path.join(BASE_DIR, "src", "models", "trading_filter_model.pkl")
-MODEL = joblib.load(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
+# مقداردهی به مغز متفکر هوش مصنوعی (مدیریت‌کننده و توزیع‌کننده مدل‌های اختصاصی هر ارز)
+BRAIN = TradingBrain()
 
 # تعریف قفل سراسری برای جلوگیری از تداخل در دیتابیس (Thread Safety)
 db_lock = threading.Lock()
@@ -47,8 +46,8 @@ def process_pair(pair):
             logging.info(f"⛔️ مسدود توسط فیلتر ۸ ساعته: {pair}")
             return
 
-        # ۲. تولید سیگنال با مدل
-        signal = strategy.generate_signal(df, pair, model=MODEL)
+        # ۲. تولید سیگنال با مغز متفکر هوشمند (پاس دادن BRAIN به جای مدل استاتیک قبلی)
+        signal = strategy.generate_signal(df, pair, model=BRAIN)
         
         with db_lock:
             if signal:
@@ -64,7 +63,7 @@ def process_pair(pair):
         logging.error(f"خطا در پردازش {pair}: {e}")
 
 def run_auto_optimization():
-    """بررسی خودکار برای بهینه‌سازی پارامترها"""
+    """بررسی خودکار برای بهینه‌سازی پارامترها (اکنون به صورت تفکیک‌شده برای هر ارز)"""
     # فراخوانی مسیر دیتابیس از ماژول database (منبع حقیقت)
     db_path = database.DB_PATH 
     try:
@@ -73,13 +72,13 @@ def run_auto_optimization():
                 count = conn.execute("SELECT count(*) FROM signals").fetchone()[0]
             if count > 0 and count % 50 == 0:
                 logging.info(f"🚀 شروع ارتقای هوشمند (تعداد کل سیگنال‌ها: {count})")
-                optimizer.optimize()
+                optimizer.optimize_all(mode="live")
     except Exception as e:
         logging.error(f"خطا در پروسه خودارتقایی: {e}")
 
 def run_bot():
     """تابع اصلی اجرای ربات"""
-    logging.info("🤖 اسکنر هوشمند v7.3 فعال شد.")
+    logging.info("🤖 اسکنر هوشمند v8.0 (Multi-Model) فعال شد.")
     
     # اطمینان از ایجاد دیتابیس و جداول پیش از هر عملیات
     database.init_db()
