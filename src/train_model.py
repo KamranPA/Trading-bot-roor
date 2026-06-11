@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/train_model.py (اصلاح شده)
+# FILE PATH: src/train_model.py (اصلاح شده و هماهنگ با کانفیگ جدید)
 # ---------------------------------------------------------
 import sqlite3
 import pandas as pd
@@ -24,13 +24,13 @@ def train_filter_model(mode="backtest"):
     mode="backtest" -> آموزش از روی دیتابیس بکتست (پیش‌فرض و ایمن)
     mode="live"     -> آموزش از روی دیتابیس معاملات واقعی
     """
-    # ۱. تفکیک هوشمند مسیر دیتابیس بر اساس Mode ورودی
+    # ۱. تفکیک هوشمند مسیر دیتابیس بر اساس متغیرهای مطلق کانفیگ جدید
     if mode == "backtest":
-        db_path = config.DB_NAME_BACKTEST
-        print("🤖 [AI Train] در حال خواندن داده‌ها از دیتابیس اختصاصی بکتست...")
+        db_path = config.DB_PATH_BACKTEST
+        print(f"🤖 [AI Train] در حال خواندن داده‌ها از دیتابیس اختصاصی بکتست: {db_path}")
     else:
-        db_path = config.DB_NAME
-        print("⚠️ [AI Train] هشدار: در حال خواندن داده‌ها از دیتابیس لایو...")
+        db_path = config.DB_PATH_LIVE
+        print(f"⚠️ [AI Train] هشدار: در حال خواندن داده‌ها از دیتابیس لایو: {db_path}")
 
     model_dir = os.path.join(BASE_DIR, "src", "models")
     model_path = os.path.join(model_dir, "trading_filter_model.pkl")
@@ -38,7 +38,7 @@ def train_filter_model(mode="backtest"):
     os.makedirs(model_dir, exist_ok=True)
     
     if not os.path.exists(db_path):
-        print(f"❌ دیتابیس یافت نشد: {db_path}")
+        print(f"❌ دیتابیس در مسیر مشخص شده یافت نشد: {db_path}")
         return
 
     # ۲. استخراج داده‌ها از دیتابیس تعیین شده
