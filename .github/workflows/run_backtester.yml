@@ -14,82 +14,78 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0 # دریافت کل تاریخچه برای حل مشکلات Merge
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      # 🔥 تغییر مهم: اضافه شدن yfinance و خواندن requirements.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pandas requests ccxt scikit-learn numpy joblib yfinance
 
-      # ۱. ابتدا دانلود داده‌های عمیق بازار با اسکریپت جدید CCXT/yfinance
       - name: Fetch Market Historical Data
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python fetcher.py
 
-      # ۲. اجرای بک‌تستر (تزریق به دیتابیس بکتست)
       - name: Run Backtest
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/backtester.py
 
-      # ۳. اجرای بهینه‌ساز پارامترها
       - name: Run Optimizer
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/optimizer.py
 
-      # ۴. اجرای آموزش هوش مصنوعی با حد نصاب ۱۰ معامله
       - name: Train AI Model
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/train_model.py
 
-      # ۵. کامیت و پوش هوشمند با استراتژی رفع تداخل (Pull Rebase)
+      # --- مرحله جدید: تولید گزارش بکتست ---
+      - name: Generate Summary Report
+        run: |
+          python -c "
+          import sqlite3, config
+          conn = sqlite3.connect(config.DB_PATH_BACKTEST)
+          cursor = conn.cursor()
+          lines = ['📈 گزارش بکتست Breakout', '================================']
+          total = 0
+          for symbol in config.WATCHLIST:
+              cursor.execute('SELECT COUNT(*), AVG(pnl_percent > 0) * 100 FROM signals WHERE symbol = ?', (symbol,))
+              row = cursor.fetchone()
+              if row and row[0] > 0:
+                  lines.append(f'{symbol} | نرخ برد: {row[1]:.1f} | تعداد معاملات: {row[0]}')
+                  total += row[0]
+          lines.append('================================')
+          lines.append(f'📊 مجموع معاملات: {total}')
+          with open('backtest_summary.txt', 'w', encoding='utf-8') as f:
+              f.write('\n'.join(lines))
+          "
+
+      # --- مرحله کامیت و پوش ---
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # افزودن دیتابیس بکتست
-          if [ -f "data/trading_bot_backtest.db" ]; then 
-            git add -f data/trading_bot_backtest.db
-          fi
+          # افزودن فایل‌های خروجی
+          git add data/trading_bot_backtest.db backtest_summary.txt best_params.json
+          if ls src/models/*.pkl >/dev/null 2>&1; then git add src/models/*.pkl; fi
           
-          # افزودن مدل‌های هوش مصنوعی (در صورت وجود)
-          if ls src/models/*.pkl >/dev/null 2>&1; then
-            git add -f src/models/*.pkl
-            echo "✅ AI Models detected and added."
-          else
-            echo "⚠️ No AI models (.pkl) generated yet."
-          fi
-          
-          # افزودن فایل تنظیمات بهینه شده
-          if [ -f "best_params.json" ]; then 
-            git add best_params.json
-          fi
-          
-          # بررسی اینکه آیا اصلاً تغییری برای کامیت وجود دارد یا خیر
           if git diff --cached --quiet; then
             echo "No changes detected, skipping commit."
           else
-            git commit -m "Auto-update: Forced Multi-Models (v8.2), Deep Backtest DB, and optimized parameters"
-            
-            # 🔥 کلید حل باگ تصویر دوم: گرفتن تغییرات جدید لایو از سرور قبل از Push
-            echo "🔄 Pulling latest changes from remote to avoid conflict..."
+            git commit -m "Auto-update: Backtest results, Report, and AI Models"
             git pull origin main --rebase
-            
-            # ارسال نهایی بدون خطا
             git push origin main
           fi
