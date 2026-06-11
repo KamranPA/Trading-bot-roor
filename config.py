@@ -28,10 +28,9 @@ RISK_PERCENT = 1.0
 
 # لیست کامل ارزهای تحت نظر
 WATCHLIST = [
-    "BTC/USDT", "ETH/USDT", "SOL/USDT", "POL/USDT", 
-    "ADA/USDT", "DOT/USDT", "LINK/USDT", "UNI/USDT", 
+    "BTC/USDT", "ETH/USDT", "SOL/USDT", "POL/USDT", "DOT/USDT", "LINK/USDT", 
     "AVAX/USDT", "XRP/USDT", "LTC/USDT", "BCH/USDT", 
-    "ATOM/USDT", "NEAR/USDT"
+    "ATOM/USDT"
 ]
 
 # تنظیمات تلگرام (از متغیرهای محیطی خوانده می‌شود)
