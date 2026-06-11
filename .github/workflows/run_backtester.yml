@@ -1,7 +1,5 @@
 name: Run Backtester and Optimizer
 
-on:name: Run Backtester and Optimizer
-
 on:
   workflow_dispatch: 
 
@@ -28,77 +26,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas requests ccxt scikit-learn numpy joblib
 
-      # 🌟 گام مفقوده: ابتدا دانلود داده‌های تاریخی بازار از صرافی کوین‌اکس
+      # 🌟 گام مفقوده: ابتدا دانلود داده‌های تاریخی بازار تا فایل‌های CSV ساخته شوند
       - name: Fetch Market Historical Data
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python fetcher.py
-
-      # ۱. اجرای بک‌تستر (داده‌ها اکنون با موفقیت در data/trading_bot_backtest.db ذخیره می‌شوند)
-      - name: Run Backtest
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: |
-          python src/backtester.py
-
-      # ۲. اجرای بهینه‌ساز پارامترها
-      - name: Run Optimizer
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: |
-          python src/optimizer.py
-
-      # ۳. اجرای آموزش هوش مصنوعی (یادگیری از دیتابیس بکتست و بروزرسانی مدل)
-      - name: Train AI Model
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: |
-          python src/train_model.py
-
-      # ۴. کامیت و پوش کردن تغییرات به مخزن (کاملاً ایمن و منعطف)
-      - name: Commit and Push Results
-        run: |
-          git config --global user.name 'github-actions'
-          git config --global user.email 'github-actions@github.com'
-          
-          # بررسی وجود هر فایل قبل از افزودن به گیت جهت همپوشانی خطای تصویر ۱ و ۲
-          if [ -f "data/trading_bot_backtest.db" ]; then git add data/trading_bot_backtest.db; fi
-          if [ -f "src/models/trading_filter_model.pkl" ]; then git add src/models/trading_filter_model.pkl; fi
-          if [ -f "best_params.json" ]; then git add best_params.json; fi
-          
-          # بررسی وضعیت تغییرات و اعمال کامیت نهایی
-          if git diff --cached --quiet; then
-            echo "No changes detected, skipping commit."
-          else
-            git commit -m "Auto-update: Backtest DB, AI Model, and optimized parameters"
-            git push
-          fi
-
-  workflow_dispatch: 
-
-# اضافه کردن دسترسی write برای اینکه ربات بتواند فایل‌های جدید را در مخزن ذخیره کند
-permissions:
-  contents: write
-
-jobs:
-  backtest:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10' # هماهنگی با ربات اصلی
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pandas requests ccxt scikit-learn numpy joblib
 
       # ۱. اجرای بک‌تستر (داده‌ها در data/trading_bot_backtest.db ذخیره می‌شوند)
       - name: Run Backtest
