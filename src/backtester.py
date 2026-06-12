@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/backtester.py (اصلاح شده برای تفکیک کامل دیتابیس)
+# FILE PATH: src/backtester.py (اصلاح شده برای تفکیک کامل دیتابیس و خروجی جدول)
 # ---------------------------------------------------------
 import os
 import sqlite3
@@ -173,10 +173,26 @@ def run_all_backtests():
     init_backtest_db(db_path)
     
     print("📊 شروع فرآیند بکتست و پر کردن دیتابیس اختصاصی بکتست...")
+    
+    # لیستی برای ذخیره نتایج تمام ارزها جهت خروجی جدولی
+    summary_results = []
+    
     for symbol in config.WATCHLIST:
         res = run_backtest_for_symbol(symbol, db_path)
         if res:
             print(f"📈 ارز {res['symbol']} | تعداد معامله: {res['total_trades']} | صدمه/سود کل: {res['total_pnl_percent']}% | وین‌ریت: {res['win_rate']}%")
+            summary_results.append(res)
+            
+    # ---- بخش جدید: ذخیره و آپدیت خودکار جدول نتایج در فایل ----
+    if summary_results:
+        summary_df = pd.DataFrame(summary_results)
+        
+        # تعیین مسیر ذخیره فایل جدول بکتست
+        report_path = os.path.join(config.BASE_DIR, "backtest_table_summary.csv")
+        
+        # ذخیره جدول (با هربار اجرا کاملاً اوررایت و آپدیت می‌شود)
+        summary_df.to_csv(report_path, index=False, encoding='utf-8')
+        print(f"✅ جدول خلاصه نتایج بکتست با موفقیت در فایل '{report_path}' آپدیت شد.")
 
 if __name__ == "__main__":
     run_all_backtests()
