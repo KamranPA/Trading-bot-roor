@@ -30,35 +30,35 @@ jobs:
       # ۱. دریافت داده‌های گذشته بازار
       - name: Fetch Market Historical Data
         env:
-          PYTHONPATH: ${{ github.workspace }}
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
         run: |
           python fetcher.py
 
       # ۲. اجرای بکتست اولیه برای ایجاد دیتای خام معاملاتی جهت آموزش AI
       - name: Run Raw Backtest for Training Data
         env:
-          PYTHONPATH: ${{ github.workspace }}
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
         run: |
           python src/backtester.py --raw
 
       # ۳. بهینه‌سازی پارامترهای معاملاتی
       - name: Run Optimizer
         env:
-          PYTHONPATH: ${{ github.workspace }}
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
         run: |
           python src/optimizer.py
 
       # ۴. آموزش یا بازآموزی مغز هوش مصنوعی
       - name: Train AI Model
         env:
-          PYTHONPATH: ${{ github.workspace }}
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
         run: |
           python src/train_model.py
 
       # ۵. شلیک نهایی: اجرای مجدد بکتستر با فیلتر هوش مصنوعی فعال برای ثبت وین‌ریت ۶۶.۶٪ در فایل Summary
       - name: Run AI-Filtered Backtest for Summary Output
         env:
-          PYTHONPATH: ${{ github.workspace }}
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
         run: |
           python src/backtester.py --ai
 
@@ -68,7 +68,6 @@ jobs:
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # فورس-اد کردن فایل سامری (حتی با وجود حضور در gitignore)
           if [ -f "backtest_summary.txt" ]; then 
             git add -f backtest_summary.txt
             echo "✅ backtest_summary.txt added forcefully."
