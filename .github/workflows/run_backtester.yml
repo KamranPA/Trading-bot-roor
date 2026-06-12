@@ -27,42 +27,36 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pandas requests ccxt scikit-learn numpy joblib yfinance schedule
 
-      # ۱. دریافت داده‌های گذشته بازار
       - name: Fetch Market Historical Data
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python fetcher.py
 
-      # ۲. اجرای بکتست اولیه برای ایجاد دیتای خام معاملاتی جهت آموزش AI
       - name: Run Raw Backtest for Training Data
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          python -m src.backtester --raw
+          python src/backtester.py --raw
 
-      # ۳. بهینه‌سازی پارامترهای معاملاتی
       - name: Run Optimizer
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          python -m src.optimizer
+          python src/optimizer.py
 
-      # ۴. آموزش یا بازآموزی مغز هوش مصنوعی
       - name: Train AI Model
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          python -m src.train_model
+          python src/train_model.py
 
-      # ۵. شلیک نهایی: اجرای مجدد بکتستر با فیلتر هوش مصنوعی فعال برای ثبت وین‌ریت ۶۶.۶٪ در فایل Summary
       - name: Run AI-Filtered Backtest for Summary Output
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          python -m src.backtester --ai
+          python src/backtester.py --ai
 
-      # ۶. کامیت و پوش هوشمند تمام خروجی‌ها و گزارشات متنی به مخزن گیت‌هاب
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
@@ -70,7 +64,6 @@ jobs:
           
           if [ -f "backtest_summary.txt" ]; then 
             git add -f backtest_summary.txt
-            echo "✅ backtest_summary.txt added forcefully."
           fi
 
           if [ -f "data/trading_bot_backtest.db" ]; then 
