@@ -39,28 +39,28 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          python src/backtester.py --raw
+          python -m src.backtester --raw
 
       # ۳. بهینه‌سازی پارامترهای معاملاتی
       - name: Run Optimizer
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          python src/optimizer.py
+          python -m src.optimizer
 
       # ۴. آموزش یا بازآموزی مغز هوش مصنوعی
       - name: Train AI Model
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          python src/train_model.py
+          python -m src.train_model
 
       # ۵. شلیک نهایی: اجرای مجدد بکتستر با فیلتر هوش مصنوعی فعال برای ثبت وین‌ریت ۶۶.۶٪ در فایل Summary
       - name: Run AI-Filtered Backtest for Summary Output
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          python src/backtester.py --ai
+          python -m src.backtester --ai
 
       # ۶. کامیت و پوش هوشمند تمام خروجی‌ها و گزارشات متنی به مخزن گیت‌هاب
       - name: Commit and Push Results
