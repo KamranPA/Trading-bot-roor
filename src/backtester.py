@@ -3,7 +3,8 @@
 # ---------------------------------------------------------
 import sys
 import os
-# تزریق مسیر روت پروژه برای لود بدون خطای ماژول‌ها در سرور گیت‌هاب
+
+# اضافه کردن مسیر اصلی پروژه به پایتون
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import sqlite3
@@ -110,7 +111,7 @@ def run_backtest_for_symbol(symbol, db_path, use_ai=False):
                         timestamp, symbol, direction, entry_price, stop_loss, status, closed_at, pnl_percent,
                         feat_adx, feat_atr_percent, feat_rsi, feat_trend_line, 
                         feat_ema_deviation, feat_rsi_momentum, feat_body_ratio
-                    ) VALUES (?, ?, ?, ?, ?, 'CLOSED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, 'CLOSED', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     entry_time, symbol, direction, entry_price, stop_loss, current_time, pnl,
                     entry_features['feat_adx'], entry_features['feat_atr_percent'],
@@ -182,12 +183,10 @@ def run_backtest_for_symbol(symbol, db_path, use_ai=False):
 def run_all_backtests():
     db_path = config.DB_PATH_BACKTEST
     
-    # تشخیص اینکه پپلاین در گام دوم (بدون AI) است یا در گام پنجم (با AI)
     use_ai_mode = False
     if len(sys.argv) > 1 and sys.argv[1] == "--ai":
         use_ai_mode = True
     else:
-        # اگر دور اول (خام) بود، فایل ریپورت قبلی حذف شود تا گزارش تمیز تولید گردد
         init_backtest_db(db_path)
         summary_file = os.path.join(config.BASE_DIR, "backtest_summary.txt")
         if os.path.exists(summary_file):
