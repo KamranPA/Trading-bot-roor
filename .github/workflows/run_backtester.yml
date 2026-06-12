@@ -9,9 +9,10 @@ permissions:
 jobs:
   backtest:
     runs-on: ubuntu-latest
-    # این دستور باعث می‌شود هر اسکریپتی که اجرا می‌شود، پوشه روت را در مسیر پایتون داشته باشد
+    # تعریف گلوبال برای اطمینان از اینکه پایتون همیشه مسیر روت را ببیند
     env:
       PYTHONPATH: ${{ github.workspace }}
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,14 +28,24 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pandas requests ccxt scikit-learn numpy joblib yfinance schedule
 
       - name: Run Pipeline
         run: |
+          echo "Starting Data Fetching..."
           python fetcher.py
+          
+          echo "Starting Raw Backtest..."
           python src/backtester.py --raw
+          
+          echo "Starting Optimizer..."
           python src/optimizer.py
+          
+          echo "Starting AI Training..."
           python src/train_model.py
+          
+          echo "Starting AI-Filtered Backtest..."
           python src/backtester.py --ai
 
       - name: Commit and Push Results
@@ -42,11 +53,17 @@ jobs:
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # افزودن فایل‌های خروجی
-          git add -f backtest_summary.txt data/trading_bot_backtest.db src/models/*.pkl best_params.json || true
+          # بررسی فایل‌ها قبل از اضافه کردن
+          git add -f backtest_summary.txt || echo "Summary file not found"
+          git add -f data/trading_bot_backtest.db || echo "DB file not found"
+          git add -f src/models/*.pkl || echo "Models not found"
+          git add -f best_params.json || echo "Params not found"
           
+          # ری‌بیس کردن قبل از پوش برای جلوگیری از تداخل (Conflict)
           if ! git diff --cached --quiet; then
-            git commit -m "Auto-update: AI Backtest Results"
-            git pull origin main --rebase
+            git commit -m "Auto-update: AI Backtest Filtered Summary and Models"
+            git pull origin main --rebase --autostash
             git push origin main
+          else
+            echo "No changes to commit."
           fi
