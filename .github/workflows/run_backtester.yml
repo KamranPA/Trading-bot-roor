@@ -67,6 +67,11 @@ jobs:
             git add -f data/trading_bot_backtest.db
           fi
           
+          # 🔥 اضافه شده: افزودن جدول خلاصه بکتست به گیت
+          if [ -f "backtest_table_summary.csv" ]; then 
+            git add backtest_table_summary.csv
+          fi
+          
           # افزودن مدل‌های هوش مصنوعی (در صورت وجود)
           if ls src/models/*.pkl >/dev/null 2>&1; then
             git add -f src/models/*.pkl
@@ -84,7 +89,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes detected, skipping commit."
           else
-            git commit -m "Auto-update: Forced Multi-Models (v8.2), Deep Backtest DB, and optimized parameters"
+            git commit -m "Auto-update: Forced Multi-Models, Deep Backtest DB & Table Summary"
             
             # 🔥 کلید حل باگ تصویر دوم: گرفتن تغییرات جدید لایو از سرور قبل از Push
             echo "🔄 Pulling latest changes from remote to avoid conflict..."
