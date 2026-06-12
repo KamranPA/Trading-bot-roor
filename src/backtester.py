@@ -144,22 +144,21 @@ def run_backtest_for_symbol(symbol, db_path):
             'feat_high_volume_session': float(current_candle.get('feat_high_volume_session', 0))
         }
 
-        # تغییر مهم: استفاده از High و Low برای شبیه‌سازی ورود در لحظه شکست سطح
-        if high_price > last_swing_high and is_bullish_momentum:
+        if close_price > last_swing_high and is_bullish_momentum:
             is_in_position = True
             direction = "LONG"
-            entry_price = last_swing_high # ورود دقیق در لحظه عبور از قله
-            stop_loss = entry_price - sl_dist
-            tp2 = entry_price + (sl_dist * 2)
+            entry_price = close_price
+            stop_loss = close_price - sl_dist
+            tp2 = close_price + (sl_dist * 2)
             entry_time = current_time
             entry_features = features_snapshot
             
-        elif low_price < last_swing_low and is_bearish_momentum:
+        elif close_price < last_swing_low and is_bearish_momentum:
             is_in_position = True
             direction = "SHORT"
-            entry_price = last_swing_low # ورود دقیق در لحظه عبور از دره
-            stop_loss = entry_price + sl_dist
-            tp2 = entry_price - (sl_dist * 2)
+            entry_price = close_price
+            stop_loss = close_price + sl_dist
+            tp2 = close_price - (sl_dist * 2)
             entry_time = current_time
             entry_features = features_snapshot
 
