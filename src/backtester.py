@@ -4,29 +4,16 @@
 import sys
 import os
 
-# تنظیم پویای مسیرها برای سازگاری کامل با اجرای گیت‌هاب اکشنز
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
+# اضافه کردن مسیر روت پروژه (یک پوشه عقب‌تر از src) به عنوان اولویت اول پایتون
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import sqlite3
 import pandas as pd
 import config
-import indicators
-import strategy_utils
-
-# مدیریت هوشمند ایمپورت مغز هوش مصنوعی برای جلوگیری از خطای ModuleNotFound
-try:
-    from src.brain import TradingBrain
-except ModuleNotFoundError:
-    from brain import TradingBrain
+from src import indicators, strategy_utils
+from src.brain import TradingBrain
 
 def init_backtest_db(db_path):
-    """پاکسازی و بازسازی جدول سیگنال‌ها در دیتابیس بکتست"""
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
@@ -54,7 +41,6 @@ def init_backtest_db(db_path):
         conn.commit()
 
 def run_backtest_for_symbol(symbol, db_path, use_ai=False):
-    """اجرای محاسبات گذشته بازار با منطق ورود لحظه‌ای در لبه سطوح سویینگ"""
     safe_name = symbol.replace('/', '_')
     file_path = os.path.join(config.BASE_DIR, "data", "4h", f"{safe_name}_history.csv")
     
@@ -79,7 +65,6 @@ def run_backtest_for_symbol(symbol, db_path, use_ai=False):
     entry_time = ""
     entry_features = {}
 
-    # فعال‌سازی موتور هوش مصنوعی در صورت نیاز
     brain = TradingBrain() if use_ai else None
 
     conn = sqlite3.connect(db_path)
@@ -158,7 +143,6 @@ def run_backtest_for_symbol(symbol, db_path, use_ai=False):
             'feat_body_ratio': float(current_candle.get('feat_body_ratio', 0))
         }
 
-        # اعمال لایه فیلتر هوش مصنوعی روی سیگنال‌های گذشته بازار
         if use_ai and brain is not None:
             if not brain.predict(symbol, features_snapshot):
                 continue
@@ -184,7 +168,6 @@ def run_backtest_for_symbol(symbol, db_path, use_ai=False):
     conn.close()
     win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
     
-    # آپدیت فیزیکی فایل backtest_summary.txt در پوشه اصلی پروژه
     summary_file = os.path.join(config.BASE_DIR, "backtest_summary.txt")
     mode_text = "AI-Filtered Mode" if use_ai else "Raw Strategy Mode"
     with open(summary_file, "a", encoding="utf-8") as f:
@@ -204,12 +187,12 @@ def run_all_backtests():
         if os.path.exists(summary_file):
             os.remove(summary_file)
 
-    print(f"📊 شروع بکتست پایتون در حالت: {'با فیلتر هوش مصنوعی اختصاصی' if use_ai_mode else 'سیگنال‌های خام اولیه'}")
+    print(f"📊 شروع بکتست در حالت: {'با فیلتر هوش مصنوعی' if use_ai_mode else 'سیگنال‌های خام'}")
     
     for symbol in config.WATCHLIST:
         res = run_backtest_for_symbol(symbol, db_path, use_ai=use_ai_mode)
         if res and use_ai_mode:
-            print(f"📈 نتایج نهایی نهایی {res['symbol']} -> وین‌ریت: {res['win_rate']}% | سود: {res['total_pnl_percent']}%")
+            print(f"📈 نتایج نهایی {res['symbol']} -> وین‌ریت: {res['win_rate']}% | سود: {res['total_pnl_percent']}%")
 
 if __name__ == "__main__":
     run_all_backtests()
