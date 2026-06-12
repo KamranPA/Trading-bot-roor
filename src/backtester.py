@@ -4,14 +4,26 @@
 import sys
 import os
 
-# اضافه کردن مسیر اصلی پروژه به پایتون
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# تنظیم پویای مسیرها برای سازگاری کامل با اجرای گیت‌هاب اکشنز
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
 import sqlite3
 import pandas as pd
 import config
-from src import indicators, strategy_utils
-from src.brain import TradingBrain
+import indicators
+import strategy_utils
+
+# مدیریت هوشمند ایمپورت مغز هوش مصنوعی برای جلوگیری از خطای ModuleNotFound
+try:
+    from src.brain import TradingBrain
+except ModuleNotFoundError:
+    from brain import TradingBrain
 
 def init_backtest_db(db_path):
     """پاکسازی و بازسازی جدول سیگنال‌ها در دیتابیس بکتست"""
