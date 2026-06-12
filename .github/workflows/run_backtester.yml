@@ -3,67 +3,89 @@ name: Run Backtester and Optimizer
 on:
   workflow_dispatch: 
 
+‎# اضافه کردن دسترسی write برای اینکه ربات بتواند فایل‌های جدید را در مخزن ذخیره کند
 permissions:
   contents: write
 
 jobs:
   backtest:
     runs-on: ubuntu-latest
-    # تعریف گلوبال برای اطمینان از اینکه پایتون همیشه مسیر روت را ببیند
-    env:
-      PYTHONPATH: ${{ github.workspace }}
-    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.10' # هماهنگی با ربات اصلی
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pandas requests ccxt scikit-learn numpy joblib yfinance schedule
+          pip install pandas requests ccxt scikit-learn numpy joblib
 
-      - name: Run Pipeline
+‎      # ۱. ابتدا دانلود داده‌های تاریخی بازار تا فایل‌های CSV برای ۱۱ ارز ساخته شوند
+      - name: Fetch Market Historical Data
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
-          echo "Starting Data Fetching..."
           python fetcher.py
-          
-          echo "Starting Raw Backtest..."
-          python src/backtester.py --raw
-          
-          echo "Starting Optimizer..."
-          python src/optimizer.py
-          
-          echo "Starting AI Training..."
-          python src/train_model.py
-          
-          echo "Starting AI-Filtered Backtest..."
-          python src/backtester.py --ai
 
+‎      # ۲. اجرای بک‌تستر (داده‌های شبیه‌سازی در دیتابیس اختصاصی ذخیره می‌شوند)
+      - name: Run Backtest
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python src/backtester.py
+
+‎      # ۳. اجرای بهینه‌ساز پارامترها (به صورت تفکیک‌شده برای تک‌تک ارزها)
+      - name: Run Optimizer
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python src/optimizer.py
+
+‎      # ۴. اجرای آموزش هوش مصنوعی (یادگیری تفکیک‌شده و ساخت ۱۱ مدل اختصاصی pkl)
+      - name: Train AI Model
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python src/train_model.py
+
+‎      # ۵. کامیت و پوش کردن تغییرات به مخزن (کاملاً ایمن و مشروط)
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # بررسی فایل‌ها قبل از اضافه کردن
-          git add -f backtest_summary.txt || echo "Summary file not found"
-          git add -f data/trading_bot_backtest.db || echo "DB file not found"
-          git add -f src/models/*.pkl || echo "Models not found"
-          git add -f best_params.json || echo "Params not found"
+‎          # اجبار گیت به افزودن دیتابیس بکتست با وجود قانون گیت‌ایگنور
+          if [ -f "data/trading_bot_backtest.db" ]; then 
+            git add -f data/trading_bot_backtest.db
+          fi
           
-          # ری‌بیس کردن قبل از پوش برای جلوگیری از تداخل (Conflict)
-          if ! git diff --cached --quiet; then
-            git commit -m "Auto-update: AI Backtest Filtered Summary and Models"
-            git pull origin main --rebase --autostash
-            git push origin main
+          if [ -f "data/trading_bot.db" ]; then 
+            git add -f data/trading_bot.db
+          fi
+          
+‎          # 🔥 رفع باگ تصویر پنجم: بررسی وجود فایل‌های pkl قبل از اجرای دستور git add
+          if ls src/models/*.pkl >/dev/null 2>&1; then
+            git add -f src/models/*.pkl
+            echo "✅ AI Models detected and added to git stash."
           else
-            echo "No changes to commit."
+            echo "⚠️ No AI models (.pkl) generated yet due to insufficient trades. Skipping models add."
+          fi
+          
+‎          # افزودن فایل تنظیمات بهینه شده چند ارزی
+          if [ -f "best_params.json" ]; then 
+            git add best_params.json
+          fi
+          
+‎          # بررسی وضعیت تغییرات و اعمال کامیت نهایی
+          if git diff --cached --quiet; then
+            echo "No changes detected or files not generated yet, skipping commit."
+          else
+            git commit -m "Auto-update: Forced Multi-Models (v8.0), Backtest DB, and optimized parameters"
+            git push
           fi
