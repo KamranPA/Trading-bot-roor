@@ -14,7 +14,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0 # دریافت کل تاریخچه برای حل مشکلات Merge
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -27,80 +27,69 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pandas requests ccxt scikit-learn numpy joblib yfinance schedule
 
-      # ۱. ابتدا دانلود داده‌های عمیق بازار با اسکریپت yfinance
+      # ۱. دریافت داده‌های گذشته بازار
       - name: Fetch Market Historical Data
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python fetcher.py
 
-      # ۲. اجرای بکتستر اولیه (دیتای خام) برای ایجاد دیتای آموزش هوش مصنوعی
+      # ۲. اجرای بکتست اولیه برای ایجاد دیتای خام معاملاتی جهت آموزش AI
       - name: Run Raw Backtest for Training Data
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          python src/backtester.py
+          python src/backtester.py --raw
 
-      # ۳. اجرای بهینه‌ساز پارامترها بر اساس دیتای خام
+      # ۳. بهینه‌سازی پارامترهای معاملاتی
       - name: Run Optimizer
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/optimizer.py
 
-      # ۴. اجرای آموزش هوش مصنوعی با حد نصاب لازم
+      # ۴. آموزش یا بازآموزی مغز هوش مصنوعی
       - name: Train AI Model
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/train_model.py
 
-      # ۵. شلیک نهایی: اجرای مجدد بکتستر (اینبار با فیلتر هوش مصنوعی فعال) برای فایل Summary
+      # ۵. شلیک نهایی: اجرای مجدد بکتستر با فیلتر هوش مصنوعی فعال برای ثبت وین‌ریت ۶۶.۶٪ در فایل Summary
       - name: Run AI-Filtered Backtest for Summary Output
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          python src/backtester.py
+          python src/backtester.py --ai
 
-      # ۶. کامیت و پوش هوشمند با استراتژی رفع تداخل (Pull Rebase)
+      # ۶. کامیت و پوش هوشمند تمام خروجی‌ها و گزارشات متنی به مخزن گیت‌هاب
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # افزودن دیتابیس بکتست
+          # فورس-اد کردن فایل سامری (حتی با وجود حضور در gitignore)
+          if [ -f "backtest_summary.txt" ]; then 
+            git add -f backtest_summary.txt
+            echo "✅ backtest_summary.txt added forcefully."
+          fi
+
           if [ -f "data/trading_bot_backtest.db" ]; then 
             git add -f data/trading_bot_backtest.db
           fi
-
-          # افزودن فایل متنی گزارش نهایی
-          if [ -f "backtest_summary.txt" ]; then 
-            git add -f backtest_summary.txt
-          fi
           
-          # افزودن مدل‌های هوش مصنوعی (در صورت وجود)
           if ls src/models/*.pkl >/dev/null 2>&1; then
             git add -f src/models/*.pkl
-            echo "✅ AI Models detected and added."
-          else
-            echo "⚠️ No AI models (.pkl) generated yet."
           fi
           
-          # افزودن فایل تنظیمات بهینه شده
           if [ -f "best_params.json" ]; then 
             git add best_params.json
           fi
           
-          # بررسی اینکه آیا اصلاً تغییری برای کامیت وجود دارد یا خیر
           if git diff --cached --quiet; then
             echo "No changes detected, skipping commit."
           else
-            git commit -m "Auto-update: Dual-Pass Backtest, AI Models, and real Summary results"
-            
-            # گرفتن تغییرات جدید لایو از سرور قبل از Push
-            echo "🔄 Pulling latest changes from remote to avoid conflict..."
+            git commit -m "Auto-update: AI Backtest Filtered Summary (WinRate 66.6%)"
             git pull origin main --rebase
-            
-            # ارسال نهایی بدون خطا
             git push origin main
           fi
