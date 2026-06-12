@@ -1,20 +1,23 @@
 # ---------------------------------------------------------
 # FILE PATH: src/backtester.py (نسخه نهایی با فیلتر هوش مصنوعی اختصاصی)
 # ---------------------------------------------------------
+import sys
 import os
+# تزریق مسیر روت پروژه برای لود بدون خطای ماژول‌ها در سرور گیت‌هاب
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import sqlite3
 import pandas as pd
 import config
 from src import indicators, strategy_utils
-from src.brain import TradingBrain  # لود کردن مغز هوش مصنوعی برای بکتست
-
-BRAIN = TradingBrain()
+from src.brain import TradingBrain
 
 def init_backtest_db(db_path):
+    """پاکسازی و بازسازی جدول سیگنال‌ها در دیتابیس بکتست"""
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
-        cursor.execute("DROP TABLE IF EXISTS signals") # پاکسازی دیتای قبلی برای ثبت نتایج جدید
+        cursor.execute("DROP TABLE IF EXISTS signals")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -37,7 +40,8 @@ def init_backtest_db(db_path):
         """)
         conn.commit()
 
-def run_backtest_for_symbol(symbol, db_path):
+def run_backtest_for_symbol(symbol, db_path, use_ai=False):
+    """اجرای محاسبات گذشته بازار با منطق ورود لحظه‌ای در لبه سطوح سویینگ"""
     safe_name = symbol.replace('/', '_')
     file_path = os.path.join(config.BASE_DIR, "data", "4h", f"{safe_name}_history.csv")
     
@@ -62,6 +66,9 @@ def run_backtest_for_symbol(symbol, db_path):
     entry_time = ""
     entry_features = {}
 
+    # فعال‌سازی موتور هوش مصنوعی در صورت نیاز
+    brain = TradingBrain() if use_ai else None
+
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
@@ -74,6 +81,7 @@ def run_backtest_for_symbol(symbol, db_path):
         if is_in_position:
             pnl = 0.0
             closed = False
+            
             if direction == "LONG":
                 if low_price <= stop_loss:
                     pnl = ((stop_loss - entry_price) / entry_price) * 100
@@ -82,6 +90,7 @@ def run_backtest_for_symbol(symbol, db_path):
                     pnl = ((tp2 - entry_price) / entry_price) * 100
                     winning_trades += 1
                     closed = True
+                    
             elif direction == "SHORT":
                 if high_price >= stop_loss:
                     pnl = ((entry_price - stop_loss) / entry_price) * 100
@@ -95,12 +104,13 @@ def run_backtest_for_symbol(symbol, db_path):
                 total_pnl += pnl
                 total_trades += 1
                 is_in_position = False
+                
                 cursor.execute("""
                     INSERT INTO signals (
                         timestamp, symbol, direction, entry_price, stop_loss, status, closed_at, pnl_percent,
                         feat_adx, feat_atr_percent, feat_rsi, feat_trend_line, 
                         feat_ema_deviation, feat_rsi_momentum, feat_body_ratio
-                    ) VALUES (?, ?, ?, ?, ?, 'CLOSED', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, 'CLOSED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     entry_time, symbol, direction, entry_price, stop_loss, current_time, pnl,
                     entry_features['feat_adx'], entry_features['feat_atr_percent'],
@@ -122,6 +132,8 @@ def run_backtest_for_symbol(symbol, db_path):
 
         atr_val = float(current_candle.get('atr', current_candle.get('feat_atr_percent', 1.0)))
         sl_dist = 1.5 * atr_val
+        is_bullish_momentum = float(current_candle.get('feat_rsi', 50)) > 50
+        is_bearish_momentum = float(current_candle.get('feat_rsi', 50)) < 50
 
         features_snapshot = {
             'feat_adx': float(current_candle.get('feat_adx', 0)),
@@ -133,13 +145,10 @@ def run_backtest_for_symbol(symbol, db_path):
             'feat_body_ratio': float(current_candle.get('feat_body_ratio', 0))
         }
 
-        # 🔥 تغییر طلایی: اعمال فیلتر هوش مصنوعی در بکتست
-        # اگر مدل pkl وجود داشته باشد، سیگنال‌های فیک را رد می‌کند
-        if not BRAIN.predict(symbol, features_snapshot):
-            continue
-
-        is_bullish_momentum = float(current_candle.get('feat_rsi', 50)) > 50
-        is_bearish_momentum = float(current_candle.get('feat_rsi', 50)) < 50
+        # اعمال لایه فیلتر هوش مصنوعی روی سیگنال‌های گذشته بازار
+        if use_ai and brain is not None:
+            if not brain.predict(symbol, features_snapshot):
+                continue
 
         if high_price > last_swing_high and is_bullish_momentum:
             is_in_position = True
@@ -149,6 +158,7 @@ def run_backtest_for_symbol(symbol, db_path):
             tp2 = entry_price + (sl_dist * 1.5)
             entry_time = current_time
             entry_features = features_snapshot
+            
         elif low_price < last_swing_low and is_bearish_momentum:
             is_in_position = True
             direction = "SHORT"
@@ -161,26 +171,34 @@ def run_backtest_for_symbol(symbol, db_path):
     conn.close()
     win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
     
-    # 📝 ایجاد خودکار یا آپدیت فایل summary با اعداد واقعی
-    summary_path = os.path.join(config.BASE_DIR, "backtest_summary.txt")
-    with open(summary_path, "a", encoding="utf-8") as f:
-        f.write(f"Symbol: {symbol} | Trades: {total_trades} | WinRate: {round(win_rate, 2)}% | PNL: {round(total_pnl, 2)}%\n")
+    # آپدیت فیزیکی فایل backtest_summary.txt در پوشه اصلی پروژه
+    summary_file = os.path.join(config.BASE_DIR, "backtest_summary.txt")
+    mode_text = "AI-Filtered Mode" if use_ai else "Raw Strategy Mode"
+    with open(summary_file, "a", encoding="utf-8") as f:
+        f.write(f"[{mode_text}] Symbol: {symbol} | Total Trades: {total_trades} | Win Rate: {round(win_rate, 2)}% | Total PNL: {round(total_pnl, 2)}%\n")
         
     return {"symbol": symbol, "total_trades": total_trades, "win_rate": round(win_rate, 2), "total_pnl_percent": round(total_pnl, 2)}
 
 def run_all_backtests():
     db_path = config.DB_PATH_BACKTEST
-    init_backtest_db(db_path)
     
-    summary_path = os.path.join(config.BASE_DIR, "backtest_summary.txt")
-    if os.path.exists(summary_path):
-        os.remove(summary_path) # پاک کردن ریپورت متنی قبلی
-        
-    print("📊 اجرای بکتست هوشمند مجهز به موتور فیلتر AI...")
+    # تشخیص اینکه پپلاین در گام دوم (بدون AI) است یا در گام پنجم (با AI)
+    use_ai_mode = False
+    if len(sys.argv) > 1 and sys.argv[1] == "--ai":
+        use_ai_mode = True
+    else:
+        # اگر دور اول (خام) بود، فایل ریپورت قبلی حذف شود تا گزارش تمیز تولید گردد
+        init_backtest_db(db_path)
+        summary_file = os.path.join(config.BASE_DIR, "backtest_summary.txt")
+        if os.path.exists(summary_file):
+            os.remove(summary_file)
+
+    print(f"📊 شروع بکتست پایتون در حالت: {'با فیلتر هوش مصنوعی اختصاصی' if use_ai_mode else 'سیگنال‌های خام اولیه'}")
+    
     for symbol in config.WATCHLIST:
-        res = run_backtest_for_symbol(symbol, db_path)
-        if res:
-            print(f"📈 {res['symbol']} | وین‌ریت: {res['win_rate']}%")
+        res = run_backtest_for_symbol(symbol, db_path, use_ai=use_ai_mode)
+        if res and use_ai_mode:
+            print(f"📈 نتایج نهایی نهایی {res['symbol']} -> وین‌ریت: {res['win_rate']}% | سود: {res['total_pnl_percent']}%")
 
 if __name__ == "__main__":
     run_all_backtests()
