@@ -14,7 +14,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
+          fetch-depth: 0 # دریافت کل تاریخچه برای حل مشکلات Merge
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -25,65 +25,44 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pandas requests ccxt scikit-learn numpy joblib yfinance
+          pip install pandas requests ccxt scikit-learn numpy joblib yfinance schedule
 
+      # ۱. ابتدا دانلود داده‌های عمیق بازار با اسکریپت yfinance
       - name: Fetch Market Historical Data
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python fetcher.py
 
-      - name: Run Backtest
+      # ۲. اجرای بکتستر اولیه (دیتای خام) برای ایجاد دیتای آموزش هوش مصنوعی
+      - name: Run Raw Backtest for Training Data
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/backtester.py
 
+      # ۳. اجرای بهینه‌ساز پارامترها بر اساس دیتای خام
       - name: Run Optimizer
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/optimizer.py
 
+      # ۴. اجرای آموزش هوش مصنوعی با حد نصاب لازم
       - name: Train AI Model
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/train_model.py
 
-      - name: Generate Summary Report
+      # ۵. شلیک نهایی: اجرای مجدد بکتستر (اینبار با فیلتر هوش مصنوعی فعال) برای فایل Summary
+      - name: Run AI-Filtered Backtest for Summary Output
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          python -c "
-          import sqlite3, config, os
-          
-          db_path = config.DB_PATH_BACKTEST
-          if not os.path.exists(db_path):
-              print('⚠️ دیتابیس بکتست یافت نشد!')
-              exit(0)
-              
-          conn = sqlite3.connect(db_path)
-          cursor = conn.cursor()
-          lines = ['📈 گزارش بکتست Breakout', '================================']
-          total = 0
-          
-          for symbol in config.WATCHLIST:
-              cursor.execute('SELECT COUNT(*), AVG(pnl_percent > 0) * 100 FROM signals WHERE symbol = ?', (symbol,))
-              row = cursor.fetchone()
-              if row and row[0] > 0:
-                  lines.append(f'{symbol} | نرخ برد: {row[1]:.1f} | تعداد معاملات: {row[0]}')
-                  total += row[0]
-                  
-          lines.append('================================')
-          lines.append(f'📊 مجموع معاملات: {total}')
-          conn.close()
-          
-          with open('backtest_summary.txt', 'w', encoding='utf-8') as f:
-              f.write('\n'.join(lines))
-          print('✅ فایل گزارش با موفقیت ساخته شد.')
-          "
+          python src/backtester.py
 
+      # ۶. کامیت و پوش هوشمند با استراتژی رفع تداخل (Pull Rebase)
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
@@ -93,10 +72,18 @@ jobs:
           if [ -f "data/trading_bot_backtest.db" ]; then 
             git add -f data/trading_bot_backtest.db
           fi
+
+          # افزودن فایل متنی گزارش نهایی
+          if [ -f "backtest_summary.txt" ]; then 
+            git add -f backtest_summary.txt
+          fi
           
           # افزودن مدل‌های هوش مصنوعی (در صورت وجود)
           if ls src/models/*.pkl >/dev/null 2>&1; then
             git add -f src/models/*.pkl
+            echo "✅ AI Models detected and added."
+          else
+            echo "⚠️ No AI models (.pkl) generated yet."
           fi
           
           # افزودن فایل تنظیمات بهینه شده
@@ -104,17 +91,16 @@ jobs:
             git add best_params.json
           fi
           
-          # افزودن فایل گزارش متنی جدید
-          if [ -f "backtest_summary.txt" ]; then 
-            git add backtest_summary.txt
-          fi
-          
-          # کامیت و پوش با مدیریت تداخل‌ها
+          # بررسی اینکه آیا اصلاً تغییری برای کامیت وجود دارد یا خیر
           if git diff --cached --quiet; then
             echo "No changes detected, skipping commit."
           else
-            git commit -m "Auto-update: Backtest DB, Models, and Summary Report"
+            git commit -m "Auto-update: Dual-Pass Backtest, AI Models, and real Summary results"
+            
+            # گرفتن تغییرات جدید لایو از سرور قبل از Push
             echo "🔄 Pulling latest changes from remote to avoid conflict..."
             git pull origin main --rebase
+            
+            # ارسال نهایی بدون خطا
             git push origin main
           fi
