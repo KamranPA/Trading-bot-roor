@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/strategy.py (v8.0 - Multi-Model & Dynamic Params)
+# FILE PATH: src/strategy.py (v8.2 - اصلاح شده برای ورود لحظه‌ای و بدون فیلتر حجم)
 # ---------------------------------------------------------
 import os
 import json
@@ -61,71 +61,78 @@ def generate_signal(df, pair, model=None):
     if last_swing_high is None or last_swing_low is None:
         return None
 
-    # ۵. آماده‌سازی ویژگی‌ها برای هوش مصنوعی
+    # ۵. آماده‌سازی ویژگی‌ها برای هوش مصنوعی (فیلترهای حجمی با توجه به تصمیم شما حذف شدند)
     features_dict = {
         'feat_adx': float(candle.get('feat_adx', 0)),
-        'feat_vol_ratio': float(candle.get('feat_vol_ratio', 0)),
         'feat_atr_percent': float(candle.get('feat_atr_percent', 0)),
         'feat_rsi': float(candle.get('feat_rsi', 0)),
         'feat_trend_line': float(candle.get('feat_trend_line', 0)),
         'feat_ema_deviation': float(candle.get('feat_ema_deviation', 0)),
         'feat_rsi_momentum': float(candle.get('feat_rsi_momentum', 0)),
-        'feat_body_ratio': float(candle.get('feat_body_ratio', 0)),
-        'feat_high_volume_session': float(candle.get('feat_high_volume_session', 0))
+        'feat_body_ratio': float(candle.get('feat_body_ratio', 0))
     }
 
     # ۶. اعمال فیلتر هوش مصنوعی اختصاصی (Multi-Model)
     if model is not None:
-        # در معماری جدید، مدل همان شیء BRAIN است که جفت‌ارز را دریافت می‌کند
         try:
             if not model.predict(pair, features_dict):
                 return None
         except Exception as e:
             print(f"خطا در مدل هوش مصنوعی {pair}: {e}")
-            # در صورت قطعی یا ارور مدل، فرض را بر تایید می‌گیریم تا ربات متوقف نشود
             pass
 
-    # ۷. مدیریت سرمایه و محاسبه تارگت‌ها بر اساس ضرایب بهینه‌شده
-    risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0)
-    atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
+    # ۷. مشخص کردن قیمت‌های لحظه‌ای کندل فعلی برای منطق ورود شکست سطوح
+    high_price = float(candle['High'])
+    low_price = float(candle['Low'])
     
-    # اعمال ضرایب هوشمند روی حد سود و ضرر
-    base_sl_dist = 1.5 * atr_val
-    sl_dist = base_sl_dist * sl_ratio
-    tp_dist = sl_dist * tp_ratio
-    
-    close_price = float(candle['Close'])
-    
-    if close_price <= 0: 
-        return None
-        
-    sl_percent = (sl_dist / close_price) * 100
-    position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL) if sl_percent > 0 else 0
-
-    # ۸. منطق شکست سطوح (Breakout Logic)
+    # ۸. منطق شکست سطوح در لحظه برخورد (Intra-candle Breakout Logic)
     is_bullish_momentum = float(candle.get('feat_rsi', 50)) > 50
     is_bearish_momentum = float(candle.get('feat_rsi', 50)) < 50
 
-    if close_price > last_swing_high and is_bullish_momentum:
+    if high_price > last_swing_high and is_bullish_momentum:
+        entry_price = last_swing_high  # قیمت ورود دقیقاً روی سطح شکست مقاومت
+        
+        # مدیریت سرمایه و محاسبه تارگت‌ها بر اساس ضرایب بهینه‌شده
+        risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0)
+        atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
+        sl_dist = 1.5 * atr_val * sl_ratio
+        tp_dist = sl_dist * tp_ratio
+        
+        stop_loss = entry_price - sl_dist
+        sl_percent = (sl_dist / entry_price) * 100
+        position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL) if sl_percent > 0 else 0
+
         return {
             'pair': pair, 
             'direction': 'LONG', 
-            'entry_price': round(close_price, 4),
-            'stop_loss': round(close_price - sl_dist, 4), 
-            'tp1': round(close_price + (tp_dist / 2), 4), # تارگت اول نصف مسیر
-            'tp2': round(close_price + tp_dist, 4),       # تارگت دوم مسیر کامل بهینه
+            'entry_price': round(entry_price, 4),
+            'stop_loss': round(stop_loss, 4), 
+            'tp1': round(entry_price + (tp_dist / 2), 4),
+            'tp2': round(entry_price + tp_dist, 4),
             'position_size': round(position_size, 2), 
             **features_dict
         }
     
-    elif close_price < last_swing_low and is_bearish_momentum:
+    elif low_price < last_swing_low and is_bearish_momentum:
+        entry_price = last_swing_low  # قیمت ورود دقیقاً روی سطح شکست حمایت
+        
+        # مدیریت سرمایه و محاسبه تارگت‌ها بر اساس ضرایب بهینه‌شده
+        risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0)
+        atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
+        sl_dist = 1.5 * atr_val * sl_ratio
+        tp_dist = sl_dist * tp_ratio
+        
+        stop_loss = entry_price + sl_dist
+        sl_percent = (sl_dist / entry_price) * 100
+        position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL) if sl_percent > 0 else 0
+
         return {
             'pair': pair, 
             'direction': 'SHORT', 
-            'entry_price': round(close_price, 4),
-            'stop_loss': round(close_price + sl_dist, 4), 
-            'tp1': round(close_price - (tp_dist / 2), 4),
-            'tp2': round(close_price - tp_dist, 4),
+            'entry_price': round(entry_price, 4),
+            'stop_loss': round(stop_loss, 4), 
+            'tp1': round(entry_price - (tp_dist / 2), 4),
+            'tp2': round(entry_price - tp_dist, 4),
             'position_size': round(position_size, 2), 
             **features_dict
         }
