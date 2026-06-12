@@ -3,7 +3,7 @@ name: Run Backtester and Optimizer
 on:
   workflow_dispatch: 
 
-‎# اضافه کردن دسترسی write برای اینکه ربات بتواند فایل‌های جدید را در مخزن ذخیره کند
+# اضافه کردن دسترسی write برای اینکه ربات بتواند فایل‌های جدید را در مخزن ذخیره کند
 permissions:
   contents: write
 
@@ -26,41 +26,41 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas requests ccxt scikit-learn numpy joblib
 
-‎      # ۱. ابتدا دانلود داده‌های تاریخی بازار تا فایل‌های CSV برای ۱۱ ارز ساخته شوند
+      # ۱. ابتدا دانلود داده‌های تاریخی بازار تا فایل‌های CSV برای ۱۱ ارز ساخته شوند
       - name: Fetch Market Historical Data
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python fetcher.py
 
-‎      # ۲. اجرای بک‌تستر (داده‌های شبیه‌سازی در دیتابیس اختصاصی ذخیره می‌شوند)
+      # ۲. اجرای بک‌تستر (داده‌های شبیه‌سازی در دیتابیس اختصاصی ذخیره می‌شوند)
       - name: Run Backtest
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/backtester.py
 
-‎      # ۳. اجرای بهینه‌ساز پارامترها (به صورت تفکیک‌شده برای تک‌تک ارزها)
+      # ۳. اجرای بهینه‌ساز پارامترها (به صورت تفکیک‌شده برای تک‌تک ارزها)
       - name: Run Optimizer
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/optimizer.py
 
-‎      # ۴. اجرای آموزش هوش مصنوعی (یادگیری تفکیک‌شده و ساخت ۱۱ مدل اختصاصی pkl)
+      # ۴. اجرای آموزش هوش مصنوعی (یادگیری تفکیک‌شده و ساخت ۱۱ مدل اختصاصی pkl)
       - name: Train AI Model
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/train_model.py
 
-‎      # ۵. کامیت و پوش کردن تغییرات به مخزن (کاملاً ایمن و مشروط)
+      # ۵. کامیت و پوش کردن تغییرات به مخزن (کاملاً ایمن و مشروط)
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-‎          # اجبار گیت به افزودن دیتابیس بکتست با وجود قانون گیت‌ایگنور
+          # اجبار گیت به افزودن دیتابیس بکتست با وجود قانون گیت‌ایگنور
           if [ -f "data/trading_bot_backtest.db" ]; then 
             git add -f data/trading_bot_backtest.db
           fi
@@ -69,7 +69,7 @@ jobs:
             git add -f data/trading_bot.db
           fi
           
-‎          # 🔥 رفع باگ تصویر پنجم: بررسی وجود فایل‌های pkl قبل از اجرای دستور git add
+          # 🔥 رفع باگ تصویر پنجم: بررسی وجود فایل‌های pkl قبل از اجرای دستور git add
           if ls src/models/*.pkl >/dev/null 2>&1; then
             git add -f src/models/*.pkl
             echo "✅ AI Models detected and added to git stash."
@@ -77,12 +77,12 @@ jobs:
             echo "⚠️ No AI models (.pkl) generated yet due to insufficient trades. Skipping models add."
           fi
           
-‎          # افزودن فایل تنظیمات بهینه شده چند ارزی
+          # افزودن فایل تنظیمات بهینه شده چند ارزی
           if [ -f "best_params.json" ]; then 
             git add best_params.json
           fi
           
-‎          # بررسی وضعیت تغییرات و اعمال کامیت نهایی
+          # بررسی وضعیت تغییرات و اعمال کامیت نهایی
           if git diff --cached --quiet; then
             echo "No changes detected or files not generated yet, skipping commit."
           else
