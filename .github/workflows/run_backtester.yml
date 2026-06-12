@@ -9,6 +9,9 @@ permissions:
 jobs:
   backtest:
     runs-on: ubuntu-latest
+    # این دستور باعث می‌شود هر اسکریپتی که اجرا می‌شود، پوشه روت را در مسیر پایتون داشته باشد
+    env:
+      PYTHONPATH: ${{ github.workspace }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -24,37 +27,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pandas requests ccxt scikit-learn numpy joblib yfinance schedule
 
-      - name: Fetch Market Historical Data
-        env:
-          PYTHONPATH: ${{ github.workspace }}
+      - name: Run Pipeline
         run: |
           python fetcher.py
-
-      - name: Run Raw Backtest for Training Data
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: |
           python src/backtester.py --raw
-
-      - name: Run Optimizer
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: |
           python src/optimizer.py
-
-      - name: Train AI Model
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: |
           python src/train_model.py
-
-      - name: Run AI-Filtered Backtest for Summary Output
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: |
           python src/backtester.py --ai
 
       - name: Commit and Push Results
@@ -62,26 +42,11 @@ jobs:
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          if [ -f "backtest_summary.txt" ]; then 
-            git add -f backtest_summary.txt
-          fi
-
-          if [ -f "data/trading_bot_backtest.db" ]; then 
-            git add -f data/trading_bot_backtest.db
-          fi
+          # افزودن فایل‌های خروجی
+          git add -f backtest_summary.txt data/trading_bot_backtest.db src/models/*.pkl best_params.json || true
           
-          if ls src/models/*.pkl >/dev/null 2>&1; then
-            git add -f src/models/*.pkl
-          fi
-          
-          if [ -f "best_params.json" ]; then 
-            git add best_params.json
-          fi
-          
-          if git diff --cached --quiet; then
-            echo "No changes detected, skipping commit."
-          else
-            git commit -m "Auto-update: AI Backtest Filtered Summary (WinRate 66.6%)"
+          if ! git diff --cached --quiet; then
+            git commit -m "Auto-update: AI Backtest Results"
             git pull origin main --rebase
             git push origin main
           fi
