@@ -7,3 +7,4 @@ numpy
 matplotlib
 schedule
 yfinance
+lightgbm==4.3.0
