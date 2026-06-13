@@ -45,21 +45,37 @@ def optimize_for_symbol(symbol, mode="backtest"):
         else:
             all_params = {}
 
+        # اضافه شدن risk_multiplier به عنوان پیش‌فرض
         if "DEFAULT" not in all_params:
-            all_params["DEFAULT"] = {"adx_threshold": config.ADX_THRESHOLD, "tp_ratio": 1.5, "sl_ratio": 1.0}
+            all_params["DEFAULT"] = {"adx_threshold": config.ADX_THRESHOLD, "tp_ratio": 1.5, "sl_ratio": 1.0, "risk_multiplier": 1.0}
 
         # اگر ارز هنوز کلیدی ندارد، از پیش‌فرض کپی کن
         if symbol not in all_params:
             all_params[symbol] = all_params["DEFAULT"].copy()
 
+        # اطمینان از وجود risk_multiplier در فایل‌های قدیمی
+        if "risk_multiplier" not in all_params[symbol]:
+            all_params[symbol]["risk_multiplier"] = 1.0
+
         # منطق خودارتقایی اختصاصی برای هر ارز
         if avg_pnl < 0:
+            # تغییر نکردن منطق ADX
             all_params[symbol]['adx_threshold'] = min(35.0, all_params[symbol]['adx_threshold'] + 1.0)
-            all_params[symbol]['tp_ratio'] = min(2.5, all_params[symbol]['tp_ratio'] + 0.1)
-            logging.info(f"📉 عملکرد {symbol} منفی بود: فیلترها سخت‌گیرانه‌تر شدند.")
+            
+            # منطق جدید: کاهش حجم معامله به جای افزایش تارگت سود
+            current_risk = all_params[symbol]['risk_multiplier']
+            all_params[symbol]['risk_multiplier'] = max(0.2, round(current_risk - 0.2, 2))
+            
+            logging.info(f"📉 عملکرد {symbol} منفی بود: ADX سخت‌گیرانه‌تر و حجم ورود کاهش یافت (ضریب: {all_params[symbol]['risk_multiplier']}).")
         else:
+            # تغییر نکردن منطق ADX
             all_params[symbol]['adx_threshold'] = max(15.0, all_params[symbol]['adx_threshold'] - 0.5)
-            logging.info(f"🚀 عملکرد {symbol} مثبت بود: پارامترها بهینه باقی ماندند.")
+            
+            # منطق جدید: بازگردانی تدریجی حجم معامله
+            current_risk = all_params[symbol]['risk_multiplier']
+            all_params[symbol]['risk_multiplier'] = min(1.0, round(current_risk + 0.1, 2))
+            
+            logging.info(f"🚀 عملکرد {symbol} مثبت بود: ADX بهینه شد و ضریب حجم معامله بازیابی شد.")
 
         with open(PARAMS_FILE, 'w') as f:
             json.dump(all_params, f, indent=4)
