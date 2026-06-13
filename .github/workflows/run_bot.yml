@@ -8,7 +8,7 @@ jobs:
   trade:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # برای اجازه Push کردن فایل
+      contents: write  # برای اجازه Push کردن فایل‌ها به مخزن
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,15 +22,18 @@ jobs:
           mkdir -p data
           python main.py
           
-      - name: Commit and Push Database
+      - name: Commit and Push Database & AI Parameters
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          # فقط اگر فایلی تغییر کرده، Push کن
-          if [ -n "$(git status --porcelain data/trading_bot.db)" ]; then
-            git add data/trading_bot.db
-            git commit -m "Update DB for Backtest: $(date)"
+          
+          # استیج کردن هر دو فایل دیتابیس و پارامترهای بهینه‌ساز هوش مصنوعی
+          git add data/trading_bot.db best_params.json
+          
+          # بررسی اینکه آیا تغییراتی برای کامیت وجود دارد یا خیر
+          if ! git diff --cached --quiet; then
+            git commit -m "Update DB and AI Parameters: $(date)"
             git push
           else
-            echo "No changes to DB."
+            echo "No changes detected in DB or best_params.json."
           fi
