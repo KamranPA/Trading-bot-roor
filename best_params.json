@@ -5,7 +5,7 @@
         "sl_ratio": 1.0
     },
     "BTC/USDT": {
-        "adx_threshold": 32.5,
+        "adx_threshold": 32.0,
         "tp_ratio": 2.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
@@ -17,7 +17,7 @@
         "risk_multiplier": 1.0
     },
     "SOL/USDT": {
-        "adx_threshold": 31.0,
+        "adx_threshold": 30.5,
         "tp_ratio": 2.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
@@ -26,7 +26,7 @@
         "adx_threshold": 35.0,
         "tp_ratio": 2.5,
         "sl_ratio": 1.0,
-        "risk_multiplier": 0.4
+        "risk_multiplier": 0.2
     },
     "ADA/USDT": {
         "adx_threshold": 20.0,
@@ -34,13 +34,13 @@
         "sl_ratio": 1.0
     },
     "DOT/USDT": {
-        "adx_threshold": 32.5,
+        "adx_threshold": 32.0,
         "tp_ratio": 2.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
     },
     "LINK/USDT": {
-        "adx_threshold": 29.5,
+        "adx_threshold": 29.0,
         "tp_ratio": 2.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
@@ -51,25 +51,25 @@
         "sl_ratio": 1.0
     },
     "AVAX/USDT": {
-        "adx_threshold": 32.5,
+        "adx_threshold": 32.0,
         "tp_ratio": 2.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
     },
     "XRP/USDT": {
-        "adx_threshold": 32.5,
+        "adx_threshold": 32.0,
         "tp_ratio": 2.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
     },
     "LTC/USDT": {
-        "adx_threshold": 32.5,
+        "adx_threshold": 32.0,
         "tp_ratio": 2.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
     },
     "BCH/USDT": {
-        "adx_threshold": 32.5,
+        "adx_threshold": 32.0,
         "tp_ratio": 2.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
