@@ -1,13 +1,12 @@
-Name: Monthly AI Retrain Pipeline
-
-permissions:
-  contents: write
+name: Monthly AI Retrain Pipeline
 
 on:
   schedule:
-    # اجرا در روز اول هر ماه در ساعت ۰۰:۰۰
     - cron: '0 0 1 * *'
   workflow_dispatch: 
+
+permissions:
+  contents: write
 
 jobs:
   retrain:
@@ -27,14 +26,12 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        # اصلاح شد: اضافه کردن lightgbm به لیست نصب
         pip install pandas scikit-learn numpy joblib lightgbm
 
     - name: Execute Machine Learning Training (Monthly Mode)
       env:
         PYTHONPATH: ${{ github.workspace }}
       run: |
-        # اجرای آموزش ترکیبی (بکتست + لایو)
         python src/train_model.py --monthly
 
     - name: Commit and Push Upgraded Models
@@ -42,16 +39,11 @@ jobs:
         git config --global user.name 'github-actions'
         git config --global user.email 'github-actions@github.com'
         
-        # شناسایی و افزودن مدل‌های جدید
-        # استفاده از f برای اجبار به اد کردن فایل‌هایی که ممکن است در gitignore باشند
         if ls src/models/*.pkl >/dev/null 2>&1; then
           git add -f src/models/*.pkl
           echo "✅ AI Models detected."
-        else
-          echo "⚠️ No models found to commit."
         fi
         
-        # کامیت تغییرات
         if git diff --cached --quiet; then
           echo "No changes detected."
         else
