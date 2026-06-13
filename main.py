@@ -1,13 +1,12 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (v8.1 - Multi-Model Architecture with Heartbeat)
+# FILE PATH: main.py (v8.2 - Optimized for GitHub Actions & 11 Pairs)
 # ---------------------------------------------------------
 import os
 import sys
 import logging
 import sqlite3
 import threading
-import time
-import schedule  # نیاز به نصب: pip install schedule
+import datetime
 from concurrent.futures import ThreadPoolExecutor
 
 # تنظیم دقیق مسیر ریشه پروژه
@@ -28,7 +27,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 BRAIN = TradingBrain()
 db_lock = threading.Lock()
 
-# --- بخش قابلیت مانیتورینگ سلامت ربات (Heartbeat) ---
 def heartbeat_job():
     """ارسال گزارش زنده بودن سیستم به تلگرام"""
     try:
@@ -41,23 +39,15 @@ def heartbeat_job():
     except Exception as e:
         logging.error(f"خطا در ارسال گزارش Heartbeat: {e}")
 
-def run_scheduler():
-    """اجرای زمان‌بندی در پس‌زمینه بدون توقف ربات"""
-    schedule.every().day.at("22:00").do(heartbeat_job)
-    while True:
-        schedule.run_pending()
-        time.sleep(60)
-# ---------------------------------------------------------
-
 def process_pair(pair):
     try:
         df = coinex_client.get_coinex_candles(pair)
-        if df is None or df.empty: return
+        if df is None or df.empty: 
+            return
 
         df = indicators.calculate_indicators(df)
         
-        # توجه: فیلتر ۸ ساعته به داخل تابع generate_signal منتقل شده است
-        
+        # نکته: فیلتر ۸ ساعته از اینجا حذف شد تا مستقیماً در strategy.py و با آگاهی از جهتِ ورود چک شود
         signal = strategy.generate_signal(df, pair, model=BRAIN)
         
         with db_lock:
@@ -76,29 +66,40 @@ def run_auto_optimization():
         if os.path.exists(db_path):
             with sqlite3.connect(db_path) as conn:
                 count = conn.execute("SELECT count(*) FROM signals").fetchone()[0]
+            
+            # اجرای Optimizer اگر تعداد سیگنال‌ها ضریبی از 50 باشد
             if count > 0 and count % 50 == 0:
+                logging.info("⚙️ سیستم به حد نصاب رسید: اجرای پروسه ارتقای خودکار...")
                 optimizer.optimize_all(mode="live")
     except Exception as e:
         logging.error(f"خطا در پروسه خودارتقایی: {e}")
 
 def run_bot():
-    logging.info("🤖 اسکنر هوشمند v8.1 فعال شد.")
+    logging.info("🤖 اسکنر هوشمند v8.2 (پشتیبانی موازی ۱۱ ارز) فعال شد.")
     database.init_db()
+    
     try:
         database.manage_open_positions()
     except Exception as e:
         logging.error(f"خطا در مدیریت پوزیشن‌ها: {e}")
     
+    # ۱. اجرای بهینه‌ساز پیش از شروع اسکن
     run_auto_optimization()
     
+    # ۲. پردازش تمام ارزها به صورت موازی 
     watchlist = getattr(config, 'WATCHLIST', [])
+    # تعداد workers به 12 افزایش یافت تا هر 11 ارز بدون معطلی و در یک لحظه پردازش شوند
     with ThreadPoolExecutor(max_workers=12) as executor:
         executor.map(process_pair, watchlist)
 
 if __name__ == "__main__":
-    # اجرای سیستم مانیتورینگ در یک نخ جداگانه (بدون ایجاد بلاک در ربات اصلی)
-    scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
-    scheduler_thread.start()
+    # در محیط GitHub Actions نیازی به schedule و حلقه بی‌نهایت نیست
+    # خود گیت‌هاب بر اساس فایل run_bot.yml این اسکریپت را زمان‌بندی می‌کند
     
+    # ارسال Heartbeat فقط اگر ساعت 22:00 تا 22:59 (به وقت سرور ابری) باشد تا از اسپم جلوگیری شود
+    current_hour = datetime.datetime.utcnow().hour
+    if current_hour == 22:
+        heartbeat_job()
+        
     # اجرای اصلی ربات
     run_bot()
