@@ -34,6 +34,7 @@ def generate_signal(df, pair, model=None):
     adx_thresh = config.ADX_THRESHOLD
     tp_ratio = 1.5  # ضریب پیش‌فرض سود
     sl_ratio = 1.0  # ضریب پیش‌فرض ضرر
+    risk_multiplier = 1.0 # ضریب پیش‌فرض حجم معامله
     
     try:
         params_file = os.path.join(config.BASE_DIR, "best_params.json")
@@ -47,6 +48,7 @@ def generate_signal(df, pair, model=None):
                 adx_thresh = pair_params.get('adx_threshold', adx_thresh)
                 tp_ratio = pair_params.get('tp_ratio', tp_ratio)
                 sl_ratio = pair_params.get('sl_ratio', sl_ratio)
+                risk_multiplier = pair_params.get('risk_multiplier', risk_multiplier)
     except Exception as e:
         pass # در صورت بروز خطا، با همان مقادیر پیش‌فرض ادامه می‌دهد
 
@@ -92,8 +94,8 @@ def generate_signal(df, pair, model=None):
     if high_price > last_swing_high and is_bullish_momentum:
         entry_price = last_swing_high  # قیمت ورود دقیقاً روی سطح شکست مقاومت
         
-        # مدیریت سرمایه و محاسبه تارگت‌ها بر اساس ضرایب بهینه‌شده
-        risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0)
+        # مدیریت سرمایه داینامیک با اعمال risk_multiplier
+        risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0) * risk_multiplier
         atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
         sl_dist = 1.5 * atr_val * sl_ratio
         tp_dist = sl_dist * tp_ratio
@@ -116,8 +118,8 @@ def generate_signal(df, pair, model=None):
     elif low_price < last_swing_low and is_bearish_momentum:
         entry_price = last_swing_low  # قیمت ورود دقیقاً روی سطح شکست حمایت
         
-        # مدیریت سرمایه و محاسبه تارگت‌ها بر اساس ضرایب بهینه‌شده
-        risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0)
+        # مدیریت سرمایه داینامیک با اعمال risk_multiplier
+        risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0) * risk_multiplier
         atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
         sl_dist = 1.5 * atr_val * sl_ratio
         tp_dist = sl_dist * tp_ratio
