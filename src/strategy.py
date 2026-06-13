@@ -1,18 +1,51 @@
 # ---------------------------------------------------------
-# FILE PATH: src/strategy.py (v8.2 - اصلاح شده برای ورود لحظه‌ای و بدون فیلتر حجم)
+# FILE PATH: src/strategy.py
 # ---------------------------------------------------------
 import os
 import json
+import sqlite3
+import datetime
 import config
 from src import database, strategy_utils
 import pandas as pd
 
-def is_blocked_by_8h_filter(pair):
+def is_blocked_by_8h_filter(pair, current_direction):
     """
-    بررسی اینکه آیا ارز مورد نظر توسط فیلتر ۸ ساعته مسدود شده است یا خیر.
-    فعلاً به صورت پیش‌فرض False برمی‌گرداند تا ربات متوقف نشود.
+    بررسی دیتابیس لایو: اگر در ۸ ساعت گذشته سیگنالی برای این ارز و دقیقاً در همین جهت صادر شده باشد، 
+    معامله جدید بلاک می‌شود.
     """
-    return False 
+    try:
+        if not os.path.exists(database.DB_PATH):
+            return False
+
+        with sqlite3.connect(database.DB_PATH) as conn:
+            cursor = conn.cursor()
+            # استخراج آخرین سیگنال همین ارز از دیتابیس
+            cursor.execute(
+                "SELECT direction, timestamp FROM signals WHERE symbol = ? ORDER BY id DESC LIMIT 1",
+                (pair,)
+            )
+            last_signal = cursor.fetchone()
+
+            if last_signal:
+                last_direction, last_time_str = last_signal
+                
+                # بررسی شرط هم‌جهت بودن (مثلا لانگ بعد از لانگ)
+                if last_direction == current_direction:
+                    # تبدیل رشته زمانی دیتابیس (فرمت YYYY-MM-DD HH:MM:SS) به آبجکت زمان
+                    clean_time_str = last_time_str.split('.')[0]
+                    last_time = datetime.datetime.strptime(clean_time_str, '%Y-%m-%d %H:%M:%S')
+                    now = datetime.datetime.utcnow() # SQLite از زمان UTC استفاده می‌کند
+                    
+                    # محاسبه اختلاف زمان به ساعت
+                    diff_hours = (now - last_time).total_seconds() / 3600
+                    
+                    if diff_hours < 8:
+                        return True # سیگنال مسدود است
+    except Exception as e:
+        print(f"⚠️ خطا در بررسی فیلتر ۸ ساعته برای {pair}: {e}")
+        
+    return False
 
 def generate_signal(df, pair, model=None):
     # اطمینان از وجود دیتای کافی برای محاسبه اندیکاتورها (به ویژه EMA 200)
@@ -22,10 +55,6 @@ def generate_signal(df, pair, model=None):
     idx = len(df) - 1
     candle = df.iloc[idx]
     
-    # ۱. فیلتر ۸ ساعته (بررسی مسدود بودن ارز)
-    if is_blocked_by_8h_filter(pair):
-        return None
-
     # ۲. مدیریت ریسک: کنترل سقف تعداد پوزیشن‌های باز
     if database.get_open_positions_count() >= config.MAX_OPEN_POSITIONS:
         return None
@@ -63,7 +92,7 @@ def generate_signal(df, pair, model=None):
     if last_swing_high is None or last_swing_low is None:
         return None
 
-    # ۵. آماده‌سازی ویژگی‌ها برای هوش مصنوعی (فیلترهای حجمی با توجه به تصمیم شما حذف شدند)
+    # ۵. آماده‌سازی ویژگی‌ها برای هوش مصنوعی
     features_dict = {
         'feat_adx': float(candle.get('feat_adx', 0)),
         'feat_atr_percent': float(candle.get('feat_atr_percent', 0)),
@@ -94,6 +123,10 @@ def generate_signal(df, pair, model=None):
     if high_price > last_swing_high and is_bullish_momentum:
         entry_price = last_swing_high  # قیمت ورود دقیقاً روی سطح شکست مقاومت
         
+        # ---> چک کردن فیلتر ۸ ساعته دقیقا در لحظه تایید ورود <---
+        if is_blocked_by_8h_filter(pair, "LONG"):
+            return None
+            
         # مدیریت سرمایه داینامیک با اعمال risk_multiplier
         risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0) * risk_multiplier
         atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
@@ -118,6 +151,10 @@ def generate_signal(df, pair, model=None):
     elif low_price < last_swing_low and is_bearish_momentum:
         entry_price = last_swing_low  # قیمت ورود دقیقاً روی سطح شکست حمایت
         
+        # ---> چک کردن فیلتر ۸ ساعته دقیقا در لحظه تایید ورود <---
+        if is_blocked_by_8h_filter(pair, "SHORT"):
+            return None
+            
         # مدیریت سرمایه داینامیک با اعمال risk_multiplier
         risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0) * risk_multiplier
         atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
