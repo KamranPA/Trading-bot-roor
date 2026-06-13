@@ -1,50 +1,56 @@
 # ---------------------------------------------------------
-# FILE PATH: src/brain.py (v8.0 - Multi-Model Brain)
+# FILE PATH: src/brain.py (Fixed for naming consistency)
 # ---------------------------------------------------------
 import os
 import joblib
+import logging
 import pandas as pd
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+import lightgbm 
+import config
 
 class TradingBrain:
     def __init__(self):
-        """🧠 مغز متفکر هوش مصنوعی با قابلیت مسیریابی پویا مابین مدل‌های اختصاصی ارزها"""
-        self.cached_models = {}
+        self.models_dir = os.path.join(config.BASE_DIR, "src", "models")
+        self.models = {}
+        self.load_all_models()
 
-    def _get_model_for_symbol(self, symbol):
-        """لود کردن یا واکشی از کش برای مدل اختصاصی هر ارز"""
-        safe_symbol_name = symbol.replace('/', '_')
-        model_path = os.path.join(BASE_DIR, "src", "models", f"{safe_symbol_name}_model.pkl")
-        
-        # اگر قبلاً لود شده، از کش استفاده کن
-        if symbol in self.cached_models:
-            return self.cached_models[symbol]
+    def load_all_models(self):
+        if not os.path.exists(self.models_dir):
+            return
             
-        if os.path.exists(model_path):
-            try:
-                model = joblib.load(model_path)
-                self.cached_models[symbol] = model
-                return model
-            except Exception as e:
-                print(f"⚠️ خطای بارگذاری مدل اختصاصی {symbol}: {e}")
-        return None
+        for file_name in os.listdir(self.models_dir):
+            # اصلاح: همخوانی با نام‌گذاری _model.pkl
+            if file_name.endswith("_model.pkl"):
+                # استخراج نام ارز: حذف _model.pkl از آخر و تبدیل _ به /
+                pair = file_name.replace("_model.pkl", "").replace("_", "/")
+                model_path = os.path.join(self.models_dir, file_name)
+                try:
+                    self.models[pair] = joblib.load(model_path)
+                    logging.info(f"✅ مدل {pair} با موفقیت لود شد.")
+                except Exception as e:
+                    logging.error(f"خطا در لود مدل {pair}: {e}")
 
-    def predict(self, symbol, features_dict):
-        """🔮 پیش‌بینی و فیلتر هوشمند سیگنال با مدل اختصاصی همان جفت‌ارز"""
-        model = self._get_model_for_symbol(symbol)
-        
-        if model is None:
-            # اگر هنوز مدلی برای این ارز تربیت نشده، سیگنال را مسدود نکن تا دیتا جمع شود
-            return True 
-
+    def predict_signal(self, pair, current_features):
+        if pair not in self.models:
+            return None 
+            
         try:
-            feature_names = model.feature_names_in_ 
-            input_data = pd.DataFrame([{f: features_dict.get(f, 0.0) for f in feature_names}])
+            model = self.models[pair]
             
-            prediction = model.predict(input_data)[0]
-            return bool(prediction == 1)
+            # در مدل‌های LightGBM ذخیره شده با joblib، فیچرها معمولاً در ویژگی feature_name_ هستند
+            # اما در برخی نسخه‌ها ممکن است نیاز به نام‌گذاری دستی داشته باشند
+            feature_names = model.feature_name_
             
+            X_test = current_features[feature_names]
+            
+            # دریافت احتمال (0 تا 1)
+            prediction_prob = model.predict_proba(X_test)[0][1]
+            
+            # لاگ زدن دقت مدل برای تحلیل‌های بعدی
+            logging.info(f"📊 پیش‌بینی هوشمند برای {pair}: دقت {prediction_prob:.2f}")
+            
+            return prediction_prob >= 0.60
+                
         except Exception as e:
-            print(f"❌ خطای پیش‌بینی هوش مصنوعی برای {symbol}: {e}")
-            return True
+            logging.error(f"خطا در پیش‌بینی {pair}: {e}")
+            return None
