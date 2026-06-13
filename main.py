@@ -92,7 +92,7 @@ def run_bot():
     run_auto_optimization()
     
     watchlist = getattr(config, 'WATCHLIST', [])
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=12) as executor:
         executor.map(process_pair, watchlist)
 
 if __name__ == "__main__":
