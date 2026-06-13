@@ -28,7 +28,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 BRAIN = TradingBrain()
 db_lock = threading.Lock()
 
-# --- بخش جدید: قابلیت مانیتورینگ سلامت ربات (Heartbeat) ---
+# --- بخش قابلیت مانیتورینگ سلامت ربات (Heartbeat) ---
 def heartbeat_job():
     """ارسال گزارش زنده بودن سیستم به تلگرام"""
     try:
@@ -56,11 +56,8 @@ def process_pair(pair):
 
         df = indicators.calculate_indicators(df)
         
-        if strategy.is_blocked_by_8h_filter(pair):
-            with db_lock:
-                database.log_scan_status(pair, "blocked for 8h filter")
-            return
-
+        # توجه: فیلتر ۸ ساعته به داخل تابع generate_signal منتقل شده است
+        
         signal = strategy.generate_signal(df, pair, model=BRAIN)
         
         with db_lock:
