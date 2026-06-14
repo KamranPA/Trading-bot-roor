@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/optimizer.py (v8.0 - Multi-Asset Optimizer)
+# FILE PATH: src/optimizer.py (v8.0 - Multi-Asset Optimizer - Fixed for 4h)
 # ---------------------------------------------------------
 import json
 import sqlite3
@@ -33,7 +33,8 @@ def optimize_for_symbol(symbol, mode="backtest"):
         rows = cursor.fetchall()
         conn.close()
 
-        if len(rows) < 15: # حد نصاب کمتر برای هر ارز (حداقل ۱۵ معامله برای بهینه‌سازی هر ارز کافیست)
+        # 🛠️ اصلاح: حد نصاب از ۱۵ به ۵ کاهش یافت تا برای دیتای ۴ ساعته کار کند
+        if len(rows) < 5: 
             return
 
         avg_pnl = sum([r[0] for r in rows]) / len(rows)
