@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/train_model.py (v8.2 - LightGBM + Full Data Logic)
+# FILE PATH: src/train_model.py (v8.3 - Fixed Time-Series Data Leakage)
 # ---------------------------------------------------------
 import sqlite3
 import pandas as pd
@@ -8,14 +8,12 @@ import os
 import sys
 import joblib
 import logging
-# اضافه کردن مدیریت خطا برای لایت‌جی‌بی‌ام
+
 try:
     from lightgbm import LGBMClassifier
 except ImportError:
     print("CRITICAL: LightGBM is not installed. Run 'pip install lightgbm'")
     sys.exit(1)
-
-from sklearn.model_selection import train_test_split
 
 # تنظیم مسیر پایه
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -61,6 +59,9 @@ def train_model_for_symbol(symbol, mode="backtest"):
     ]
     
     df = df.dropna(subset=features)
+    
+    # ⚠️ بسیار مهم: ابتدا داده‌ها را بر اساس زمان صعودی مرتب می‌کنیم تا توالی زمانی حفظ شود
+    df = df.sort_values(by='timestamp', ascending=True)
     df = df.drop_duplicates(subset=['timestamp'])
     
     if len(df) < 50:
@@ -70,32 +71,41 @@ def train_model_for_symbol(symbol, mode="backtest"):
     X = df[features]
     y = np.where(df['pnl_percent'] > 0, 1, 0)
 
-    # --- ۳. آموزش مدل LightGBM ---
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # --- ۳. تقسیم داده‌ها بدون Shuffle برای جلوگیری از نشت داده (Time-Series Split) ---
+    # ۸۰ درصد ابتدایی داده‌ها (گذشته) برای آموزش و ۲۰ درصد انتهایی (آینده) برای تست فیلتر می‌شوند
+    split_idx = int(len(df) * 0.8)
+    
+    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+    y_train, y_test = y[:split_idx], y[split_idx:]
 
+    # --- ۴. آموزش مدل LightGBM ---
     model = LGBMClassifier(
-        n_estimators=150,
-        learning_rate=0.05,
-        max_depth=6,
-        num_leaves=31,
-        min_child_samples=20,
-        subsample=0.8,
+        n_estimators=100,       # برای جلوگیری از Overfit روی داده‌های محدود کمی کاهش یافت
+        learning_rate=0.03,      # نرخ یادگیری ملایم‌تر برای یادگیری ساختار پایدار
+        max_depth=5,
+        num_leaves=15,          # کاهش پیچیدگی درخت‌ها جهت انطباق با رفتار نوسانی بازار
+        min_child_samples=15,
+        subsample=0.7,           # نمونه‌گیری ردیفی بدون دستکاری توالی برای تعمیم‌دهی بهتر
         colsample_bytree=0.8,
         random_state=42,
         n_jobs=1,
         verbose=-1
     )
     
-    model.fit(X_train, y_train)
+    model.fit(
+        X_train, 
+        y_train,
+        eval_set=[(X_test, y_test)]  # ارزیابی مستقیم روی داده‌های آینده واقعی
+    )
 
-    # --- ۴. ذخیره‌سازی ---
+    # --- ۵. ذخیره‌سازی ---
     safe_symbol_name = symbol.replace('/', '_')
     models_dir = os.path.join(BASE_DIR, "src", "models")
     os.makedirs(models_dir, exist_ok=True)
     model_path = os.path.join(models_dir, f"{safe_symbol_name}_model.pkl")
     
     joblib.dump(model, model_path)
-    print(f"🎯 مدل {symbol} با موفقیت ارتقا یافت.")
+    print(f"🎯 مدل {symbol} با موفقیت بدون نشت داده (Time-Series) ارتقا یافت.")
 
 def train_all(mode="backtest"):
     for symbol in config.WATCHLIST:
