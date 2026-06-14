@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/backtester.py (اصلاح شده برای تفکیک کامل دیتابیس و خروجی جدول)
+# FILE PATH: src/backtester.py (اصلاح شده برای هماهنگی ساختار دیتابیس با ربات لایو)
 # ---------------------------------------------------------
 import os
 import sqlite3
@@ -12,6 +12,7 @@ def init_backtest_db(db_path):
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
+        # تغییر مهم: اضافه شدن tp1 و tp2 برای هماهنگی با ساختار جدید دیتابیس لایو
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -20,6 +21,8 @@ def init_backtest_db(db_path):
                 direction TEXT, 
                 entry_price REAL, 
                 stop_loss REAL, 
+                tp1 REAL,
+                tp2 REAL,
                 status TEXT DEFAULT 'OPEN',
                 closed_at TEXT,
                 pnl_percent REAL,
@@ -61,6 +64,7 @@ def run_backtest_for_symbol(symbol, db_path):
     entry_price = 0.0
     direction = ""
     stop_loss = 0.0
+    tp1 = 0.0
     tp2 = 0.0
     entry_time = ""
     entry_features = {}
@@ -103,14 +107,15 @@ def run_backtest_for_symbol(symbol, db_path):
                 total_trades += 1
                 is_in_position = False
                 
+                # تغییر مهم: ذخیره tp1 و tp2 در دیتابیس
                 cursor.execute("""
                     INSERT INTO signals (
-                        timestamp, symbol, direction, entry_price, stop_loss, status, closed_at, pnl_percent,
+                        timestamp, symbol, direction, entry_price, stop_loss, tp1, tp2, status, closed_at, pnl_percent,
                         feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, 
                         feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session
-                    ) VALUES (?, ?, ?, ?, ?, 'CLOSED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'CLOSED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    entry_time, symbol, direction, entry_price, stop_loss, current_time, pnl,
+                    entry_time, symbol, direction, entry_price, stop_loss, tp1, tp2, current_time, pnl,
                     entry_features['feat_adx'], entry_features['feat_vol_ratio'], entry_features['feat_atr_percent'],
                     entry_features['feat_rsi'], entry_features['feat_trend_line'], entry_features['feat_ema_deviation'],
                     entry_features['feat_rsi_momentum'], entry_features['feat_body_ratio'], entry_features['feat_high_volume_session']
@@ -150,6 +155,7 @@ def run_backtest_for_symbol(symbol, db_path):
             direction = "LONG"
             entry_price = last_swing_high # ورود دقیق در لحظه عبور از قله
             stop_loss = entry_price - sl_dist
+            tp1 = entry_price + sl_dist # اضافه شد
             tp2 = entry_price + (sl_dist * 2)
             entry_time = current_time
             entry_features = features_snapshot
@@ -159,6 +165,7 @@ def run_backtest_for_symbol(symbol, db_path):
             direction = "SHORT"
             entry_price = last_swing_low # ورود دقیق در لحظه عبور از دره
             stop_loss = entry_price + sl_dist
+            tp1 = entry_price - sl_dist # اضافه شد
             tp2 = entry_price - (sl_dist * 2)
             entry_time = current_time
             entry_features = features_snapshot
