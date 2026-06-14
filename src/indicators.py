@@ -1,58 +1,52 @@
-# FILE: src/indicators.py
+# ---------------------------------------------------------
+# FILE NAME: indicators.py
+# FILE PATH: /src/indicators.py
+# ---------------------------------------------------------
 import pandas as pd
 import numpy as np
+import config
 
-def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    محاسبه کامل ۹ فیلتر کلیدی برای سیستم هوشمند.
-    تضمین حفظ تمامی ابعاد داده‌ای مورد نیاز برای مدل LightGBM.
-    """
-    df = df.copy()
+def calculate_indicators(df):
+    """📊 محاسبه سنسورهای هوشمند (بدون وابستگی به پارامترهای حجمی)"""
+    if df is None or df.empty or len(df) < 50:
+        return df
+
+    # ۱. محاسبات پایه قیمت
+    df['ema_200'] = df['Close'].ewm(span=200, adjust=False).mean()
     
-    # استانداردسازی نام ستون‌ها برای جلوگیری از KeyError
-    df.columns = [col.lower() for col in df.columns]
-    
-    # 1. Trend Line
-    df['feat_trend_line'] = np.where(df['close'] > df['close'].rolling(window=20).mean(), 1.0, 0.0)
-    
-    # 2. ADX
-    delta = df['close'].diff()
+    # ۲. محاسبات RSI
+    delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta > 0, 0)).rolling(window=14).mean()
     rs = gain / (loss + 1e-10)
-    df['feat_adx'] = 100 - (100 / (1 + rs))
-    
-    # 3. ATR Percent
-    high_low = df['high'] - df['low']
-    df['feat_atr_percent'] = (high_low.rolling(window=14).mean() / df['close']) * 100
-    
-    # 4. RSI
-    delta = df['close'].diff()
-    up = delta.clip(lower=0)
-    down = -1 * delta.clip(upper=0)
-    ema_up = up.ewm(com=13, adjust=False).mean()
-    ema_down = down.ewm(com=13, adjust=False).mean()
-    rs = ema_up / (ema_down + 1e-10)
     df['feat_rsi'] = 100 - (100 / (1 + rs))
     
-    # 5. EMA Deviation
-    ema_20 = df['close'].ewm(span=20, adjust=False).mean()
-    df['feat_ema_deviation'] = (df['close'] - ema_20) / ema_20 * 100
+    # ۳. محاسبات ATR
+    high_low = df['High'] - df['Low']
+    high_close = (df['High'] - df['Close'].shift()).abs()
+    low_close = (df['Low'] - df['Close'].shift()).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    df['atr'] = tr.rolling(window=14).mean()
+    df['feat_atr_percent'] = (df['atr'] / df['Close']) * 100
     
-    # 6. RSI Momentum
-    df['feat_rsi_momentum'] = df['feat_rsi'].diff()
-    
-    # 7. Body Ratio
-    df['feat_body_ratio'] = abs(df['close'] - df['open']) / (df['high'] - df['low'] + 0.0001)
-    
-    # 8. High Volume Session
-    df['feat_high_volume_session'] = np.where((df['high'] - df['low']) > (df['high'] - df['low']).rolling(20).mean(), 1.0, 0.0)
-    
-    # 9. Volatility Ratio
-    df['feat_vol_ratio'] = (df['high'] - df['low']) / ((df['high'] - df['low']).rolling(window=10).mean() + 1e-10)
+    # ۴. محاسبات ADX
+    up_move = df['High'].diff()
+    down_move = df['Low'].diff()
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+    tr_smooth = tr.rolling(window=14).sum()
+    plus_di = 100 * (pd.Series(plus_dm).rolling(window=14).sum() / (tr_smooth + 1e-10))
+    minus_di = 100 * (pd.Series(minus_dm).rolling(window=14).sum() / (tr_smooth + 1e-10))
+    dx = (abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)) * 100
+    df['feat_adx'] = dx.rolling(window=14).mean().fillna(25.0)
 
-    # پر کردن مقادیر خالی برای جلوگیری از شکست ماشین لرنینگ
-    df.fillna(method='bfill', inplace=True)
-    df.fillna(0, inplace=True)
-    
-    return df
+    # ۵. سنسورهای ۹‌گانه (بدون استفاده از config برای حجم)
+    df['feat_vol_ratio'] = 1.0 
+    df['feat_trend_line'] = np.where(df['Close'] > df['ema_200'], 1.0, 0.0)
+    df['feat_ema_deviation'] = ((df['Close'] - df['ema_200']) / df['ema_200']) * 100
+    df['feat_rsi_momentum'] = df['feat_rsi'].diff().fillna(0.0)
+    df['feat_body_ratio'] = (abs(df['Close'] - df['Open']) / (df['High'] - df['Low'] + 1e-10))
+    df['feat_high_volume_session'] = 0.0 
+    df['feat_vol_confirm'] = 1.0
+
+    return df.fillna(0.0)
