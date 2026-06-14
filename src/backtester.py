@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/backtester.py (اصلاح شده برای هماهنگی ساختار دیتابیس با ربات لایو)
+# FILE PATH: src/backtester.py (اصلاح شده و بدون خطای SQL)
 # ---------------------------------------------------------
 import os
 import sqlite3
@@ -12,7 +12,6 @@ def init_backtest_db(db_path):
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
-        # تغییر مهم: اضافه شدن tp1 و tp2 برای هماهنگی با ساختار جدید دیتابیس لایو
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -107,13 +106,13 @@ def run_backtest_for_symbol(symbol, db_path):
                 total_trades += 1
                 is_in_position = False
                 
-                # تغییر مهم: ذخیره tp1 و tp2 در دیتابیس
+                # اصلاح شد: دقیقاً ۱۹ فیلد درج می‌شود و ۱۹ علامت سوال قرار دارد (شناسه id خودکار پر می‌شود)
                 cursor.execute("""
                     INSERT INTO signals (
                         timestamp, symbol, direction, entry_price, stop_loss, tp1, tp2, status, closed_at, pnl_percent,
                         feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, 
                         feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'CLOSED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'CLOSED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     entry_time, symbol, direction, entry_price, stop_loss, tp1, tp2, current_time, pnl,
                     entry_features['feat_adx'], entry_features['feat_vol_ratio'], entry_features['feat_atr_percent'],
@@ -149,13 +148,12 @@ def run_backtest_for_symbol(symbol, db_path):
             'feat_high_volume_session': float(current_candle.get('feat_high_volume_session', 0))
         }
 
-        # تغییر مهم: استفاده از High و Low برای شبیه‌سازی ورود در لحظه شکست سطح
         if high_price > last_swing_high and is_bullish_momentum:
             is_in_position = True
             direction = "LONG"
-            entry_price = last_swing_high # ورود دقیق در لحظه عبور از قله
+            entry_price = last_swing_high
             stop_loss = entry_price - sl_dist
-            tp1 = entry_price + sl_dist # اضافه شد
+            tp1 = entry_price + sl_dist
             tp2 = entry_price + (sl_dist * 2)
             entry_time = current_time
             entry_features = features_snapshot
@@ -163,9 +161,9 @@ def run_backtest_for_symbol(symbol, db_path):
         elif low_price < last_swing_low and is_bearish_momentum:
             is_in_position = True
             direction = "SHORT"
-            entry_price = last_swing_low # ورود دقیق در لحظه عبور از دره
+            entry_price = last_swing_low
             stop_loss = entry_price + sl_dist
-            tp1 = entry_price - sl_dist # اضافه شد
+            tp1 = entry_price - sl_dist
             tp2 = entry_price - (sl_dist * 2)
             entry_time = current_time
             entry_features = features_snapshot
@@ -175,29 +173,21 @@ def run_backtest_for_symbol(symbol, db_path):
     return {"symbol": symbol, "total_trades": total_trades, "win_rate": round(win_rate, 2), "total_pnl_percent": round(total_pnl, 2)}
 
 def run_all_backtests():
-    # استفاده از مسیر مطلق تعریف‌شده در کانفیگ جدید
     db_path = config.DB_PATH_BACKTEST
     init_backtest_db(db_path)
     
     print("📊 شروع فرآیند بکتست و پر کردن دیتابیس اختصاصی بکتست...")
     
-    # لیستی برای ذخیره نتایج تمام ارزها جهت خروجی جدولی
     summary_results = []
-    
     for symbol in config.WATCHLIST:
         res = run_backtest_for_symbol(symbol, db_path)
         if res:
             print(f"📈 ارز {res['symbol']} | تعداد معامله: {res['total_trades']} | صدمه/سود کل: {res['total_pnl_percent']}% | وین‌ریت: {res['win_rate']}%")
             summary_results.append(res)
             
-    # ---- بخش جدید: ذخیره و آپدیت خودکار جدول نتایج در فایل ----
     if summary_results:
         summary_df = pd.DataFrame(summary_results)
-        
-        # تعیین مسیر ذخیره فایل جدول بکتست
         report_path = os.path.join(config.BASE_DIR, "backtest_table_summary.csv")
-        
-        # ذخیره جدول (با هربار اجرا کاملاً اوررایت و آپدیت می‌شود)
         summary_df.to_csv(report_path, index=False, encoding='utf-8')
         print(f"✅ جدول خلاصه نتایج بکتست با موفقیت در فایل '{report_path}' آپدیت شد.")
 
