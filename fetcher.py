@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: fetcher.py (Final Intelligence-Driven Solution)
+# FILE PATH: fetcher.py (Final Intelligence-Driven Solution - Fixed 4h Resampling)
 # ---------------------------------------------------------
 import yfinance as yf
 import pandas as pd
@@ -38,15 +38,37 @@ def fetch_data_intel(symbol, timeframe="4h"):
         # 💡 حل مشکل Date در مقابل Datetime
         time_col = 'Datetime' if 'Datetime' in df.columns else 'Date'
         
-        # تبدیل زمان به فرمت میلی‌ثانیه برای هماهنگی با بکتستر شما
-        df['Timestamp'] = pd.to_datetime(df[time_col]).astype('int64') // 10**6
+        # --- 🛠️ اصلاح ساختاری: تبدیل و تجمیع دیتای 1 ساعته به 4 ساعته استاندارد بازار ---
+        # تبدیل ستون زمان به فرمت datetime استاندارد
+        df[time_col] = pd.to_datetime(df[time_col])
         
-        # انتخاب و مرتب‌سازی دقیق ستون‌ها
-        final_df = df[['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume']]
+        # قرار دادن زمان به عنوان ایندکس برای امکان‌پذیر شدن ریسامپل
+        df.set_index(time_col, inplace=True)
+        
+        # منطق تبدیل اوپن، های، لو، کلوز و حجم به کندل‌های ۴ ساعته
+        ohlc_dict = {
+            'Open': 'first',
+            'High': 'max',
+            'Low': 'min',
+            'Close': 'last',
+            'Volume': 'sum'
+        }
+        
+        # ریسامپل کردن به کندل‌های ۴ ساعته و حذف ردیف‌های خالی
+        df_4h = df.resample('4H').agg(ohlc_dict).dropna().reset_index()
+        
+        # استخراج نام ستون زمان جدید پس از ریسامپل
+        time_col_4h = df_4h.columns[0] 
+        
+        # تبدیل زمان به فرمت میلی‌ثانیه برای هماهنگی کامل با بکتستر سیستم شما
+        df_4h['Timestamp'] = pd.to_datetime(df_4h[time_col_4h]).astype('int64') // 10**6
+        
+        # انتخاب و مرتب‌سازی دقیق ستون‌ها مطابق نیاز بکتستر
+        final_df = df_4h[['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume']]
         final_df = final_df.sort_values('Timestamp')
         
         final_df.to_csv(file_path, index=False)
-        print(f"✅ موفقیت: {len(final_df)} کندل برای {symbol} ذخیره شد.")
+        print(f"✅ موفقیت: {len(final_df)} کندل واقعی 4 ساعته برای {symbol} ذخیره شد.")
         
     except Exception as e:
         print(f"❌ خطای غیرمنتظره در پردازش {symbol}: {e}")
