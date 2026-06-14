@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/strategy_utils.py
+# FILE PATH: src/strategy_utils.py (Fixed ADX Formula)
 # ---------------------------------------------------------
 import pandas as pd
 import numpy as np
@@ -42,16 +42,25 @@ def calculate_indicators(df):
     # 1. Trend Line (ساده‌سازی شده برای تشخیص روند کلی)
     df['feat_trend_line'] = np.where(df['Close'] > df['Close'].rolling(window=20).mean(), 1.0, 0.0)
     
-    # 2. ADX (قدرت روند)
-    delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / (loss + 1e-10) # جلوگیری از خطای تقسیم بر صفر
-    df['feat_adx'] = 100 - (100 / (1 + rs))
+    # 2. ADX (قدرت روند) - 🛠️ اصلاح: فرمول اشتباه با فرمول واقعی جایگزین شد
+    high_low = df['High'] - df['Low']
+    high_close = (df['High'] - df['Close'].shift()).abs()
+    low_close = (df['Low'] - df['Close'].shift()).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    
+    up_move = df['High'].diff()
+    down_move = df['Low'].diff()
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+    
+    tr_smooth = tr.rolling(window=14).sum()
+    plus_di = 100 * (pd.Series(plus_dm).rolling(window=14).sum() / (tr_smooth + 1e-10))
+    minus_di = 100 * (pd.Series(minus_dm).rolling(window=14).sum() / (tr_smooth + 1e-10))
+    dx = (abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)) * 100
+    df['feat_adx'] = dx.rolling(window=14).mean().fillna(25.0)
     
     # 3. ATR Percent (نوسان‌پذیری)
-    high_low = df['High'] - df['Low']
-    df['feat_atr_percent'] = (high_low.rolling(window=14).mean() / df['Close']) * 100
+    df['feat_atr_percent'] = (tr.rolling(window=14).mean() / df['Close']) * 100
     
     # 4. RSI (شاخص قدرت نسبی)
     delta = df['Close'].diff()
