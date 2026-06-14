@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (v8.2 - Optimized for GitHub Actions & 11 Pairs)
+# FILE PATH: main.py (اصلاح شده: مدیریت امن پوزیشن‌ها)
 # ---------------------------------------------------------
 import os
 import sys
@@ -9,7 +9,6 @@ import threading
 import datetime
 from concurrent.futures import ThreadPoolExecutor
 
-# تنظیم دقیق مسیر ریشه پروژه
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
@@ -27,29 +26,55 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 BRAIN = TradingBrain()
 db_lock = threading.Lock()
 
+def check_exits():
+    """
+    تابع جدید برای بررسی قیمت و بستن پوزیشن‌ها در صورت رسیدن به حد سود یا ضرر
+    جایگزین منطق مخرب قبلی
+    """
+    try:
+        positions = database.get_open_positions() # تابعی که در database.py تعریف کردیم
+        for pos in positions:
+            # فرض بر اینکه ساختار دیتابیس (id=0, symbol=2, direction=3, entry=4, sl=5, tp1=6, tp2=7)
+            sig_id, _, symbol, direction, entry, sl, tp1, tp2, status, _, _, *_ = pos
+            
+            df = coinex_client.get_coinex_candles(symbol, limit=1)
+            if df is None or df.empty: continue
+            current_price = df.iloc[-1]['Close']
+            
+            # منطق خروج هوشمند
+            pnl = 0
+            should_close = False
+            if direction == "LONG":
+                if current_price <= sl: pnl = ((sl - entry) / entry) * 100; should_close = True
+                elif current_price >= tp2: pnl = ((tp2 - entry) / entry) * 100; should_close = True
+            elif direction == "SHORT":
+                if current_price >= sl: pnl = ((entry - sl) / entry) * 100; should_close = True
+                elif current_price <= tp2: pnl = ((entry - tp2) / entry) * 100; should_close = True
+            
+            if should_close:
+                database.update_position_status(sig_id, 'CLOSED', pnl)
+                logging.info(f"✅ پوزیشن {symbol} بسته شد. سود/ضرر: {pnl:.2f}%")
+    except Exception as e:
+        logging.error(f"خطا در بررسی پوزیشن‌های باز: {e}")
+
 def heartbeat_job():
-    """ارسال گزارش زنده بودن سیستم به تلگرام"""
+    # ... (بدون تغییر)
     try:
         watchlist_count = len(getattr(config, 'WATCHLIST', []))
         models_dir = os.path.join(BASE_DIR, "src", "models")
         model_count = len([f for f in os.listdir(models_dir) if f.endswith('.pkl')]) if os.path.exists(models_dir) else 0
-        
         telegram_bot.send_heartbeat_report(watchlist_count, model_count)
         logging.info("✅ گزارش Heartbeat با موفقیت ارسال شد.")
     except Exception as e:
         logging.error(f"خطا در ارسال گزارش Heartbeat: {e}")
 
 def process_pair(pair):
+    # ... (بدون تغییر)
     try:
         df = coinex_client.get_coinex_candles(pair)
-        if df is None or df.empty: 
-            return
-
+        if df is None or df.empty: return
         df = indicators.calculate_indicators(df)
-        
-        # نکته: فیلتر ۸ ساعته از اینجا حذف شد تا مستقیماً در strategy.py و با آگاهی از جهتِ ورود چک شود
         signal = strategy.generate_signal(df, pair, model=BRAIN)
-        
         with db_lock:
             if signal:
                 database.save_signal_advanced(pair=pair, **signal)
@@ -61,13 +86,12 @@ def process_pair(pair):
         logging.error(f"خطا در پردازش {pair}: {e}")
 
 def run_auto_optimization():
+    # ... (بدون تغییر)
     db_path = database.DB_PATH 
     try:
         if os.path.exists(db_path):
             with sqlite3.connect(db_path) as conn:
                 count = conn.execute("SELECT count(*) FROM signals").fetchone()[0]
-            
-            # اجرای Optimizer اگر تعداد سیگنال‌ها ضریبی از 50 باشد
             if count > 0 and count % 50 == 0:
                 logging.info("⚙️ سیستم به حد نصاب رسید: اجرای پروسه ارتقای خودکار...")
                 optimizer.optimize_all(mode="live")
@@ -78,28 +102,17 @@ def run_bot():
     logging.info("🤖 اسکنر هوشمند v8.2 (پشتیبانی موازی ۱۱ ارز) فعال شد.")
     database.init_db()
     
-    try:
-        database.manage_open_positions()
-    except Exception as e:
-        logging.error(f"خطا در مدیریت پوزیشن‌ها: {e}")
+    # جایگزین کردن منطق مخرب با منطق پایشگر
+    # database.manage_open_positions()  <-- این خط غیرفعال شد
+    check_exits()                      # <-- اضافه شدن پایشگر هوشمند
     
-    # ۱. اجرای بهینه‌ساز پیش از شروع اسکن
     run_auto_optimization()
-    
-    # ۲. پردازش تمام ارزها به صورت موازی 
     watchlist = getattr(config, 'WATCHLIST', [])
-    # تعداد workers به 12 افزایش یافت تا هر 11 ارز بدون معطلی و در یک لحظه پردازش شوند
     with ThreadPoolExecutor(max_workers=12) as executor:
         executor.map(process_pair, watchlist)
 
 if __name__ == "__main__":
-    # در محیط GitHub Actions نیازی به schedule و حلقه بی‌نهایت نیست
-    # خود گیت‌هاب بر اساس فایل run_bot.yml این اسکریپت را زمان‌بندی می‌کند
-    
-    # ارسال Heartbeat فقط اگر ساعت 22:00 تا 22:59 (به وقت سرور ابری) باشد تا از اسپم جلوگیری شود
     current_hour = datetime.datetime.utcnow().hour
     if current_hour == 22:
         heartbeat_job()
-        
-    # اجرای اصلی ربات
     run_bot()
