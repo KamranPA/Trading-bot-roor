@@ -1,5 +1,5 @@
 # FILE: src/train_model.py
-# PURPOSE: High-stability LightGBM training pipeline with dynamic split safety
+# PURPOSE: High-stability LightGBM training pipeline with strict feature columns extraction
 
 import os
 import json
@@ -15,7 +15,7 @@ import config
 from src.indicators import calculate_indicators
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("TrainModel_LightGBM_Fix")
+logger = logging.getLogger("TrainModel_LightGBM_Final")
 
 def load_data_from_db(symbol: str) -> pd.DataFrame:
     """Loads history candles from local DB for a specific symbol."""
@@ -58,7 +58,6 @@ def prepare_dataset(df: pd.DataFrame) -> pd.DataFrame:
     # Create target: 1 if close price goes UP, 2 if DOWN, 0 if flat
     df['future_close'] = df['close'].shift(-1)
     
-    # Adjusted threshold slightly to capture more active directional movements
     conditions = [
         (df['future_close'] > df['close'] * 1.0005), # UP
         (df['future_close'] < df['close'] * 0.9995)  # DOWN
@@ -72,8 +71,8 @@ def prepare_dataset(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def train_model_for_symbol(symbol: str):
-    """Executes the training pipeline using LightGBM with low-data protections."""
-    logger.info(f"--- Starting Safe LightGBM Pipeline for {symbol} ---")
+    """Executes the training pipeline using LightGBM with strict clean features isolation."""
+    logger.info(f"--- Starting Final LightGBM Pipeline for {symbol} ---")
     
     raw_df = load_data_from_db(symbol)
     if raw_df.empty:
@@ -83,47 +82,50 @@ def train_model_for_symbol(symbol: str):
     df = prepare_dataset(raw_df)
     total_rows = len(df)
     if df.empty or total_rows < 40:
-        logger.warning(f"Skipping {symbol}: Insufficient historical rows after indicators ({total_rows}). Need more candles!")
+        logger.warning(f"Skipping {symbol}: Insufficient historical rows ({total_rows}).")
         return
         
-    # Exclude non-feature columns
+    # 1. STRICT SEPARATION OF TARGET AND FEATURES
+    y = df["target"].astype(int).copy()
+    
+    # Define columns that MUST NEVER be fed into the training matrix X
     exclude_cols = ["timestamp", "open", "high", "low", "close", "volume", "future_close", "target"]
-    feature_cols = [col for col in df.columns if col not in exclude_cols]
     
-    X = df[feature_cols]
-    y = df["target"].astype(int)
+    # Keep ONLY numerical indicator columns that are not in the forbidden list
+    feature_cols = []
+    for col in df.columns:
+        if col not in exclude_cols:
+            # Check if column is numeric to avoid LightGBM object/string errors
+            if pd.api.types.is_numeric_dtype(df[col]):
+                feature_cols.append(col)
     
-    # --- SAFE TIME-SERIES SPLIT ---
-    # Dynamically ensure test split has at least 15 rows, otherwise fallback to 85/15 split
+    # Explicitly slice X to contain only safe feature columns
+    X = df[feature_cols].copy()
+    
+    # 2. SAFE TIME-SERIES SPLIT
     test_size = max(15, int(total_rows * 0.15))
     split_idx = total_rows - test_size
     
-    # Fallback to keep training set dominant if dataset is extremely small
     if split_idx < 20:
         split_idx = int(total_rows * 0.8)
     
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
     
-    logger.info(f"Dataset Size: {total_rows} -> Train size: {len(X_train)}, Test size: {len(X_test)}")
+    logger.info(f"Dataset Verified -> Train size: {len(X_train)}, Test size: {len(X_test)}, Total Features: {len(feature_cols)}")
     
-    # Ensure test target isn't completely empty or uniform
-    if len(np.unique(y_test)) < 1:
-        logger.warning(f"Skipping {symbol}: Test target set has no distinct classes.")
-        return
-        
-    # Scale features
+    # 3. SCALE FEATURES
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
     
-    # --- LIGHTGBM CLASSIFIER SETTINGS FOR SMALL DATA ---
+    # 4. LIGHTGBM MODEL DEFINITION
     model = lgb.LGBMClassifier(
         n_estimators=100,
         learning_rate=0.05,
-        max_depth=4,                # Lower depth to prevent overfit on small data
+        max_depth=4,
         num_leaves=15,
-        min_child_samples=2,        # CRITICAL FIX: allow leaves with only 2 samples
+        min_child_samples=2,
         random_state=42,
         objective='multiclass',
         num_class=3,
@@ -132,12 +134,11 @@ def train_model_for_symbol(symbol: str):
         verbose=-1
     )
     
-    # Train model with defensive callbacks
     callbacks = []
     if len(X_test_scaled) >= 10:
-        # Only use early stopping if test data has sufficient volume
         callbacks.append(lgb.early_stopping(stopping_rounds=5, verbose=False))
         
+    # Fit the model securely using aligned numpy arrays
     model.fit(
         X_train_scaled, 
         y_train,
@@ -150,7 +151,7 @@ def train_model_for_symbol(symbol: str):
     test_acc = model.score(X_test_scaled, y_test)
     logger.info(f"Results for {symbol} -> Train Acc: {train_acc*100:.2f}%, Test Acc: {test_acc*100:.2f}%")
     
-    # --- SAVE COMPONENTS ---
+    # 5. SAVE COMPONENTS
     os.makedirs(config.MODELS_DIR, exist_ok=True)
     
     model_path = os.path.join(config.MODELS_DIR, f"{symbol}_model.pkl")
@@ -163,7 +164,7 @@ def train_model_for_symbol(symbol: str):
     with open(features_json_path, "w") as f:
         json.dump(feature_cols, f, indent=4)
         
-    logger.info(f"Successfully saved Model & Scaler for {symbol}.")
+    logger.info(f"Successfully saved clean LightGBM components for {symbol}.")
 
 def main():
     symbols = config.SYMBOLS
