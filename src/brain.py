@@ -1,56 +1,68 @@
-# ---------------------------------------------------------
-# FILE PATH: src/brain.py (Fixed for naming consistency)
-# ---------------------------------------------------------
+# FILE: src/brain.py
+# PURPOSE: Loads ML models and safely handles inference/predictions without shape errors
+
 import os
 import joblib
 import logging
 import pandas as pd
-import lightgbm 
 import config
 
-class TradingBrain:
+logger = logging.getLogger(__name__)
+
+class Brain:
     def __init__(self):
-        self.models_dir = os.path.join(config.BASE_DIR, "src", "models")
-        self.models = {}
-        self.load_all_models()
+        self.models_dir = config.MODELS_DIR
+        self.scaler_dir = config.MODELS_DIR
+        
+    def _get_model_paths(self, symbol: str):
+        model_path = os.path.join(self.models_dir, f"{symbol}_model.pkl")
+        scaler_path = os.path.join(self.scaler_dir, f"{symbol}_scaler.pkl")
+        features_path = os.path.join(self.scaler_dir, f"{symbol}_features.json")
+        return model_path, scaler_path, features_path
 
-    def load_all_models(self):
-        if not os.path.exists(self.models_dir):
-            return
-            
-        for file_name in os.listdir(self.models_dir):
-            # اصلاح: همخوانی با نام‌گذاری _model.pkl
-            if file_name.endswith("_model.pkl"):
-                # استخراج نام ارز: حذف _model.pkl از آخر و تبدیل _ به /
-                pair = file_name.replace("_model.pkl", "").replace("_", "/")
-                model_path = os.path.join(self.models_dir, file_name)
-                try:
-                    self.models[pair] = joblib.load(model_path)
-                    logging.info(f"✅ مدل {pair} با موفقیت لود شد.")
-                except Exception as e:
-                    logging.error(f"خطا در لود مدل {pair}: {e}")
-
-    def predict_signal(self, pair, current_features):
-        if pair not in self.models:
-            return None 
+    def predict_direction(self, symbol: str, features_df: pd.DataFrame) -> tuple:
+        """
+        Predicts the market direction for a given symbol using saved models.
+        Returns (prediction_code, probability) or (0, 0.0) if failed.
+        """
+        model_path, scaler_path, _ = self._get_model_paths(symbol)
+        
+        if not os.path.exists(model_path) or not os.path.exists(scaler_path):
+            logger.warning(f"No ML model found for {symbol}. Skipping AI prediction.")
+            return 0, 0.0
             
         try:
-            model = self.models[pair]
+            # Load models
+            model = joblib.load(model_path)
+            scaler = joblib.load(scaler_path)
             
-            # در مدل‌های LightGBM ذخیره شده با joblib، فیچرها معمولاً در ویژگی feature_name_ هستند
-            # اما در برخی نسخه‌ها ممکن است نیاز به نام‌گذاری دستی داشته باشند
-            feature_names = model.feature_name_
+            # Align features to ensure exact same column order and shapes as training
+            # Extract only the last row for inference
+            latest_features = features_df.iloc[[-1]].copy()
             
-            X_test = current_features[feature_names]
+            # Handle expected features by checking model attributes if available
+            if hasattr(model, "feature_names_in_"):
+                expected_features = model.feature_names_in_
+                # Reindex columns to match training exactly, filling missing with 0
+                latest_features = latest_features.reindex(columns=expected_features, fill_value=0)
+            elif hasattr(scaler, "feature_names_in_"):
+                expected_features = scaler.feature_names_in_
+                latest_features = latest_features.reindex(columns=expected_features, fill_value=0)
             
-            # دریافت احتمال (0 تا 1)
-            prediction_prob = model.predict_proba(X_test)[0][1]
+            # Scale features
+            scaled_data = scaler.transform(latest_features)
             
-            # لاگ زدن دقت مدل برای تحلیل‌های بعدی
-            logging.info(f"📊 پیش‌بینی هوشمند برای {pair}: دقت {prediction_prob:.2f}")
+            # Predict
+            prediction = model.predict(scaled_data)[0]
             
-            return prediction_prob >= 0.60
+            # Get probability
+            probability = 0.5
+            if hasattr(model, "predict_proba"):
+                prob_idx = model.predict_proba(scaled_data)[0]
+                probability = max(prob_idx)
                 
+            return int(prediction), float(probability)
+            
         except Exception as e:
-            logging.error(f"خطا در پیش‌بینی {pair}: {e}")
-            return None
+            logger.error(f"Prediction failed for {symbol}: {e}", exc_info=True)
+            return 0, 0.0
