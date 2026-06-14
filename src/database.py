@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/database.py (اصلاح شده و امن برای ربات اصلی)
+# FILE PATH: src/database.py (اصلاح شده: مدیریت هوشمند پوزیشن‌ها)
 # ---------------------------------------------------------
 import sqlite3
 import os
@@ -18,7 +18,7 @@ def get_db_path(mode="live"):
 
 def init_db(mode="live"):
     """
-    ایجاد دیتابیس و جداول با ساختار جامع شامل تمام ۹ سنسور هوش مصنوعی
+    ایجاد دیتابیس و جداول با ساختار جامع
     """
     if not os.path.exists("data"):
         os.makedirs("data")
@@ -28,7 +28,6 @@ def init_db(mode="live"):
     with sqlite3.connect(target_path) as conn:
         cursor = conn.cursor()
         
-        # ایجاد جدول سیگنال‌ها همراه با فیلدهای تکمیلی بکتست و هوش مصنوعی
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -37,18 +36,13 @@ def init_db(mode="live"):
                 direction TEXT, 
                 entry_price REAL, 
                 stop_loss REAL, 
+                tp1 REAL, tp2 REAL,  -- اضافه شده برای منطق خروج
                 status TEXT DEFAULT 'OPEN',
                 closed_at TEXT,
                 pnl_percent REAL,
-                feat_adx REAL, 
-                feat_vol_ratio REAL, 
-                feat_atr_percent REAL, 
-                feat_rsi REAL, 
-                feat_trend_line REAL, 
-                feat_ema_deviation REAL, 
-                feat_rsi_momentum REAL, 
-                feat_body_ratio REAL, 
-                feat_high_volume_session REAL
+                feat_adx REAL, feat_vol_ratio REAL, feat_atr_percent REAL, 
+                feat_rsi REAL, feat_trend_line REAL, feat_ema_deviation REAL, 
+                feat_rsi_momentum REAL, feat_body_ratio REAL, feat_high_volume_session REAL
             )
         """)
         
@@ -62,34 +56,38 @@ def init_db(mode="live"):
         """)
         conn.commit()
 
-def get_open_positions_count():
-    """
-    کنترل سقف پوزیشن‌های باز (فقط برای ربات لایو اعمال می‌شود)
-    """
-    try:
-        if not os.path.exists(DB_PATH): 
-            return 0
-        with sqlite3.connect(DB_PATH) as conn:
-            return conn.execute("SELECT COUNT(*) FROM signals WHERE status = 'OPEN'").fetchone()[0]
-    except: 
-        return 0
+def get_open_positions():
+    """دریافت لیست تمام پوزیشن‌های باز جهت بررسی قیمت"""
+    if not os.path.exists(DB_PATH): return []
+    with sqlite3.connect(DB_PATH) as conn:
+        return conn.execute("SELECT * FROM signals WHERE status = 'OPEN'").fetchall()
 
-def save_signal_advanced(pair, direction, entry_price, stop_loss, **kwargs):
-    """
-    ذخیره سیگنال‌های جدید ربات اصلی در دیتابیس لایو.
-    آرگومان kwargs** برای پایداری و عدم بروز خطا در زمان دریافت داده‌های اضافی طراحی شده است.
-    """
+def update_position_status(signal_id, status, pnl=None):
+    """ثبت نتیجه نهایی معامله در دیتابیس"""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            "INSERT INTO signals (timestamp, symbol, direction, entry_price, stop_loss) VALUES (datetime('now'), ?, ?, ?, ?)", 
-            (pair, direction, entry_price, stop_loss)
+            "UPDATE signals SET status = ?, pnl_percent = ?, closed_at = datetime('now') WHERE id = ?",
+            (status, pnl, signal_id)
+        )
+        conn.commit()
+
+def get_open_positions_count():
+    try:
+        if not os.path.exists(DB_PATH): return 0
+        with sqlite3.connect(DB_PATH) as conn:
+            return conn.execute("SELECT COUNT(*) FROM signals WHERE status = 'OPEN'").fetchone()[0]
+    except: return 0
+
+def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1=0, tp2=0, **kwargs):
+    """ذخیره سیگنال با فیلدهای TP برای مدیریت خروج"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO signals (timestamp, symbol, direction, entry_price, stop_loss, tp1, tp2) VALUES (datetime('now'), ?, ?, ?, ?, ?, ?)", 
+            (pair, direction, entry_price, stop_loss, tp1, tp2)
         )
         conn.commit()
 
 def log_scan_status(pair, status):
-    """
-    ثبت لاگ وضعیت اسکن ارزها در دیتابیس لایو
-    """
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO scan_logs (timestamp, symbol, result) VALUES (datetime('now'), ?, ?)", 
@@ -99,10 +97,10 @@ def log_scan_status(pair, status):
 
 def manage_open_positions():
     """
-    مدیریت پوزیشن‌های منقضی شده در دیتابیس لایو
+    اصلاح شده: این تابع دیگر پوزیشن‌ها را خودکار نمی‌بندد.
+    در ربات اصلی (main.py) باید از تابع check_exits استفاده شود تا 
+    فقط در صورت لمس SL یا TP پوزیشن بسته شود.
     """
-    if not os.path.exists(DB_PATH): 
-        return
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("UPDATE signals SET status = 'CLOSED' WHERE status = 'OPEN'")
-        conn.commit()
+    # این تابع اکنون خالی می‌ماند تا از بستن اجباری جلوگیری شود.
+    # در صورت نیاز به پاکسازی‌های دیگر (غیر از بستن پوزیشن‌ها) می‌توانید اینجا بنویسید.
+    pass
