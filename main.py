@@ -1,105 +1,114 @@
-# ---------------------------------------------------------
-# FILE PATH: main.py (v8.2 - Optimized for GitHub Actions & 11 Pairs)
-# ---------------------------------------------------------
-import os
+# FILE: src/main.py
+# PURPOSE: Main entry point for execution loop, scanning pairs, and orchestrating workflow
+
 import sys
+import os
+import json
 import logging
-import sqlite3
-import threading
-import datetime
 from concurrent.futures import ThreadPoolExecutor
 
-# تنظیم دقیق مسیر ریشه پروژه
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
+# Ensure project root is in python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-try:
-    import config
-    from src import database, coinex_client, strategy, telegram_bot, indicators, optimizer
-    from src.brain import TradingBrain
-except ImportError as e:
-    print(f"CRITICAL IMPORT ERROR: {e}")
-    sys.exit(1)
+import config
+from src.coinex_client import CoinExClient
+from src.database import DatabaseManager
+from src.telegram_bot import TelegramBot
+from src.brain import Brain
+from src.strategy import AdvancedMLStrategy
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Setup Logger
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("MainBot")
 
-BRAIN = TradingBrain()
-db_lock = threading.Lock()
-
-def heartbeat_job():
-    """ارسال گزارش زنده بودن سیستم به تلگرام"""
+def process_symbol(symbol: str, client: CoinExClient, db: DatabaseManager, brain: Brain, telegram: TelegramBot, params_dict: dict):
+    """Processes a single symbol: fetches data, calculates strategy, and generates signals."""
     try:
-        watchlist_count = len(getattr(config, 'WATCHLIST', []))
-        models_dir = os.path.join(BASE_DIR, "src", "models")
-        model_count = len([f for f in os.listdir(models_dir) if f.endswith('.pkl')]) if os.path.exists(models_dir) else 0
-        
-        telegram_bot.send_heartbeat_report(watchlist_count, model_count)
-        logging.info("✅ گزارش Heartbeat با موفقیت ارسال شد.")
-    except Exception as e:
-        logging.error(f"خطا در ارسال گزارش Heartbeat: {e}")
-
-def process_pair(pair):
-    try:
-        df = coinex_client.get_coinex_candles(pair)
-        if df is None or df.empty: 
+        # Avoid checking if we already have an open position for this specific asset
+        if db.has_open_position(symbol):
+            logger.info(f"Skipping scanning for {symbol}, a position is already active.")
             return
 
-        df = indicators.calculate_indicators(df)
-        
-        # نکته: فیلتر ۸ ساعته از اینجا حذف شد تا مستقیماً در strategy.py و با آگاهی از جهتِ ورود چک شود
-        signal = strategy.generate_signal(df, pair, model=BRAIN)
-        
-        with db_lock:
-            if signal:
-                database.save_signal_advanced(pair=pair, **signal)
-                database.log_scan_status(pair, "SIGNAL SENT")
-                telegram_bot.format_and_send_signal(signal)
-            else:
-                database.log_scan_status(pair, "nosignal")
-    except Exception as e:
-        logging.error(f"خطا در پردازش {pair}: {e}")
+        # Fetch candles
+        candles = client.get_last_candles(market=symbol, limit=100, period=config.TIMEFRAME)
+        if not candles or len(candles) < 30:
+            logger.warning(f"Not enough candles fetched for {symbol}")
+            return
 
-def run_auto_optimization():
-    db_path = database.DB_PATH 
-    try:
-        if os.path.exists(db_path):
-            with sqlite3.connect(db_path) as conn:
-                count = conn.execute("SELECT count(*) FROM signals").fetchone()[0]
+        # Load dynamic parameters optimized for this symbol
+        symbol_params = params_dict.get(symbol, {})
+        
+        # Initialize strategy with dynamic/fallback parameters
+        strategy = AdvancedMLStrategy(params=symbol_params)
+        
+        # Execute Strategy Logic (Combines Technical Indicators & ML model prediction)
+        signal = strategy.check_signal(candles, brain, symbol)
+        
+        if signal and signal.get("action") in ["LONG", "SHORT"]:
+            action = signal["action"]
+            entry = signal["entry"]
+            sl = signal["sl"]
+            tp1 = signal["tp1"]
+            tp2 = signal["tp2"]
+            ml_prob = signal.get("probability", 0.0)
             
-            # اجرای Optimizer اگر تعداد سیگنال‌ها ضریبی از 50 باشد
-            if count > 0 and count % 50 == 0:
-                logging.info("⚙️ سیستم به حد نصاب رسید: اجرای پروسه ارتقای خودکار...")
-                optimizer.optimize_all(mode="live")
+            # Save to Database (Returns True if newly inserted successfully)
+            success = db.save_signal(symbol, action, entry, sl, tp1, tp2)
+            
+            if success:
+                msg = (
+                    f"🚀 **NEW ML SIGNAL GENERATED**\n\n"
+                    f"🔹 **Asset:** {symbol}\n"
+                    f"🔹 **Action:** {action}\n"
+                    f"🔹 **Entry Price:** {entry:.4f}\n"
+                    f"🛑 **Stop Loss:** {sl:.4f}\n"
+                    f"🎯 **Target 1 (Partial):** {tp1:.4f}\n"
+                    f"🎯 **Target 2 (Final):** {tp2:.4f}\n"
+                    f"🤖 **AI Confidence:** {ml_prob*100:.1f}%"
+                )
+                telegram.send_message(msg)
+                db.log_execution(f"Signal executed for {symbol}: {action}")
+                
     except Exception as e:
-        logging.error(f"خطا در پروسه خودارتقایی: {e}")
+        logger.error(f"Error processing symbol {symbol}: {e}", exc_info=True)
 
-def run_bot():
-    logging.info("🤖 اسکنر هوشمند v8.2 (پشتیبانی موازی ۱۱ ارز) فعال شد.")
-    database.init_db()
+def main():
+    logger.info("Initializing Trading Bot System...")
     
-    try:
-        database.manage_open_positions()
-    except Exception as e:
-        logging.error(f"خطا در مدیریت پوزیشن‌ها: {e}")
+    # Core system components
+    client = CoinExClient()
+    db = DatabaseManager()
+    telegram = TelegramBot()
+    brain = Brain()
     
-    # ۱. اجرای بهینه‌ساز پیش از شروع اسکن
-    run_auto_optimization()
+    # 1. FIRST STEP: Track & Manage existing live positions before generating new trades
+    logger.info("Step 1: Managing and tracking open positions...")
+    db.manage_open_positions(coinex_client=client, telegram_bot=telegram)
     
-    # ۲. پردازش تمام ارزها به صورت موازی 
-    watchlist = getattr(config, 'WATCHLIST', [])
-    # تعداد workers به 12 افزایش یافت تا هر 11 ارز بدون معطلی و در یک لحظه پردازش شوند
-    with ThreadPoolExecutor(max_workers=12) as executor:
-        executor.map(process_pair, watchlist)
+    # Load dynamic optimization parameters if available
+    params_dict = {}
+    if os.path.exists(config.PARAMS_FILE):
+        try:
+            with open(config.PARAMS_FILE, "r") as f:
+                params_dict = json.load(f)
+            logger.info("Dynamic parameters successfully loaded.")
+        except Exception as e:
+            logger.error(f"Failed to read parameters file: {e}")
+
+    # 2. SECOND STEP: Scan markets for new opportunities
+    logger.info("Step 2: Scanning markets for new setups...")
+    symbols_to_scan = config.SYMBOLS
+    
+    # Multithreading execution for parallel symbol processing
+    with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as executor:
+        for symbol in symbols_to_scan:
+            executor.submit(process_symbol, symbol, client, db, brain, telegram, params_dict)
+            
+    db.log_execution("Cycle executed successfully.")
+    logger.info("Bot cycle execution finished.")
 
 if __name__ == "__main__":
-    # در محیط GitHub Actions نیازی به schedule و حلقه بی‌نهایت نیست
-    # خود گیت‌هاب بر اساس فایل run_bot.yml این اسکریپت را زمان‌بندی می‌کند
-    
-    # ارسال Heartbeat فقط اگر ساعت 22:00 تا 22:59 (به وقت سرور ابری) باشد تا از اسپم جلوگیری شود
-    current_hour = datetime.datetime.utcnow().hour
-    if current_hour == 22:
-        heartbeat_job()
-        
-    # اجرای اصلی ربات
-    run_bot()
+    main()
