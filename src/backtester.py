@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/backtester.py (v8.4 - Two-Phase AI Architecture)
+# FILE PATH: src/backtester.py (v8.4 - Two-Phase AI Architecture - Fixed 4h)
 # ---------------------------------------------------------
 import os
 import sqlite3
@@ -124,8 +124,9 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
                 conn.commit()
             continue
 
-        if float(current_candle.get('feat_adx', 0)) < config.ADX_THRESHOLD:
-            continue
+        # 🛠️ اصلاح: فیلتر سخت‌گیرانه خاموش شد تا دیتای آموزشی به اندازه کافی تولید شود
+        # if float(current_candle.get('feat_adx', 0)) < config.ADX_THRESHOLD:
+        #     continue
 
         df_slice = df.iloc[:i]
         last_swing_high = strategy_utils.find_last_swing(df_slice, 'high', config.SWING_WINDOW)
@@ -220,6 +221,7 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
                 is_in_position_ai = False
             continue
 
+        # در فاز لایو، فیلتر به درستی حضور دارد
         if float(current_candle.get('feat_adx', 0)) < config.ADX_THRESHOLD:
             continue
 
