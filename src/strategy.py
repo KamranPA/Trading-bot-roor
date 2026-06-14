@@ -116,6 +116,42 @@ def generate_signal(df, pair, model=None):
     high_price = float(candle['High'])
     low_price = float(candle['Low'])
     
+    # -------------------------------------------------------------
+    # سیستم امتیاز دهی (Scoring System) - اضافه شده بدون حذف منطق قبلی
+    # -------------------------------------------------------------
+    def calculate_signal_score(direction):
+        """
+        محاسبه امتیاز سیگنال از 100 بر اساس پارامترهای تکنیکال.
+        رسیدن به این مرحله یعنی حداقل 50 امتیاز پایه‌ای را بابت عبور از فیلترها داریم.
+        """
+        score = 50 
+        
+        # ۱. امتیاز قدرت ترند (ADX)
+        current_adx = features_dict['feat_adx']
+        if current_adx >= adx_thresh + 10:
+            score += 20 # ترند بسیار قدرتمند
+        elif current_adx >= adx_thresh + 5:
+            score += 10 # ترند نسبتاً قدرتمند
+            
+        # ۲. تایید مدل هوش مصنوعی
+        if model is not None:
+            score += 10
+            
+        # ۳. امتیاز مومنتوم و تاییدیه اندیکاتورها بر اساس جهت
+        if direction == 'LONG':
+            if features_dict['feat_rsi'] >= 65:
+                score += 10
+            if features_dict['feat_ema_deviation'] > 0:
+                score += 10
+        elif direction == 'SHORT':
+            if features_dict['feat_rsi'] <= 35:
+                score += 10
+            if features_dict['feat_ema_deviation'] < 0:
+                score += 10
+                
+        return min(score, 100) # اطمینان از اینکه امتیاز از 100 بیشتر نشود
+    # -------------------------------------------------------------
+
     # ۸. منطق شکست سطوح در لحظه برخورد (Intra-candle Breakout Logic)
     is_bullish_momentum = float(candle.get('feat_rsi', 50)) > 50
     is_bearish_momentum = float(candle.get('feat_rsi', 50)) < 50
@@ -137,6 +173,9 @@ def generate_signal(df, pair, model=None):
         sl_percent = (sl_dist / entry_price) * 100
         position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL) if sl_percent > 0 else 0
 
+        # محاسبه امتیاز سیگنال
+        signal_score = calculate_signal_score('LONG')
+
         return {
             'pair': pair, 
             'direction': 'LONG', 
@@ -145,6 +184,7 @@ def generate_signal(df, pair, model=None):
             'tp1': round(entry_price + (tp_dist / 2), 4),
             'tp2': round(entry_price + tp_dist, 4),
             'position_size': round(position_size, 2), 
+            'signal_score': signal_score, # <--- اضافه شدن امتیاز به خروجی
             **features_dict
         }
     
@@ -165,6 +205,9 @@ def generate_signal(df, pair, model=None):
         sl_percent = (sl_dist / entry_price) * 100
         position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL) if sl_percent > 0 else 0
 
+        # محاسبه امتیاز سیگنال
+        signal_score = calculate_signal_score('SHORT')
+
         return {
             'pair': pair, 
             'direction': 'SHORT', 
@@ -173,6 +216,7 @@ def generate_signal(df, pair, model=None):
             'tp1': round(entry_price - (tp_dist / 2), 4),
             'tp2': round(entry_price - tp_dist, 4),
             'position_size': round(position_size, 2), 
+            'signal_score': signal_score, # <--- اضافه شدن امتیاز به خروجی
             **features_dict
         }
 
