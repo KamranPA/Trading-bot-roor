@@ -1,97 +1,179 @@
-# FILE: src/strategy.py
-# PURPOSE: Core trading strategy logic combining technical indicators with ML models
-
-import pandas as pd
-import logging
+# ---------------------------------------------------------
+# FILE PATH: src/strategy.py
+# ---------------------------------------------------------
+import os
+import json
+import sqlite3
+import datetime
 import config
-from src.indicators import calculate_indicators
-from src.strategy_utils import find_swings
+from src import database, strategy_utils
+import pandas as pd
 
-logger = logging.getLogger(__name__)
+def is_blocked_by_8h_filter(pair, current_direction):
+    """
+    بررسی دیتابیس لایو: اگر در ۸ ساعت گذشته سیگنالی برای این ارز و دقیقاً در همین جهت صادر شده باشد، 
+    معامله جدید بلاک می‌شود.
+    """
+    try:
+        if not os.path.exists(database.DB_PATH):
+            return False
 
-class AdvancedMLStrategy:
-    def __init__(self, params: dict = None):
-        # Default fallback parameters if dynamic optimizer hasn't run yet
-        self.params = params or {
-            "rsi_period": 14,
-            "atr_period": 14,
-            "risk_reward_ratio": 2.0
+        with sqlite3.connect(database.DB_PATH) as conn:
+            cursor = conn.cursor()
+            # استخراج آخرین سیگنال همین ارز از دیتابیس
+            cursor.execute(
+                "SELECT direction, timestamp FROM signals WHERE symbol = ? ORDER BY id DESC LIMIT 1",
+                (pair,)
+            )
+            last_signal = cursor.fetchone()
+
+            if last_signal:
+                last_direction, last_time_str = last_signal
+                
+                # بررسی شرط هم‌جهت بودن (مثلا لانگ بعد از لانگ)
+                if last_direction == current_direction:
+                    # تبدیل رشته زمانی دیتابیس (فرمت YYYY-MM-DD HH:MM:SS) به آبجکت زمان
+                    clean_time_str = last_time_str.split('.')[0]
+                    last_time = datetime.datetime.strptime(clean_time_str, '%Y-%m-%d %H:%M:%S')
+                    now = datetime.datetime.utcnow() # SQLite از زمان UTC استفاده می‌کند
+                    
+                    # محاسبه اختلاف زمان به ساعت
+                    diff_hours = (now - last_time).total_seconds() / 3600
+                    
+                    if diff_hours < 8:
+                        return True # سیگنال مسدود است
+    except Exception as e:
+        print(f"⚠️ خطا در بررسی فیلتر ۸ ساعته برای {pair}: {e}")
+        
+    return False
+
+def generate_signal(df, pair, model=None):
+    # اطمینان از وجود دیتای کافی برای محاسبه اندیکاتورها (به ویژه EMA 200)
+    if df is None or len(df) < 200:
+        return None
+
+    idx = len(df) - 1
+    candle = df.iloc[idx]
+    
+    # ۲. مدیریت ریسک: کنترل سقف تعداد پوزیشن‌های باز
+    if database.get_open_positions_count() >= config.MAX_OPEN_POSITIONS:
+        return None
+
+    # --- خواندن پارامترهای اختصاصی ارز از best_params.json ---
+    adx_thresh = config.ADX_THRESHOLD
+    tp_ratio = 1.5  # ضریب پیش‌فرض سود
+    sl_ratio = 1.0  # ضریب پیش‌فرض ضرر
+    risk_multiplier = 1.0 # ضریب پیش‌فرض حجم معامله
+    
+    try:
+        params_file = os.path.join(config.BASE_DIR, "best_params.json")
+        if os.path.exists(params_file):
+            with open(params_file, 'r') as f:
+                all_params = json.load(f)
+                
+                # خواندن تنظیمات اختصاصی یا استفاده از DEFAULT به عنوان جایگزین
+                pair_params = all_params.get(pair, all_params.get("DEFAULT", {}))
+                
+                adx_thresh = pair_params.get('adx_threshold', adx_thresh)
+                tp_ratio = pair_params.get('tp_ratio', tp_ratio)
+                sl_ratio = pair_params.get('sl_ratio', sl_ratio)
+                risk_multiplier = pair_params.get('risk_multiplier', risk_multiplier)
+    except Exception as e:
+        pass # در صورت بروز خطا، با همان مقادیر پیش‌فرض ادامه می‌دهد
+
+    # ۳. فیلتر جهت‌گیری و شتاب روند کلان با حد آستانه اختصاصی این ارز
+    if float(candle.get('feat_adx', 0)) < adx_thresh:
+        return None
+
+    # ۴. شناسایی سطوح سویینگ قیمتی
+    last_swing_high = strategy_utils.find_last_swing(df, 'high', config.SWING_WINDOW)
+    last_swing_low = strategy_utils.find_last_swing(df, 'low', config.SWING_WINDOW)
+
+    if last_swing_high is None or last_swing_low is None:
+        return None
+
+    # ۵. آماده‌سازی ویژگی‌ها برای هوش مصنوعی
+    features_dict = {
+        'feat_adx': float(candle.get('feat_adx', 0)),
+        'feat_atr_percent': float(candle.get('feat_atr_percent', 0)),
+        'feat_rsi': float(candle.get('feat_rsi', 0)),
+        'feat_trend_line': float(candle.get('feat_trend_line', 0)),
+        'feat_ema_deviation': float(candle.get('feat_ema_deviation', 0)),
+        'feat_rsi_momentum': float(candle.get('feat_rsi_momentum', 0)),
+        'feat_body_ratio': float(candle.get('feat_body_ratio', 0))
+    }
+
+    # ۶. اعمال فیلتر هوش مصنوعی اختصاصی (Multi-Model)
+    if model is not None:
+        try:
+            if not model.predict(pair, features_dict):
+                return None
+        except Exception as e:
+            print(f"خطا در مدل هوش مصنوعی {pair}: {e}")
+            pass
+
+    # ۷. مشخص کردن قیمت‌های لحظه‌ای کندل فعلی برای منطق ورود شکست سطوح
+    high_price = float(candle['High'])
+    low_price = float(candle['Low'])
+    
+    # ۸. منطق شکست سطوح در لحظه برخورد (Intra-candle Breakout Logic)
+    is_bullish_momentum = float(candle.get('feat_rsi', 50)) > 50
+    is_bearish_momentum = float(candle.get('feat_rsi', 50)) < 50
+
+    if high_price > last_swing_high and is_bullish_momentum:
+        entry_price = last_swing_high  # قیمت ورود دقیقاً روی سطح شکست مقاومت
+        
+        # ---> چک کردن فیلتر ۸ ساعته دقیقا در لحظه تایید ورود <---
+        if is_blocked_by_8h_filter(pair, "LONG"):
+            return None
+            
+        # مدیریت سرمایه داینامیک با اعمال risk_multiplier
+        risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0) * risk_multiplier
+        atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
+        sl_dist = 1.5 * atr_val * sl_ratio
+        tp_dist = sl_dist * tp_ratio
+        
+        stop_loss = entry_price - sl_dist
+        sl_percent = (sl_dist / entry_price) * 100
+        position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL) if sl_percent > 0 else 0
+
+        return {
+            'pair': pair, 
+            'direction': 'LONG', 
+            'entry_price': round(entry_price, 4),
+            'stop_loss': round(stop_loss, 4), 
+            'tp1': round(entry_price + (tp_dist / 2), 4),
+            'tp2': round(entry_price + tp_dist, 4),
+            'position_size': round(position_size, 2), 
+            **features_dict
+        }
+    
+    elif low_price < last_swing_low and is_bearish_momentum:
+        entry_price = last_swing_low  # قیمت ورود دقیقاً روی سطح شکست حمایت
+        
+        # ---> چک کردن فیلتر ۸ ساعته دقیقا در لحظه تایید ورود <---
+        if is_blocked_by_8h_filter(pair, "SHORT"):
+            return None
+            
+        # مدیریت سرمایه داینامیک با اعمال risk_multiplier
+        risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0) * risk_multiplier
+        atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
+        sl_dist = 1.5 * atr_val * sl_ratio
+        tp_dist = sl_dist * tp_ratio
+        
+        stop_loss = entry_price + sl_dist
+        sl_percent = (sl_dist / entry_price) * 100
+        position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL) if sl_percent > 0 else 0
+
+        return {
+            'pair': pair, 
+            'direction': 'SHORT', 
+            'entry_price': round(entry_price, 4),
+            'stop_loss': round(stop_loss, 4), 
+            'tp1': round(entry_price - (tp_dist / 2), 4),
+            'tp2': round(entry_price - tp_dist, 4),
+            'position_size': round(position_size, 2), 
+            **features_dict
         }
 
-    def check_signal(self, candles: list, brain, symbol: str) -> dict:
-        """
-        Processes candles, runs technical analysis and ML brain to look for signals.
-        """
-        df = pd.DataFrame(candles)
-        if df.empty or len(df) < 30:
-            return {"action": "HOLD"}
-            
-        # 1. Calculate Sensors & Indicators
-        df = calculate_indicators(df)
-        
-        # Clean infinite or NaN entries that break ML Scalers
-        df.replace([return_inf for return_inf in [float('inf'), float('-inf')]], pd.NA, inplace=True)
-        df.dropna(inplace=True)
-        
-        if len(df) < 5:
-            return {"action": "HOLD"}
-            
-        latest_row = df.iloc[-1]
-        close_price = float(latest_row["close"])
-        
-        # 2. Extract technical feature matrix for the ML Brain
-        # Dropping non-feature columns
-        feature_cols = [col for col in df.columns if col not in ["timestamp", "open", "high", "low", "close", "volume", "target"]]
-        features_df = df[feature_cols]
-        
-        # 3. Request prediction from Brain
-        prediction, probability = brain.predict_direction(symbol, features_df)
-        
-        # 4. Find structural Swings for Risk Management (SL / TP)
-        swings = find_swings(df)
-        last_swing_high = swings.get("last_high", close_price * 1.02)
-        last_swing_low = swings.get("last_low", close_price * 0.98)
-        
-        # Basic ATR for dynamic buffer
-        atr = float(latest_row.get("atr", close_price * 0.01))
-        rr = self.params.get("risk_reward_ratio", 2.0)
-        
-        # 5. Signal generation matching ML predictions
-        # Assuming Model Target: 1 = Price Up (LONG), 2 = Price Down (SHORT), 0 = HOLD
-        if prediction == 1 and probability >= config.PROBABILITY_THRESHOLD:
-            sl = min(last_swing_low, close_price - (1.5 * atr))
-            if sl >= close_price: 
-                sl = close_price - (2 * atr)
-                
-            risk = close_price - sl
-            tp1 = close_price + (risk * 1.0) # Partial profit at 1:1 RR
-            tp2 = close_price + (risk * rr)  # Final profit target
-            
-            return {
-                "action": "LONG",
-                "entry": close_price,
-                "sl": sl,
-                "tp1": tp1,
-                "tp2": tp2,
-                "probability": probability
-            }
-            
-        elif prediction == 2 and probability >= config.PROBABILITY_THRESHOLD:
-            sl = max(last_swing_high, close_price + (1.5 * atr))
-            if sl <= close_price: 
-                sl = close_price + (2 * atr)
-                
-            risk = sl - close_price
-            tp1 = close_price - (risk * 1.0)
-            tp2 = close_price - (risk * rr)
-            
-            return {
-                "action": "SHORT",
-                "entry": close_price,
-                "sl": sl,
-                "tp1": tp1,
-                "tp2": tp2,
-                "probability": probability
-            }
-            
-        return {"action": "HOLD"}
+    return None
