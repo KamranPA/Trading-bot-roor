@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/train_model.py (v8.3 - Fixed Time-Series Data Leakage)
+# FILE PATH: src/train_model.py (v8.6 - Strict Order Alignment)
 # ---------------------------------------------------------
 import sqlite3
 import pandas as pd
@@ -28,10 +28,13 @@ def get_data_from_db(db_path, symbol):
         return pd.DataFrame()
     try:
         with sqlite3.connect(db_path) as conn:
-            return pd.read_sql_query(
+            df_res = pd.read_sql_query(
                 "SELECT * FROM signals WHERE symbol = ? AND status = 'CLOSED'", 
                 conn, params=(symbol,)
             )
+            # تبدیل نام تمام ستون‌ها به حروف کوچک برای جلوگیری از KeyError
+            df_res.columns = [col.lower() for col in df_res.columns]
+            return df_res
     except Exception as e:
         print(f"❌ خطای دیتابیس در {db_path}: {e}")
         return pd.DataFrame()
@@ -43,7 +46,6 @@ def train_model_for_symbol(symbol, mode="backtest"):
     if mode == "monthly":
         df_backtest = get_data_from_db(config.DB_PATH_BACKTEST, symbol)
         df_live = get_data_from_db(config.DB_PATH_LIVE, symbol)
-        # 🛠️ اصلاح شد: ignore_index به جای iore_index
         df = pd.concat([df_backtest, df_live], ignore_index=True)
     else:
         df = get_data_from_db(config.DB_PATH_BACKTEST, symbol)
@@ -52,51 +54,71 @@ def train_model_for_symbol(symbol, mode="backtest"):
         print(f"⚠️ دیتایی برای {symbol} یافت نشد.")
         return
 
-    # --- ۲. پیش‌پردازش کامل ---
+    # بررسی وجود ستون کلیدی pnl_percent جهت جلوگیری از کرش پایپ‌لاین
+    if 'pnl_percent' not in df.columns:
+        print(f"⚠️ ستون pnl_percent در داده‌های {symbol} یافت نشد.")
+        return
+
+    # --- ۲. پیش‌پردازش کامل و پاک‌سازی داده‌ها (قبل از Split) ---
     features = [
         'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 
         'feat_trend_line', 'feat_ema_deviation', 'feat_rsi_momentum', 
         'feat_body_ratio', 'feat_high_volume_session'
     ]
     
-    df = df.dropna(subset=features)
+    # بررسی وجود تمام فیچرها در دیتابیس
+    missing_feats = [f for f in features if f not in df.columns]
+    if missing_feats:
+        print(f"⚠️ برخی ویژگی‌ها در دیتابیس یافت نشدند: {missing_feats}")
+        return
+
+    # ساخت ستون هدف داخل خود دیتافریم
+    df['target_label'] = np.where(df['pnl_percent'] > 0, 1, 0)
     
-    # ⚠️ بسیار مهم: ابتدا داده‌ها را بر اساس زمان صعودی مرتب می‌کنیم تا توالی زمانی حفظ شود
+    # ⚠️ اصلاح ترتیب (مهم): ابتدا فیلترها و حذف تکراری‌ها روی کل دیتافریم اعمال می‌شود
+    df = df.dropna(subset=features + ['target_label'])
     df = df.sort_values(by='timestamp', ascending=True)
     df = df.drop_duplicates(subset=['timestamp'])
     
-    if len(df) < 50:
-        print(f"⚠️ معاملات کافی برای ارتقای {symbol} نیست ({len(df)}).")
+    # بررسی حداقل تعداد داده‌های تصفیه شده
+    if len(df) < 10:  # حد نصاب حداقل ۱۰ معامله برای پپلاین بک‌تست
+        print(f"⚠️ معاملات کافی برای ارتقای {symbol} پس از فیلتر موجود نیست ({len(df)}).")
         return
 
+    # استخراج نهایی ماتریس‌ها به صورت کاملاً تصفیه شده و هم‌تراز
     X = df[features]
-    y = np.where(df['pnl_percent'] > 0, 1, 0)
+    y = df['target_label'].to_numpy()
 
-    # --- ۳. تقسیم داده‌ها بدون Shuffle برای جلوگیری از نشت داده (Time-Series Split) ---
-    # ۸۰ درصد ابتدایی داده‌ها (گذشته) برای آموزش و ۲۰ درصد انتهایی (آینده) برای تست فیلتر می‌شوند
-    split_idx = int(len(df) * 0.8)
+    # --- ۳. تقسیم داده‌ها بدون Shuffle بر اساس طول نهایی ماتریس تصفیه شده ---
+    split_idx = int(len(X) * 0.8)
     
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_test = y[:split_idx], y[split_idx:]
 
+    # اطمینان نهایی چشمی برای ستون‌ها و ردیف‌ها
+    if len(X_test) != len(y_test) or len(X_train) != len(y_train):
+        print(f"⚠️ خطای داخلی عدم تطابق اندکس‌ها؛ انصراف از آموزش برای {symbol}")
+        return
+
     # --- ۴. آموزش مدل LightGBM ---
     model = LGBMClassifier(
-        n_estimators=100,       # برای جلوگیری از Overfit روی داده‌های محدود کمی کاهش یافت
-        learning_rate=0.03,      # نرخ یادگیری ملایم‌تر برای یادگیری ساختار پایدار
+        n_estimators=100,       
+        learning_rate=0.03,      
         max_depth=5,
-        num_leaves=15,          # کاهش پیچیدگی درخت‌ها جهت انطباق با رفتار نوسانی بازار
+        num_leaves=15,          
         min_child_samples=15,
-        subsample=0.7,           # نمونه‌گیری ردیفی بدون دستکاری توالی برای تعمیم‌دهی بهتر
+        subsample=0.7,           
         colsample_bytree=0.8,
         random_state=42,
         n_jobs=1,
         verbose=-1
     )
     
+    # ارزیابی دقیق بدون خطای طول ماتریس
     model.fit(
         X_train, 
         y_train,
-        eval_set=[(X_test, y_test)]  # ارزیابی مستقیم روی داده‌های آینده واقعی
+        eval_set=[(X_test, y_test)]  
     )
 
     # --- ۵. ذخیره‌سازی ---
