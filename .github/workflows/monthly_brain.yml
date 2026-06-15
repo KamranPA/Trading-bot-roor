@@ -16,7 +16,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
-        persist-credentials: true  # 🛠️ اصلاح: برای حفظ مجوزهای دسترسی در گام Git Push
+        persist-credentials: true
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -32,13 +32,11 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        # 🛠️ اصلاح: scikit-learn حذف و صرفاً پکیج‌های سبک و حیاتی ربات شما قرار گرفتند
         pip install pandas numpy joblib lightgbm
 
     - name: Ensure Data Directory and DB Exist
       run: |
         mkdir -p data
-        # ایجاد فایل‌های دیتابیس خالی در صورتی که وجود نداشته باشند تا اسکریپت کرش نکند
         touch data/crypto_backtest.db
         touch data/crypto_live.db
 
@@ -53,16 +51,23 @@ jobs:
         git config --global user.name 'github-actions'
         git config --global user.email 'github-actions@github.com'
         
+        # ۱. استیج کردن تغییرات مدل‌ها
         if ls src/models/*.pkl >/dev/null 2>&1; then
           git add -f src/models/*.pkl
           echo "✅ AI Models detected."
         fi
         
+        # ۲. بررسی اینکه آیا تغییری وجود دارد
         if git diff --cached --quiet; then
           echo "No changes detected."
         else
           git commit -m "🧠 Monthly Brain Upgrade: AI models learned from live trades."
-          # 🛠️ اصلاح: استفاده از آدرس اوریجین مجهز به توکن برای عبور از سدهای امنیتی گیت‌هاب
+          
+          # ۳. همگام‌سازی با سرور قبل از پوش (حیاتی برای جلوگیری از تداخل)
+          # استفاده از autostash برای ذخیره موقت تغییرات در صورت نیاز و rebase برای یکپارچگی تاریخچه
+          git pull origin ${{ github.ref_name }} --rebase --autostash
+          
+          # ۴. ارسال نهایی تغییرات
           git push origin HEAD:${{ github.ref_name }}
         fi
 
