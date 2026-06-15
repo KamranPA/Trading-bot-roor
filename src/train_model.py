@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/train_model.py (اصلاح شده و هماهنگ با strategy.py)
+# FILE PATH: src/train_model.py (اصلاح شده برای پایداری ۱۰۰٪)
 # ---------------------------------------------------------
 import sqlite3
 import pandas as pd
@@ -7,7 +7,6 @@ import numpy as np
 import os
 import sys
 import joblib
-import logging
 
 try:
     from lightgbm import LGBMClassifier
@@ -15,7 +14,6 @@ except ImportError:
     print("CRITICAL: LightGBM is not installed. Run 'pip install lightgbm'")
     sys.exit(1)
 
-# تنظیم مسیر پایه
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
@@ -23,13 +21,10 @@ if BASE_DIR not in sys.path:
 import config
 
 def get_data_from_db(db_path, symbol):
-    """استخراج امن دیتا از دیتابیس"""
     if not os.path.exists(db_path):
         return pd.DataFrame()
     try:
         with sqlite3.connect(db_path) as conn:
-            # توجه: دقت کنید نام ستون در دیتابیس signals ممکن است syml یا pair باشد
-            # طبق کدهای شما در strategy.py معمولا از syml یا symbol استفاده شده است
             return pd.read_sql_query(
                 "SELECT * FROM signals WHERE symbol = ? AND status = 'CLOSED'", 
                 conn, params=(symbol,)
@@ -41,7 +36,6 @@ def get_data_from_db(db_path, symbol):
 def train_model_for_symbol(symbol, mode="backtest"):
     df = pd.DataFrame()
     
-    # --- ۱. تجمیع داده‌ها ---
     if mode == "monthly":
         df_backtest = get_data_from_db(config.DB_PATH_BACKTEST, symbol)
         df_live = get_data_from_db(config.DB_PATH_LIVE, symbol)
@@ -53,17 +47,13 @@ def train_model_for_symbol(symbol, mode="backtest"):
         print(f"⚠️ دیتایی برای {symbol} یافت نشد.")
         return
 
-    # --- ۲. پیش‌پردازش کامل (هماهنگ با strategy.py) ---
     features = [
         'feat_adx', 'feat_atr_percent', 'feat_rsi', 
         'feat_trend_line', 'feat_ema_deviation', 'feat_rsi_momentum', 
         'feat_body_ratio'
     ]
     
-    # حذف ردیف‌هایی که مقدار خالی (NaN) در ستون‌های اصلی دارند
     df = df.dropna(subset=features)
-    
-    # ⚠️ بسیار مهم: مرتب‌سازی زمانی
     df = df.sort_values(by='timestamp', ascending=True)
     df = df.drop_duplicates(subset=['timestamp'])
     
@@ -74,12 +64,10 @@ def train_model_for_symbol(symbol, mode="backtest"):
     X = df[features]
     y = np.where(df['pnl_percent'] > 0, 1, 0)
 
-    # --- ۳. تقسیم داده‌ها (Time-Series Split) ---
     split_idx = int(len(df) * 0.8)
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_test = y[:split_idx], y[split_idx:]
 
-    # --- ۴. آموزش مدل LightGBM ---
     model = LGBMClassifier(
         n_estimators=100,
         learning_rate=0.03,
@@ -95,14 +83,19 @@ def train_model_for_symbol(symbol, mode="backtest"):
     
     model.fit(X_train, y_train, eval_set=[(X_test, y_test)])
 
-    # --- ۵. ذخیره‌سازی ---
+    # --- ۵. ذخیره‌سازی اصلاح شده (این بخش کلید حل مشکل شماست) ---
     safe_symbol_name = symbol.replace('/', '_')
     models_dir = os.path.join(BASE_DIR, "src", "models")
     os.makedirs(models_dir, exist_ok=True)
     model_path = os.path.join(models_dir, f"{safe_symbol_name}_model.pkl")
     
-    joblib.dump(model, model_path)
-    print(f"🎯 مدل {symbol} با موفقیت آموزش دید.")
+    # ذخیره مدل و نام ویژگی‌ها در یک بسته‌بندی واحد
+    bundle = {
+        'model': model,
+        'feature_names': features
+    }
+    joblib.dump(bundle, model_path)
+    print(f"🎯 مدل {symbol} با موفقیت در بسته‌بندی جدید ذخیره شد.")
 
 def train_all(mode="backtest"):
     for symbol in config.WATCHLIST:
