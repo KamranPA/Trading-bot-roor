@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/backtester.py (v8.5 - Fixed Safe ATR Key)
+# FILE PATH: src/backtester.py (v8.7 - Fixed short position sl_dist bug)
 # ---------------------------------------------------------
 import os
 import sqlite3
@@ -134,7 +134,6 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
         if last_swing_high is None or last_swing_low is None:
             continue
 
-        # 🛠️ اصلاح دسترسی امن بدون وابستگی به متد get روی سری‌های پاندا برای جلوگیری از KeyError
         atr_val = 1.0
         if 'feat_atr_percent' in current_candle:
             atr_val = float(current_candle['feat_atr_percent'])
@@ -237,7 +236,6 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
         if last_swing_high is None or last_swing_low is None:
             continue
 
-        # 🛠️ اصلاح دسترسی امن بدون وابستگی به متد get روی سری‌های پاندا برای جلوگیری از KeyError
         atr_val = 1.0
         if 'feat_atr_percent' in current_candle:
             atr_val = float(current_candle['feat_atr_percent'])
@@ -252,18 +250,16 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
         ai_approved = False
         if brain_instance and symbol in brain_instance.models:
             try:
-                # فقط ویژگی‌های مورد استفاده مدل فیلتر و ارسال می‌شوند تا ساختار LightGBM با خطا مواجه نشود
                 features_list = [
                     'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 
                     'feat_trend_line', 'feat_ema_deviation', 'feat_rsi_momentum', 
                     'feat_body_ratio', 'feat_high_volume_session'
                 ]
-                features_df = df.iloc[[i]][features_list] # استخراج امن یک ردیف در قالب دیتافریم فیلتر شده
+                features_df = df.iloc[[i]][features_list]
                 ai_approved = brain_instance.predict_signal(symbol, features_df)
             except:
                 ai_approved = False
         else:
-            # اگر هنوز مدلی ساخته نشده (اجرای اول)، سیگنال‌ها خام در نظر گرفته شوند
             ai_approved = True
 
         if high_price > last_swing_high and is_bullish_momentum and ai_approved:
@@ -277,13 +273,12 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
             is_in_position_ai = True
             direction_ai = "SHORT"
             entry_price_ai = last_swing_low
-            stop_loss_ai = entry_price_ai + pnl # حد اصلاح ایمن
+            # 🛠️ اصلاح: جایگزینی فرمول صحیح sl_dist به جای متغیر تعریف نشده pnl
+            stop_loss_ai = entry_price_ai + sl_dist
             tp2_ai = entry_price_ai - (sl_dist * 2)
 
-    # محاسبه وین‌ریت فاز ۲
     win_rate_ai = (ai_winning_trades / ai_total_trades * 100) if ai_total_trades > 0 else 0
     
-    # چاپ گزارش ترکیبی در ترمینال
     print(f"📈 {symbol} | آموزش خام: {total_trades_raw} پوزیشن | تست AI (لایو): {ai_total_trades} معامله، وین‌ریت: {win_rate_ai:.1f}%، سود: {ai_total_pnl:.1f}%")
     
     return {
@@ -299,7 +294,6 @@ def run_all_backtests():
     
     print("📊 شروع پروسه دوفازی: تزریق دیتای گذشته و شبیه‌سازی لایو با هوش مصنوعی...")
     
-    # بارگذاری مغز هوش مصنوعی برای ارزیابی فاز ۲
     brain = TradingBrain()
     
     summary_results = []
