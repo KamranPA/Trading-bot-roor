@@ -134,7 +134,8 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
         if last_swing_high is None or last_swing_low is None:
             continue
 
-        sl_dist = 1.5 * float(current_candle.get('atr', current_candle.get('feat_atr_percent', 1.0)))
+        # 🛠️ اصلاح: اولویت‌دهی به feat_atr_percent هماهنگ با آموزش مدل
+        sl_dist = 1.5 * float(current_candle.get('feat_atr_percent', current_candle.get('atr', 1.0)))
         is_bullish_momentum = float(current_candle.get('feat_rsi', 50)) > 50
         is_bearish_momentum = float(current_candle.get('feat_rsi', 50)) < 50
 
@@ -230,7 +231,8 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
         if last_swing_high is None or last_swing_low is None:
             continue
 
-        sl_dist = 1.5 * float(current_candle.get('atr', current_candle.get('feat_atr_percent', 1.0)))
+        # 🛠️ اصلاح: اولویت‌دهی به feat_atr_percent هماهنگ با آموزش مدل
+        sl_dist = 1.5 * float(current_candle.get('feat_atr_percent', current_candle.get('atr', 1.0)))
         is_bullish_momentum = float(current_candle.get('feat_rsi', 50)) > 50
         is_bearish_momentum = float(current_candle.get('feat_rsi', 50)) < 50
 
@@ -238,7 +240,13 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
         ai_approved = False
         if brain_instance and symbol in brain_instance.models:
             try:
-                features_df = df.iloc[[i]] # ارسال ردیف دیتافریم برای لایت‌جی‌بی‌ام
+                # 🛠️ اصلاح: فقط ویژگی‌های مورد استفاده مدل فیلتر و ارسال می‌شوند تا ساختار LightGBM با خطا مواجه نشود
+                features_list = [
+                    'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 
+                    'feat_trend_line', 'feat_ema_deviation', 'feat_rsi_momentum', 
+                    'feat_body_ratio', 'feat_high_volume_session'
+                ]
+                features_df = df.iloc[[i]][features_list] # استخراج امن یک ردیف در قالب دیتافریم فیلتر شده
                 ai_approved = brain_instance.predict_signal(symbol, features_df)
             except:
                 ai_approved = False
