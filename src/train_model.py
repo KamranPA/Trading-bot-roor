@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/train_model.py (v8.3 - Fixed Time-Series Data Leakage)
+# FILE PATH: src/train_model.py (اصلاح شده و هماهنگ با strategy.py)
 # ---------------------------------------------------------
 import sqlite3
 import pandas as pd
@@ -28,6 +28,8 @@ def get_data_from_db(db_path, symbol):
         return pd.DataFrame()
     try:
         with sqlite3.connect(db_path) as conn:
+            # توجه: دقت کنید نام ستون در دیتابیس signals ممکن است syml یا pair باشد
+            # طبق کدهای شما در strategy.py معمولا از syml یا symbol استفاده شده است
             return pd.read_sql_query(
                 "SELECT * FROM signals WHERE symbol = ? AND status = 'CLOSED'", 
                 conn, params=(symbol,)
@@ -51,16 +53,17 @@ def train_model_for_symbol(symbol, mode="backtest"):
         print(f"⚠️ دیتایی برای {symbol} یافت نشد.")
         return
 
-    # --- ۲. پیش‌پردازش کامل ---
+    # --- ۲. پیش‌پردازش کامل (هماهنگ با strategy.py) ---
     features = [
-        'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 
+        'feat_adx', 'feat_atr_percent', 'feat_rsi', 
         'feat_trend_line', 'feat_ema_deviation', 'feat_rsi_momentum', 
-        'feat_body_ratio', 'feat_high_volume_session'
+        'feat_body_ratio'
     ]
     
+    # حذف ردیف‌هایی که مقدار خالی (NaN) در ستون‌های اصلی دارند
     df = df.dropna(subset=features)
     
-    # ⚠️ بسیار مهم: ابتدا داده‌ها را بر اساس زمان صعودی مرتب می‌کنیم تا توالی زمانی حفظ شود
+    # ⚠️ بسیار مهم: مرتب‌سازی زمانی
     df = df.sort_values(by='timestamp', ascending=True)
     df = df.drop_duplicates(subset=['timestamp'])
     
@@ -71,32 +74,26 @@ def train_model_for_symbol(symbol, mode="backtest"):
     X = df[features]
     y = np.where(df['pnl_percent'] > 0, 1, 0)
 
-    # --- ۳. تقسیم داده‌ها بدون Shuffle برای جلوگیری از نشت داده (Time-Series Split) ---
-    # ۸۰ درصد ابتدایی داده‌ها (گذشته) برای آموزش و ۲۰ درصد انتهایی (آینده) برای تست فیلتر می‌شوند
+    # --- ۳. تقسیم داده‌ها (Time-Series Split) ---
     split_idx = int(len(df) * 0.8)
-    
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_test = y[:split_idx], y[split_idx:]
 
     # --- ۴. آموزش مدل LightGBM ---
     model = LGBMClassifier(
-        n_estimators=100,       # برای جلوگیری از Overfit روی داده‌های محدود کمی کاهش یافت
-        learning_rate=0.03,      # نرخ یادگیری ملایم‌تر برای یادگیری ساختار پایدار
+        n_estimators=100,
+        learning_rate=0.03,
         max_depth=5,
-        num_leaves=15,          # کاهش پیچیدگی درخت‌ها جهت انطباق با رفتار نوسانی بازار
+        num_leaves=15,
         min_child_samples=15,
-        subsample=0.7,           # نمونه‌گیری ردیفی بدون دستکاری توالی برای تعمیم‌دهی بهتر
+        subsample=0.7,
         colsample_bytree=0.8,
         random_state=42,
         n_jobs=1,
         verbose=-1
     )
     
-    model.fit(
-        X_train, 
-        y_train,
-        eval_set=[(X_test, y_test)]  # ارزیابی مستقیم روی داده‌های آینده واقعی
-    )
+    model.fit(X_train, y_train, eval_set=[(X_test, y_test)])
 
     # --- ۵. ذخیره‌سازی ---
     safe_symbol_name = symbol.replace('/', '_')
@@ -105,7 +102,7 @@ def train_model_for_symbol(symbol, mode="backtest"):
     model_path = os.path.join(models_dir, f"{safe_symbol_name}_model.pkl")
     
     joblib.dump(model, model_path)
-    print(f"🎯 مدل {symbol} با موفقیت بدون نشت داده (Time-Series) ارتقا یافت.")
+    print(f"🎯 مدل {symbol} با موفقیت آموزش دید.")
 
 def train_all(mode="backtest"):
     for symbol in config.WATCHLIST:
