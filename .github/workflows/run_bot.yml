@@ -1,4 +1,4 @@
-Name: Trading Bot - Live DB Update
+name: Trading Bot - Live DB Update
 on:
   schedule:
     - cron: '*/30 * * * *'
