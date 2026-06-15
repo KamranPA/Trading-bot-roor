@@ -21,92 +21,63 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 🛠️ اصلاح: نصب وابستگی سیستمی لینوکس برای جلوگیری از کرش کردن LightGBM
       - name: Install System Dependencies for LightGBM
         run: |
           sudo apt-get update
           sudo apt-get install -y libgomp1
 
-      # 🔥 تغییر مهم: اضافه شدن yfinance و lightgbm و خواندن requirements.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          # scikit-learn حذف و پکیج حیاتی lightgbm جایگزین شد
           pip install pandas requests ccxt numpy joblib yfinance lightgbm
 
-      # ۱. ابتدا دانلود داده‌های عمیق بازار با اسکریپت جدید CCXT/yfinance
       - name: Fetch Market Historical Data
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python fetcher.py
 
-      # ۲. اجرای بک‌تستر (تزریق به دیتابیس بکتست)
       - name: Run Backtest
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/backtester.py
 
-      # ۳. اجرای بهینه‌ساز پارامترها
       - name: Run Optimizer
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/optimizer.py
 
-      # ۴. اجرای آموزش هوش مصنوعی با حد نصاب ۱۰ معامله
       - name: Train AI Model
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/train_model.py
 
-      # ۵. کامیت و پوش هوشمند با استراتژی رفع تداخل (Pull Rebase)
+      # ۵. کامیت و پوش هوشمند با استراتژی رفع تداخل
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # 🛠️ اصلاح: بررسی امن برای افزودن فایل دیتابیس بکتست
-          if [ -f "data/crypto_backtest.db" ]; then 
-            git add -f data/crypto_backtest.db
-            echo "✅ Database tracked."
-          fi
+          # استیج کردن فایل‌ها
+          if [ -f "data/crypto_backtest.db" ]; then git add -f data/crypto_backtest.db; fi
+          if [ -f "backtest_table_summary.csv" ]; then git add backtest_table_summary.csv; fi
+          if ls src/models/*.pkl >/dev/null 2>&1; then git add -f src/models/*.pkl; fi
+          if [ -f "best_params.json" ]; then git add best_params.json; fi
           
-          # 🛠️ اصلاح: بررسی کاملاً امن برای افزودن فایل گزارش بکتست جهت جلوگیری از خطای Pathspec
-          if [ -f "backtest_table_summary.csv" ]; then 
-            git add backtest_table_summary.csv
-            echo "✅ Summary table tracked."
-          else
-            echo "⚠️ backtest_table_summary.csv not found, skipping."
-          fi
-          
-          # افزودن مدل‌های هوش مصنوعی (در صورت وجود)
-          if ls src/models/*.pkl >/dev/null 2>&1; then
-            git add -f src/models/*.pkl
-            echo "✅ AI Models detected and added."
-          else
-            echo "⚠️ No AI models (.pkl) generated yet."
-          fi
-          
-          # افزودن فایل تنظیمات بهینه شده
-          if [ -f "best_params.json" ]; then 
-            git add best_params.json
-            echo "✅ Best params tracked."
-          fi
-          
-          # بررسی اینکه آیا اصلاً تغییری برای کامیت وجود دارد یا خیر
+          # 🔥 اصلاح اصلی: بررسی تغییرات و کامیت کردن پیش از Pull
           if git diff --cached --quiet; then
             echo "No changes detected, skipping commit."
           else
             git commit -m "Auto-update: Forced Multi-Models, Deep Backtest DB & Table Summary"
             
-            # 🔥 کلید حل باگ: گرفتن تغییرات جدید لایو از سرور قبل از Push
-            echo "🔄 Pulling latest changes from remote to avoid conflict..."
+            # اکنون که تغییرات کامیت شده‌اند، Pull بدون خطا انجام می‌شود
+            echo "🔄 Pulling latest changes from remote..."
             git pull origin main --rebase
             
-            # ارسال نهایی بدون خطا
+            # ارسال نهایی
             git push origin main
           fi
