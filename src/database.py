@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/database.py (اصلاح شده: مدیریت هوشمند پوزیشن‌ها)
+# FILE PATH: src/database.py (نسخه نهایی کاملاً ضدگلوله و بدون تداخل آرگومان)
 # ---------------------------------------------------------
 import sqlite3
 import os
@@ -84,20 +84,34 @@ def get_open_positions_count():
             return conn.execute("SELECT COUNT(*) FROM signals WHERE status = 'OPEN'").fetchone()[0]
     except: return 0
 
-def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1=0, tp2=0, position_size=0, **kwargs):
+def save_signal_advanced(*args, **kwargs):
     """
-    اصلاح شده و پویا: ذخیره سیگنال به همراه حجم معامله و ویژگی‌های هوش مصنوعی.
-    با استفاده از kwargs**، تمام ویژگی‌های زنده بدون ارور به متن JSON تبدیل و ذخیره می‌شوند.
+    نسخه کاملاً ضدگلوله: استخراج هوشمند پارامترها بدون تداخل نام آرگومان‌ها در مفسر پایتون.
+    با استفاده از این ساختار، ارسال دوگانه یا چندگانه کلمات کلیدی هرگز باعث کرش سیستم نمی‌شود.
     """
     try:
-        # ۱. تبدیل دیکشنری اندیکاتورها به رشته متنی JSON برای پایداری ۱۰۰٪ دیتابیس
-        serialized_features = json.dumps(kwargs)
-        
-        # ۲. مقداردهی برخی ویژگی‌های کلیدی قدیمی (جهت همپوشانی با کدهای قدیمی دیتابیس)
-        f_adx = kwargs.get('feat_adx', 0.0)
-        f_atr = kwargs.get('feat_atr_percent', 0.0)
-        f_rsi = kwargs.get('feat_rsi', 0.0)
+        # ۱. استخراج متغیرهای پایه چه به صورت پارامتر موقعیتی (args) و چه کلیدی (kwargs)
+        pair = kwargs.get('pair', args[0] if len(args) > 0 else None)
+        direction = kwargs.get('direction', args[1] if len(args) > 1 else None)
+        entry_price = kwargs.get('entry_price', args[2] if len(args) > 2 else None)
+        stop_loss = kwargs.get('stop_loss', args[3] if len(args) > 3 else None)
+        tp1 = kwargs.get('tp1', args[4] if len(args) > 4 else 0.0)
+        tp2 = kwargs.get('tp2', args[5] if len(args) > 5 else 0.0)
+        position_size = kwargs.get('position_size', args[6] if len(args) > 6 else 0.0)
 
+        # ۲. پاکسازی دیکشنری برای ذخیره خالص ویژگی‌های اندیکاتور هوش مصنوعی در JSON
+        reserved_keys = {'pair', 'direction', 'entry_price', 'stop_loss', 'tp1', 'tp2', 'position_size'}
+        clean_features = {k: v for k, v in kwargs.items() if k not in reserved_keys}
+        
+        # ۳. تبدیل ویژگی‌ها به متون ساختاریافته متنی جی‌سون
+        serialized_features = json.dumps(clean_features)
+        
+        # ۴. مقداردهی فیلدهای سنتی و قدیمی جهت همپوشانی با کل پروژه
+        f_adx = clean_features.get('feat_adx', 0.0)
+        f_atr = clean_features.get('feat_atr_percent', 0.0)
+        f_rsi = clean_features.get('feat_rsi', 0.0)
+
+        # ۵. درج نهایی اطلاعات در دیتابیس لایو
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute("""
                 INSERT INTO signals 
