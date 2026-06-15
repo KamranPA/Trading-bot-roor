@@ -69,14 +69,18 @@ jobs:
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # 🛠️ اصلاح: تغییر نام فایل دیتابیس به نام واقعی پروژه (crypto_backtest.db)
+          # 🛠️ اصلاح: بررسی امن برای افزودن فایل دیتابیس بکتست
           if [ -f "data/crypto_backtest.db" ]; then 
             git add -f data/crypto_backtest.db
+            echo "✅ Database tracked."
           fi
           
-          # 🔥 اضافه شده: افزودن جدول خلاصه بکتست به گیت
+          # 🛠️ اصلاح: بررسی کاملاً امن برای افزودن فایل گزارش بکتست جهت جلوگیری از خطای Pathspec
           if [ -f "backtest_table_summary.csv" ]; then 
             git add backtest_table_summary.csv
+            echo "✅ Summary table tracked."
+          else
+            echo "⚠️ backtest_table_summary.csv not found, skipping."
           fi
           
           # افزودن مدل‌های هوش مصنوعی (در صورت وجود)
@@ -90,6 +94,7 @@ jobs:
           # افزودن فایل تنظیمات بهینه شده
           if [ -f "best_params.json" ]; then 
             git add best_params.json
+            echo "✅ Best params tracked."
           fi
           
           # بررسی اینکه آیا اصلاً تغییری برای کامیت وجود دارد یا خیر
@@ -98,7 +103,7 @@ jobs:
           else
             git commit -m "Auto-update: Forced Multi-Models, Deep Backtest DB & Table Summary"
             
-            # 🔥 کلید حل باگ تصویر دوم: گرفتن تغییرات جدید لایو از سرور قبل از Push
+            # 🔥 کلید حل باگ: گرفتن تغییرات جدید لایو از سرور قبل از Push
             echo "🔄 Pulling latest changes from remote to avoid conflict..."
             git pull origin main --rebase
             
