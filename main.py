@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (نسخه فوق امن - حل قطعی خطای حروف ستون‌ها در اندیکاتور)
+# FILE PATH: main.py (اصلاح شده: مدیریت امن پوزیشن‌ها)
 # ---------------------------------------------------------
 import os
 import sys
@@ -26,67 +26,39 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 BRAIN = TradingBrain()
 db_lock = threading.Lock()
 
-def check_exits(*args, **kwargs):
+def check_exits():
     """
-    تابع بررسی قیمت و بستن پوزیشن‌ها در صورت رسیدن به حد سود یا ضرر.
+    تابع جدید برای بررسی قیمت و بستن پوزیشن‌ها در صورت رسیدن به حد سود یا ضرر
+    جایگزین منطق مخرب قبلی
     """
     try:
-        positions = database.get_open_positions() 
-        if not positions:
-            return
-
+        positions = database.get_open_positions() # تابعی که در database.py تعریف کردیم
         for pos in positions:
-            try:
-                sig_id = pos[0]
-                symbol = pos[2]
-                direction = pos[3]
-                entry = float(pos[4])
-                sl = float(pos[5])
-                tp2 = float(pos[7])
-                
-                if hasattr(coinex_client, 'get_coinex_candles'):
-                    df = coinex_client.get_coinex_candles(symbol, limit=2)
-                else:
-                    df = coinex_client.get_candles(symbol, limit=2)
-                
-                if df is None or not hasattr(df, 'empty') or df.empty: 
-                    continue
-                
-                # پیدا کردن قیمت بدون دستکاری فیزیکی ستون‌ها
-                current_price = None
-                for col in ['Close', 'close']:
-                    if col in df.columns:
-                        current_price = float(df.iloc[-1][col])
-                        break
-                
-                if current_price is None:
-                    current_price = float(df.iloc[-1].iloc[4])
-
-                pnl = 0.0
-                should_close = False
-                
-                if direction == "LONG":
-                    if current_price <= sl: pnl = ((sl - entry) / entry) * 100; should_close = True
-                    elif current_price >= tp2: pnl = ((tp2 - entry) / entry) * 100; should_close = True
-                elif direction == "SHORT":
-                    if current_price >= sl: pnl = ((entry - sl) / entry) * 100; should_close = True
-                    elif current_price <= tp2: pnl = ((entry - tp2) / entry) * 100; should_close = True
-                
-                if should_close:
-                    with db_lock:
-                        database.update_position_status(sig_id, 'CLOSED', pnl)
-                    logging.info(f"✅ پوزیشن {symbol} بسته شد. سود/ضرر: {pnl:.2f}%")
-                    try:
-                        telegram_bot.send_message(f"🚨 **خروج از پوزیشن {symbol}**\nجهت: {direction}\nسود/ضرر نهایی: {pnl:.2f}%")
-                    except Exception:
-                        pass
-            except Exception as pos_err:
-                logging.error(f"خطا در بررسی پوزیشن {pos}: {pos_err}")
-                continue
+            # فرض بر اینکه ساختار دیتابیس (id=0, symbol=2, direction=3, entry=4, sl=5, tp1=6, tp2=7)
+            sig_id, _, symbol, direction, entry, sl, tp1, tp2, status, _, _, *_ = pos
+            
+            df = coinex_client.get_coinex_candles(symbol, limit=1)
+            if df is None or df.empty: continue
+            current_price = df.iloc[-1]['Close']
+            
+            # منطق خروج هوشمند
+            pnl = 0
+            should_close = False
+            if direction == "LONG":
+                if current_price <= sl: pnl = ((sl - entry) / entry) * 100; should_close = True
+                elif current_price >= tp2: pnl = ((tp2 - entry) / entry) * 100; should_close = True
+            elif direction == "SHORT":
+                if current_price >= sl: pnl = ((entry - sl) / entry) * 100; should_close = True
+                elif current_price <= tp2: pnl = ((entry - tp2) / entry) * 100; should_close = True
+            
+            if should_close:
+                database.update_position_status(sig_id, 'CLOSED', pnl)
+                logging.info(f"✅ پوزیشن {symbol} بسته شد. سود/ضرر: {pnl:.2f}%")
     except Exception as e:
         logging.error(f"خطا در بررسی پوزیشن‌های باز: {e}")
 
 def heartbeat_job():
+    # ... (بدون تغییر)
     try:
         watchlist_count = len(getattr(config, 'WATCHLIST', []))
         models_dir = os.path.join(BASE_DIR, "src", "models")
@@ -97,26 +69,12 @@ def heartbeat_job():
         logging.error(f"خطا در ارسال گزارش Heartbeat: {e}")
 
 def process_pair(pair):
-    """
-    تابع پردازش موازی جفت‌ارزها - مپ کردن دوگانه ستون‌ها برای هماهنگی با فایل indicators
-    """
+    # ... (بدون تغییر)
     try:
-        if hasattr(coinex_client, 'get_coinex_candles'):
-            df = coinex_client.get_coinex_candles(pair)
-        else:
-            df = coinex_client.get_candles(pair)
-
-        if df is None or not hasattr(df, 'empty') or df.empty: 
-            return
-            
-        # 🟢 تزریق جادویی: ساخت ستون‌های حروف کوچک در کنار حروف بزرگ تاindicators.py کرش نکند!
-        for col in list(df.columns):
-            df[col.lower()] = df[col]
-        
-        # فرستادن دیتای ایمن‌شده به اندیکاتورها و استراتژی
+        df = coinex_client.get_coinex_candles(pair)
+        if df is None or df.empty: return
         df = indicators.calculate_indicators(df)
         signal = strategy.generate_signal(df, pair, model=BRAIN)
-        
         with db_lock:
             if signal:
                 database.save_signal_advanced(pair=pair, **signal)
@@ -128,6 +86,7 @@ def process_pair(pair):
         logging.error(f"خطا در پردازش {pair}: {e}")
 
 def run_auto_optimization():
+    # ... (بدون تغییر)
     db_path = database.DB_PATH 
     try:
         if os.path.exists(db_path):
@@ -143,9 +102,11 @@ def run_bot():
     logging.info("🤖 اسکنر هوشمند v8.2 (پشتیبانی موازی ۱۱ ارز) فعال شد.")
     database.init_db()
     
-    check_exits()                      
-    run_auto_optimization()
+    # جایگزین کردن منطق مخرب با منطق پایشگر
+    # database.manage_open_positions()  <-- این خط غیرفعال شد
+    check_exits()                      # <-- اضافه شدن پایشگر هوشمند
     
+    run_auto_optimization()
     watchlist = getattr(config, 'WATCHLIST', [])
     with ThreadPoolExecutor(max_workers=12) as executor:
         executor.map(process_pair, watchlist)
