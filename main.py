@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (نسخه نهایی، حل قطعی خطای KeyError: close با یکپارچه‌سازی ستون‌ها)
+# FILE PATH: main.py (نسخه ضدگلوله: یکپارچه‌سازی لیست‌ها و دیتافریم‌ها)
 # ---------------------------------------------------------
 import os
 import sys
@@ -7,6 +7,7 @@ import logging
 import sqlite3
 import threading
 import datetime
+import pandas as pd
 from concurrent.futures import ThreadPoolExecutor
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -26,6 +27,29 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 BRAIN = TradingBrain()
 db_lock = threading.Lock()
 
+def ensure_dataframe(data):
+    """
+    لایه محافظ: تبدیل خودکار دیتای خام صرافی (لیست یا دیکشنری) به دیتافریم استاندارد پانداس
+    """
+    if data is None:
+        return pd.DataFrame()
+    if isinstance(data, list):
+        if len(data) > 0 and isinstance(data[0], list):
+            # فرض بر این است که خروجی کوین‌اکس ایندکس‌های استانداردی دارد
+            # [time, open, close, high, low, volume, amount]
+            try:
+                df = pd.DataFrame(data)
+                # اگر 7 ستون داشت، نام‌گذاری می‌کنیم
+                if len(df.columns) >= 7:
+                    df.columns = ['time', 'open', 'close', 'high', 'low', 'volume', 'amount'][:len(df.columns)]
+                return df
+            except:
+                return pd.DataFrame(data)
+        return pd.DataFrame(data)
+    if isinstance(data, pd.DataFrame):
+        return data
+    return pd.DataFrame()
+
 def check_exits(*args, **kwargs):
     """
     تابع بررسی قیمت و بستن پوزیشن‌ها در صورت رسیدن به حد سود یا ضرر.
@@ -44,17 +68,26 @@ def check_exits(*args, **kwargs):
                 sl = float(pos[5])
                 tp2 = float(pos[7])
                 
-                df = coinex_client.get_coinex_candles(symbol, limit=2)
-                if df is None or df.empty: 
+                # فراخوانی ایمن متد صرافی
+                raw_data = None
+                if hasattr(coinex_client, 'get_coinex_candles'):
+                    raw_data = coinex_client.get_coinex_candles(symbol, limit=2)
+                elif hasattr(coinex_client, 'get_candles'):
+                    raw_data = coinex_client.get_candles(symbol, limit=2)
+                
+                # تبدیل امن به دیتافریم
+                df = ensure_dataframe(raw_data)
+                
+                if df.empty: 
                     continue
                 
-                # یکپارچه‌سازی حروف ستون‌ها به حروف کوچک برای جلوگیری از KeyError
-                df.columns = df.columns.str.lower()
+                # یکپارچه‌سازی حروف ستون‌ها به حروف کوچک
+                df.columns = [str(col).lower() for col in df.columns]
                 
                 if 'close' in df.columns:
                     current_price = float(df.iloc[-1]['close'])
                 else:
-                    current_price = float(df.iloc[-1].iloc[4])
+                    current_price = float(df.iloc[-1].iloc[2] if len(df.columns) > 2 else df.iloc[-1].iloc[-1])
 
                 pnl = 0.0
                 should_close = False
@@ -102,15 +135,22 @@ def heartbeat_job():
 
 def process_pair(pair):
     """
-    تابع پردازش موازی جفت‌ارزها همراه با استانداردسازی نام ستون‌ها
+    تابع پردازش موازی جفت‌ارزها با محافظت فرمت دیتا
     """
     try:
-        df = coinex_client.get_coinex_candles(pair)
-        if df is None or df.empty: 
+        raw_data = None
+        if hasattr(coinex_client, 'get_coinex_candles'):
+            raw_data = coinex_client.get_coinex_candles(pair)
+        elif hasattr(coinex_client, 'get_candles'):
+            raw_data = coinex_client.get_candles(pair)
+
+        # تبدیل امن به دیتافریم
+        df = ensure_dataframe(raw_data)
+        if df.empty: 
             return
             
-        # تبدیل تمام ستون‌ها (Close, High, Low, Open) به حروف کوچک قبل از ورود به محاسبات اندیکاتور
-        df.columns = df.columns.str.lower()
+        # استانداردسازی نام ستون‌ها
+        df.columns = [str(col).lower() for col in df.columns]
         
         df = indicators.calculate_indicators(df)
         signal = strategy.generate_signal(df, pair, model=BRAIN)
@@ -141,9 +181,7 @@ def run_bot():
     logging.info("🤖 اسکنر هوشمند v8.2 (پشتیبانی موازی ۱۱ ارز) فعال شد.")
     database.init_db()
     
-    # اجرای پایشگر خروج پوزیشن‌ها
     check_exits()                      
-    
     run_auto_optimization()
     
     watchlist = getattr(config, 'WATCHLIST', [])
