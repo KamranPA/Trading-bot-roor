@@ -1,106 +1,122 @@
 # ---------------------------------------------------------
-# FILE PATH: src/train_model.py (اصلاح شده برای پایداری ۱۰۰٪)
+# FILE PATH: src/train_model.py (سیستم بازآموزی و باندلینگ خودکار هوش مصنوعی)
 # ---------------------------------------------------------
-import sqlite3
-import pandas as pd
-import numpy as np
 import os
 import sys
+import sqlite3
+import argparse
+import logging
 import joblib
+import pandas as pd
+from lightgbm import LGBMClassifier
+from sklearn.model_selection import train_test_split
 
-try:
-    from lightgbm import LGBMClassifier
-except ImportError:
-    print("CRITICAL: LightGBM is not installed. Run 'pip install lightgbm'")
-    sys.exit(1)
-
+# تنظیم مسیر پروژه برای دسترسی به فایل کانفیگ
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 import config
 
-def get_data_from_db(db_path, symbol):
-    if not os.path.exists(db_path):
-        return pd.DataFrame()
-    try:
-        with sqlite3.connect(db_path) as conn:
-            return pd.read_sql_query(
-                "SELECT * FROM signals WHERE symbol = ? AND status = 'CLOSED'", 
-                conn, params=(symbol,)
-            )
-    except Exception as e:
-        print(f"❌ خطای دیتابیس در {db_path}: {e}")
-        return pd.DataFrame()
+# تنظیمات لاگ سیستم
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def train_model_for_symbol(symbol, mode="backtest"):
-    df = pd.DataFrame()
-    
+def train_ai_for_symbol(symbol, mode="normal"):
+    """
+    استخراج سیگنال‌های گذشته از دیتابیس بکتست یا لایو، آموزش مدل LightGBM 
+    و ذخیره آن به همراه نام ویژگی‌ها به صورت باندل (Bundle)
+    """
+    # ۱. تعیین دیتابیس بر اساس مد اجرا
     if mode == "monthly":
-        df_backtest = get_data_from_db(config.DB_PATH_BACKTEST, symbol)
-        df_live = get_data_from_db(config.DB_PATH_LIVE, symbol)
-        df = pd.concat([df_backtest, df_live], ignore_index=True)
+        db_path = config.DB_PATH_LIVE
+        logging.info(f"🧠 مد ماهانه فعال است. استخراج تجربیات لایو برای جفت ارز: {symbol}")
     else:
-        df = get_data_from_db(config.DB_PATH_BACKTEST, symbol)
+        db_path = config.DB_PATH_BACKTEST
+        logging.info(f"📊 مد بکتست فعال است. استخراج دیتای شبیه‌سازی گذشته برای جفت ارز: {symbol}")
 
-    if df.empty:
-        print(f"⚠️ دیتایی برای {symbol} یافت نشد.")
+    if not os.path.exists(db_path):
+        logging.warning(f"⚠️ دیتابیس در مسیر {db_path} یافت نشد. آموزش متوقف شد.")
         return
 
-    features = [
-        'feat_adx', 'feat_atr_percent', 'feat_rsi', 
-        'feat_trend_line', 'feat_ema_deviation', 'feat_rsi_momentum', 
-        'feat_body_ratio'
-    ]
-    
-    df = df.dropna(subset=features)
-    df = df.sort_values(by='timestamp', ascending=True)
-    df = df.drop_duplicates(subset=['timestamp'])
-    
-    if len(df) < 50:
-        print(f"⚠️ معاملات کافی برای ارتقای {symbol} نیست ({len(df)}).")
+    # ۲. خواندن داده‌ها از دیتابیس
+    try:
+        conn = sqlite3.connect(db_path)
+        query = "SELECT * FROM signals WHERE symbol = ? AND status = 'CLOSED'"
+        df = pd.read_sql_query(query, conn, params=(symbol,))
+        conn.close()
+    except Exception as e:
+        logging.error(f"❌ خطا در خواندن اطلاعات دیتابیس برای {symbol}: {e}")
         return
 
-    X = df[features]
-    y = np.where(df['pnl_percent'] > 0, 1, 0)
+    # ۳. بررسی حد نصاب تعداد معاملات برای یادگیری ماشین (حداقل ۵ یا ۱۰ معامله)
+    min_trades = 5 if mode != "monthly" else 3
+    if len(df) < min_trades:
+        logging.warning(f"⚠️ تعداد معاملات برای {symbol} کمتر از حد نصاب است ({len(df)}/{min_trades}). مدل بازآموزی نشد.")
+        return
 
-    split_idx = int(len(df) * 0.8)
-    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-    y_train, y_test = y[:split_idx], y[split_idx:]
-
-    model = LGBMClassifier(
-        n_estimators=100,
-        learning_rate=0.03,
-        max_depth=5,
-        num_leaves=15,
-        min_child_samples=15,
-        subsample=0.7,
-        colsample_bytree=0.8,
-        random_state=42,
-        n_jobs=1,
-        verbose=-1
-    )
+    # ۴. جداسازی ویژگی‌ها (Features) و برچسب سودآوری (Target)
+    # تمام ستون‌هایی که با feat_ شروع می‌شوند را پیدا می‌کنیم
+    feature_cols = [col for col in df.columns if col.startswith('feat_')]
     
-    model.fit(X_train, y_train, eval_set=[(X_test, y_test)])
+    if not feature_cols:
+        logging.error(f"❌ هیچ اندیکاتور/ویژگی با پیشوند 'feat_' در جدول یافت نشد.")
+        return
 
-    # --- ۵. ذخیره‌سازی اصلاح شده (این بخش کلید حل مشکل شماست) ---
-    safe_symbol_name = symbol.replace('/', '_')
-    models_dir = os.path.join(BASE_DIR, "src", "models")
-    os.makedirs(models_dir, exist_ok=True)
-    model_path = os.path.join(models_dir, f"{safe_symbol_name}_model.pkl")
+    X = df[feature_cols]
+    # اگر سود (pnl_percent) مثبت بود برچسب ۱ (برنده) وگرنه ۰ (بازنده)
+    y = (df['pnl_percent'] > 0).astype(int)
+
+    logging.info(f"⚙️ در حال آموزش جفت ارز {symbol} با {len(df)} نمونه و {len(feature_cols)} ویژگی...")
+
+    # ۵. آموزش مدل با استفاده از LightGBM Classifier
+    try:
+        # ساختار بهینه لایت جی بی ام برای جلوگیری از Overfitting روی دیتای کم
+        model = LGBMClassifier(
+            n_estimators=50,
+            max_depth=3,
+            learning_rate=0.05,
+            random_state=42,
+            verbose=-1
+        )
+        
+        # فیت کردن مدل
+        model.fit(X, y)
+        
+        # ۶. ساخت بسته باندل هوشمند (ذخیره مدل + دفترچه راهنمای ویژگی‌ها)
+        model_bundle = {
+            "model": model,
+            "feature_names": feature_cols # ذخیره خودکار نام ستون‌ها در داخل فایل pkl
+        }
+        
+        # ۷. ذخیره‌سازی مدل در پوشه src/models
+        models_dir = os.path.join(config.BASE_DIR, "src", "models")
+        os.makedirs(models_dir, exist_ok=True)
+        
+        safe_name = symbol.replace("/", "_")
+        model_file_name = f"{safe_name}_model.pkl"
+        model_path = os.path.join(models_dir, model_file_name)
+        
+        joblib.dump(model_bundle, model_path)
+        logging.info(f"✅ مغز هوش مصنوعی {symbol} با موفقیت در مسیر {model_path} باندل و ذخیره شد.")
+        
+    except Exception as e:
+        logging.error(f"❌ خطا در فرآیند آموزش مدل {symbol}: {e}")
+
+def main():
+    # راه‌اندازی آرگومان‌ها برای هماهنگی با فایل‌های yml گیت‌هاب (monthly_brain.yml)
+    parser = argparse.ArgumentParser(description="AI Brain Training Automation")
+    parser.add_name_or_flag = parser.add_argument('--monthly', action='store_true', help='آموزش بر اساس تجربیات دیتابیس لایو')
+    args = parser.parse_args()
+
+    mode = "monthly" if args.monthly else "normal"
     
-    # ذخیره مدل و نام ویژگی‌ها در یک بسته‌بندی واحد
-    bundle = {
-        'model': model,
-        'feature_names': features
-    }
-    joblib.dump(bundle, model_path)
-    print(f"🎯 مدل {symbol} با موفقیت در بسته‌بندی جدید ذخیره شد.")
-
-def train_all(mode="backtest"):
+    logging.info(f"🚀 استارت پایپ‌لاین آموزش هوش مصنوعی (مد: {mode.upper()})")
+    
+    # چرخش روی تمام جفت‌ارزهای واچ‌لیست شما در config.py
     for symbol in config.WATCHLIST:
-        train_model_for_symbol(symbol, mode=mode)
+        train_ai_for_symbol(symbol, mode=mode)
+        
+    logging.info("🎯 پروسه بازآموزی تمام مدل‌ها با موفقیت به پایان رسید.")
 
 if __name__ == "__main__":
-    mode = "monthly" if "--monthly" in sys.argv else "backtest"
-    train_all(mode=mode)
+    main()
