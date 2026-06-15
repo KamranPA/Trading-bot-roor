@@ -1,27 +1,24 @@
 # ---------------------------------------------------------
-# FILE PATH: src/database.py (اصلاح شده: مدیریت هوشمند پوزیشن‌ها)
+# FILE PATH: src/database.py (نسخه نهایی و ایمن‌سازی شده)
 # ---------------------------------------------------------
 import sqlite3
 import os
 import config
 
-# مسیر پیش‌فرض برای دیتابیس لایو (منبع حقیقت ربات اصلی)
-DB_PATH = os.path.join("data", config.DB_NAME)
+# استفاده از مسیر مطلق برای جلوگیری از خطاهای مسیر در GitHub Actions
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.path.join(BASE_DIR, "data", config.DB_NAME)
 
 def get_db_path(mode="live"):
-    """
-    تشخیص هوشمند مسیر دیتابیس بر اساس وضعیت لایو یا بکتست
-    """
+    """تشخیص هوشمند مسیر دیتابیس"""
     if mode == "backtest":
-        return os.path.join("data", config.DB_NAME_BACKTEST)
+        return os.path.join(BASE_DIR, "data", config.DB_NAME_BACKTEST)
     return DB_PATH
 
 def init_db(mode="live"):
-    """
-    ایجاد دیتابیس و جداول با ساختار جامع
-    """
-    if not os.path.exists("data"):
-        os.makedirs("data")
+    """ایجاد دیتابیس و جداول با ساختار جامع"""
+    if not os.path.exists(os.path.join(BASE_DIR, "data")):
+        os.makedirs(os.path.join(BASE_DIR, "data"))
         
     target_path = get_db_path(mode)
     
@@ -36,7 +33,7 @@ def init_db(mode="live"):
                 direction TEXT, 
                 entry_price REAL, 
                 stop_loss REAL, 
-                tp1 REAL, tp2 REAL,  -- اضافه شده برای منطق خروج
+                tp1 REAL, tp2 REAL,
                 status TEXT DEFAULT 'OPEN',
                 closed_at TEXT,
                 pnl_percent REAL,
@@ -57,13 +54,15 @@ def init_db(mode="live"):
         conn.commit()
 
 def get_open_positions():
-    """دریافت لیست تمام پوزیشن‌های باز جهت بررسی قیمت"""
+    """دریافت لیست پوزیشن‌های باز با قابلیت دسترسی به نام ستون"""
     if not os.path.exists(DB_PATH): return []
     with sqlite3.connect(DB_PATH) as conn:
+        # 🛠️ اصلاح کلیدی: استفاده از Row برای دسترسی راحت‌تر به ستون‌ها در main.py
+        conn.row_factory = sqlite3.Row 
         return conn.execute("SELECT * FROM signals WHERE status = 'OPEN'").fetchall()
 
 def update_position_status(signal_id, status, pnl=None):
-    """ثبت نتیجه نهایی معامله در دیتابیس"""
+    """ثبت نتیجه نهایی معامله"""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "UPDATE signals SET status = ?, pnl_percent = ?, closed_at = datetime('now') WHERE id = ?",
@@ -79,7 +78,7 @@ def get_open_positions_count():
     except: return 0
 
 def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1=0, tp2=0, **kwargs):
-    """ذخیره سیگنال با فیلدهای TP برای مدیریت خروج"""
+    """ذخیره سیگنال (دقت کنید در main.py کلید pair حذف می‌شود تا تداخل ایجاد نکند)"""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO signals (timestamp, symbol, direction, entry_price, stop_loss, tp1, tp2) VALUES (datetime('now'), ?, ?, ?, ?, ?, ?)", 
@@ -96,11 +95,5 @@ def log_scan_status(pair, status):
         conn.commit()
 
 def manage_open_positions():
-    """
-    اصلاح شده: این تابع دیگر پوزیشن‌ها را خودکار نمی‌بندد.
-    در ربات اصلی (main.py) باید از تابع check_exits استفاده شود تا 
-    فقط در صورت لمس SL یا TP پوزیشن بسته شود.
-    """
-    # این تابع اکنون خالی می‌ماند تا از بستن اجباری جلوگیری شود.
-    # در صورت نیاز به پاکسازی‌های دیگر (غیر از بستن پوزیشن‌ها) می‌توانید اینجا بنویسید.
+    """این تابع برای جلوگیری از بستن اجباری غیرفعال است."""
     pass
