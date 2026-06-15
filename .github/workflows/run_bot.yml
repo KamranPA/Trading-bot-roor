@@ -1,4 +1,4 @@
-name: Trading Bot - Live DB Update
+Name: Trading Bot - Live DB Update
 on:
   schedule:
     - cron: '*/30 * * * *'
@@ -8,7 +8,7 @@ jobs:
   trade:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # برای اجازه Push کردن فایل‌ها به مخزن
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -17,17 +17,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       
-      # 🛠️ رفع خطای Read-only database با تغییر دسترسی پوشه دیتابیس
       - name: Set Permissions
         run: |
+          mkdir -p data
           chmod -R 777 data/
       
       - name: Run Bot
         env:
-          # 🛠️ رفع خطای ModuleNotFoundError با تعیین مسیر ریشه
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          mkdir -p data
           python main.py
           
       - name: Commit and Push Database & AI Parameters
@@ -35,14 +33,15 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           
-          # استیج کردن تمام تغییرات (دیتابیس، پارامترها و...)
-          git add .
+          # 🛠️ اصلاح: اطمینان از اینکه فقط فایل‌های دیتابیس و تنظیمات استیج شوند
+          git add data/*.db best_params.json 2>/dev/null || echo "No tracked files to add."
           
-          # بررسی اینکه آیا تغییراتی وجود دارد یا خیر
+          # بررسی تغییرات
           if ! git diff --cached --quiet; then
             git commit -m "Update DB and AI Parameters: $(date)"
             
-            # 🛠️ اصلاح نهایی: استفاده از force برای جلوگیری از خطای Rejected
+            # 🛠️ اصلاح حیاتی: استفاده از --force برای جلوگیری از خطای Rejected
+            # استفاده از HEAD:${{ github.ref_name }} تضمین می‌کند همیشه روی شاخه درست پوش می‌شود
             git push origin HEAD:${{ github.ref_name }} --force
           else
             echo "No changes detected in DB or best_params.json."
