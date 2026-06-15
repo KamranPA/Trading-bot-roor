@@ -1,11 +1,10 @@
 # ---------------------------------------------------------
-# FILE PATH: src/brain.py (نسخه نهایی و ایمن شده)
+# FILE PATH: src/brain.py (اصلاح شده و سازگار با باندل)
 # ---------------------------------------------------------
 import os
 import joblib
 import logging
 import pandas as pd
-import lightgbm 
 import config
 
 class TradingBrain:
@@ -15,7 +14,6 @@ class TradingBrain:
         self.load_all_models()
 
     def load_all_models(self):
-        """لود کردن تمام مدل‌های آموزش‌دیده از پوشه models"""
         if not os.path.exists(self.models_dir):
             logging.warning(f"⚠️ پوشه مدل‌ها یافت نشد: {self.models_dir}")
             return
@@ -25,36 +23,34 @@ class TradingBrain:
                 pair = file_name.replace("_model.pkl", "").replace("_", "/")
                 model_path = os.path.join(self.models_dir, file_name)
                 try:
+                    # لود کردن باندل ذخیره شده (شامل مدل و لیست ویژگی‌ها)
                     self.models[pair] = joblib.load(model_path)
                     logging.info(f"✅ مدل {pair} با موفقیت لود شد.")
                 except Exception as e:
                     logging.error(f"خطا در لود مدل {pair}: {e}")
 
     def predict_signal(self, pair, current_features):
-        """
-        پیش‌بینی سیگنال با مدیریت خطاهای ساختاری دیتای ورودی
-        """
         if pair not in self.models:
             return None 
             
         try:
-            model = self.models[pair]
+            # استخراج مدل و ویژگی‌ها از باندل لود شده
+            bundle = self.models[pair]
+            model = bundle['model']
+            required_features = bundle['feature_names']
             
             # ۱. تبدیل دیکشنری به DataFrame
             df_features = pd.DataFrame([current_features])
             
-            # ۲. تطبیق ویژگی‌های ورودی با نیازهای مدل
-            # رفع مشکل KeyError: اگر مدلی ویژگی خاصی را بخواهد که در دیتا نیست، آن را با 0.0 پر می‌کند
-            required_features = model.feature_name_
+            # ۲. تطبیق ویژگی‌ها: اگر ویژگی‌ای کم است، با صفر پر کن
             for feat in required_features:
                 if feat not in df_features.columns:
-                    logging.warning(f"⚠️ ویژگی {feat} در دیتای ورودی نبود، مقدار 0.0 جایگزین شد.")
                     df_features[feat] = 0.0
             
-            # ۳. انتخاب ستون‌ها بر اساس نیاز مدل
+            # ۳. انتخاب ستون‌ها بر اساس نام‌های ذخیره شده در باندل
             X_test = df_features[required_features]
             
-            # ۴. پیش‌بینی احتمال
+            # ۴. پیش‌بینی
             prediction_prob = model.predict_proba(X_test)[0][1]
             
             logging.info(f"📊 پیش‌بینی هوشمند برای {pair}: دقت {prediction_prob:.2f}")
