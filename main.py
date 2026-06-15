@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (نسخه نهایی و اصلاح شده - رفع خطای TypeError آرگومان)
+# FILE PATH: main.py (نسخه فوق امن و ضدضربه - رفع قطعی تداخل آرگومان check_exits)
 # ---------------------------------------------------------
 import os
 import sys
@@ -26,10 +26,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 BRAIN = TradingBrain()
 db_lock = threading.Lock()
 
-def check_exits():
+def check_exits(*args, **kwargs):
     """
     تابع بررسی قیمت و بستن پوزیشن‌ها در صورت رسیدن به حد سود یا ضرر.
-    ورودی ندارد و کاملاً مستقل از واچ‌لیست کار می‌کند.
+    پذیرش داینامیک ورودی‌ها (*args, **kwargs) اضافه شد تا تحت هیچ شرایطی خطای TypeError آرگومان رخ ندهد.
     """
     try:
         positions = database.get_open_positions() 
@@ -38,7 +38,7 @@ def check_exits():
 
         for pos in positions:
             try:
-                # استخراج ایمن داده‌ها بر اساس ایندکس دیتابیس (id, timestamp, symbol, direction, entry, sl, tp1, tp2)
+                # استخراج ایمن داده‌ها بر اساس ایندکس دقیق دیتابیس
                 sig_id = pos[0]
                 symbol = pos[2]
                 direction = pos[3]
@@ -107,7 +107,7 @@ def heartbeat_job():
 
 def process_pair(pair):
     """
-    تابع پردازش موازی برای هر جفت‌ارز که دقیقاً یک آرگومان (pair) دریافت می‌کند.
+    تابع پردازش موازی برای هر جفت‌ارز واچ‌لیست
     """
     try:
         df = coinex_client.get_coinex_candles(pair)
@@ -143,13 +143,13 @@ def run_bot():
     logging.info("🤖 اسکنر هوشمند v8.2 (پشتیبانی موازی ۱۱ ارز) فعال شد.")
     database.init_db()
     
-    # ۱. ابتدا بررسی پوزیشن‌های باز انجام می‌شود (بدون مپ کردن به ارگومان‌های ترد واچ‌لیست)
+    # اجرای پایشگر خروج پوزیشن‌ها
     check_exits()                      
     
-    # ۲. بررسی خودارتقایی سیستم
+    # بررسی پروسه خود ارتقایی
     run_auto_optimization()
     
-    # ۳. اجرای موازی اسکنرها فقط و فقط برای تابع process_pair
+    # اجرای موازی اسکنرها برای واچ‌لیست جفت‌ارزها
     watchlist = getattr(config, 'WATCHLIST', [])
     with ThreadPoolExecutor(max_workers=12) as executor:
         executor.map(process_pair, watchlist)
