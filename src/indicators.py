@@ -30,7 +30,8 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
         ranges = pd.concat([high_low, high_close, low_close], axis=1)
         true_range = ranges.max(axis=1)
         df['atr'] = true_range.rolling(14).mean()
-        df['atr'] = df['atr'].fillna(method='bfill').fillna(0)
+        # اصلاح قطعی برای برطرف کردن خطای FutureWarning پانداز
+        df['atr'] = df['atr'].bfill().fillna(0)
 
         # --- ۳. اندیکاتور ADX ---
         upmove = df['high'].diff()
