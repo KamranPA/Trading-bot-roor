@@ -1,7 +1,8 @@
 # ---------------------------------------------------------
-# FILE PATH: src/brain.py (نسخه اصلاح‌شده و هماهنگ با فرمت نام‌گذاری چسبیده)
+# FILE PATH: src/brain.py (نسخه نهایی ضدگلوله)
 # ---------------------------------------------------------
 import os
+import re
 import joblib
 import logging
 import pandas as pd
@@ -17,69 +18,71 @@ class TradingBrain:
         self.load_all_models()
 
     def load_all_models(self):
-        """لود کردن خودکار تمام باندل‌های هوش مصنوعی موجود در پوشه مدل‌ها"""
+        """لود کردن خودکار تمام مدل‌ها با هر نوع فرمت نام‌گذاری چسبیده یا جدا"""
         if not os.path.exists(self.models_dir):
             logging.warning(f"⚠️ پوشه مدل‌ها یافت نشد: {self.models_dir}")
             return
             
         for file_name in os.listdir(self.models_dir):
-            if file_name.endswith("_model.pkl"):
-                # ۱. استخراج نام پایه ارز (مثال: SOLUSDT_model.pkl -> SOLUSDT)
-                base_name = file_name.replace("_model.pkl", "")
+            if file_name.endswith(".pkl"):
+                # ۱. پاکسازی نام فایل (مثال: ATOMUSDT_model.pkl -> ATOMUSDT)
+                base_name = file_name.replace("_model.pkl", "").replace(".pkl", "")
+                clean_name = re.sub(r'[^A-Za-z0-9]', '', base_name).upper()
                 
-                # ۲. تبدیل فرمت چسبیده به فرمت استاندارد صرافی با اسلش (SOLUSDT -> SOL/USDT)
-                if base_name.endswith("USDT"):
-                    pair = base_name.replace("USDT", "/USDT")
+                # ۲. استانداردسازی کلید به فرمت صرافی (ATOMUSDT -> ATOM/USDT)
+                if clean_name.endswith("USDT"):
+                    pair = clean_name[:-4] + "/USDT"
                 else:
-                    # پشتیبانی از ساختار قدیمی یا ارزهای دارای خط فاصله
-                    pair = base_name.replace("_", "/")
+                    pair = clean_name
                 
                 model_path = os.path.join(self.models_dir, file_name)
                 try:
-                    # لود کردن باندل ذخیره شده (شامل مدل لایت‌جی‌بی‌ام و لیست ویژگی‌ها)
                     self.models[pair] = joblib.load(model_path)
                     logging.info(f"🧠 مدل اختصاصی {pair} با موفقیت بارگذاری شد.")
                 except Exception as e:
-                    logging.error(f"❌ خطا در لود مدل {pair}: {e}")
+                    logging.error(f"❌ خطا در لود مدل {file_name}: {e}")
 
     def predict_signal(self, pair, current_features):
-        """
-        پیش‌بینی هوشمند احتمال موفقیت شکست (Breakout) بر اساس مدل LightGBM اختصاصی هر ارز
-        تطبیق خودکار ویژگی‌ها (Feature Alignment) جهت جلوگیری از ارور عدم تطابق ستون‌ها
-        """
-        # نرمال‌سازی نام جفت ارز (اطمینان از وجود اسلش)
-        if "/" not in pair and pair.endswith("USDT"):
-            pair = pair.replace("USDT", "/USDT")
+        """پیش‌بینی هوشمند سیگنال با تطبیق دقیق ستون‌های مدل"""
+        # همسان‌سازی نام ارز ورودی صرافی با فرمت ذخیره‌شده (تبدیل به فرمت اسلش‌دار)
+        clean_pair = re.sub(r'[^A-Za-z0-9]', '', pair).upper()
+        if clean_pair.endswith("USDT"):
+            search_pair = clean_pair[:-4] + "/USDT"
+        else:
+            search_pair = clean_pair
 
-        if pair not in self.models:
-            logging.warning(f"⚠️ مدلی برای جفت ارز {pair} یافت نشد. فیلتر هوش مصنوعی اعمال نمی‌شود.")
+        if search_pair not in self.models:
+            logging.warning(f"⚠️ مدلی برای جفت ارز {search_pair} یافت نشد. فیلتر هوش مصنوعی اعمال نمی‌شود.")
             return True 
             
         try:
-            # استخراج مدل و ویژگی‌ها از باندل لود شده
-            bundle = self.models[pair]
-            model = bundle['model']
-            required_features = bundle['feature_names']
+            bundle = self.models[search_pair]
             
-            # ۱. تبدیل دیکشنری ویژگی‌های فعلی بازار به DataFrame
+            # پشتیبانی از ساختارهای ذخیره‌سازی مختلف (دیکشنری باندل یا مدل خام)
+            if isinstance(bundle, dict) and 'model' in bundle:
+                model = bundle['model']
+                required_features = bundle.get('feature_names', [])
+            else:
+                model = bundle
+                required_features = [col for col in current_features.keys() if col.startswith('feat_')]
+            
             df_features = pd.DataFrame([current_features])
             
-            # ۲. تطبیق خودکار: پر کردن ستون‌های جا افتاده با 0.0 جهت جلوگیری از کرش لایت‌جی‌بی‌ام
-            for feat in required_features:
-                if feat not in df_features.columns:
-                    df_features[feat] = 0.0
+            # تطبیق ستون‌ها برای جلوگیری از ارور عدم تطابق فیچرها در LightGBM
+            if required_features:
+                for feat in required_features:
+                    if feat not in df_features.columns:
+                        df_features[feat] = 0.0
+                X_live = df_features[required_features]
+            else:
+                feat_cols = sorted([c for c in df_features.columns if c.startswith('feat_')])
+                X_live = df_features[feat_cols]
             
-            # ۳. چیدمان دقیق و مرتب‌سازی ستون‌ها دقیقاً بر اساس ترتیبی که مدل با آن آموزش دیده است
-            X_live = df_features[required_features]
-            
-            # ۴. محاسبه احتمال موفقیت معامله (خروجی بین 0.0 تا 1.0)
             prediction_prob = model.predict_proba(X_live)[0][1]
+            logging.info(f"📊 پیش‌بینی برای {search_pair}: احتمال موفقیت معامله {prediction_prob:.2f}")
             
-            logging.info(f"📊 پیش‌بینی هوشمند برای {pair}: احتمال موفقیت معامله {prediction_prob:.2f}")
-            
-            # ۵. شرط ورود: اگر حد نصاب بالای ۶۰٪ تایید را بیاورد، اجازه ورود صادر می‌شود
             return prediction_prob >= 0.60
                 
         except Exception as e:
-            logging.error(f"❌ خطا در پیش‌بینی جفت ارز {pair}: {type(e).__name__} - {e}")
-            return True # در صورت بروز خطای سیستمی، ربات به کار خود ادامه می‌دهد
+            logging.error(f"❌ خطا در پیش‌بینی جفت ارز {search_pair}: {e}")
+            return True
