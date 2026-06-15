@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (اصلاح شده: مدیریت امن پوزیشن‌ها و رفع باگ دیتابیس)
+# FILE PATH: main.py (نسخه نهایی و اصلاح شده - رفع خطای TypeError آرگومان)
 # ---------------------------------------------------------
 import os
 import sys
@@ -29,7 +29,7 @@ db_lock = threading.Lock()
 def check_exits():
     """
     تابع بررسی قیمت و بستن پوزیشن‌ها در صورت رسیدن به حد سود یا ضرر.
-    اصلاح شده جهت استخراج کاملاً ایمن بر اساس ترتیب ستون‌های دیتابیس مخزن.
+    ورودی ندارد و کاملاً مستقل از واچ‌لیست کار می‌کند.
     """
     try:
         positions = database.get_open_positions() 
@@ -38,9 +38,7 @@ def check_exits():
 
         for pos in positions:
             try:
-                # استخراج ایمن داده‌ها بر اساس ایندکس دقیق دیتابیس جهت جلوگیری از خطای Unpacking
-                # ساختار جدول signals در دیتابیس: 
-                # 0: id, 1: timestamp, 2: symbol, 3: direction, 4: entry_price, 5: stop_loss, 6: tp1, 7: tp2
+                # استخراج ایمن داده‌ها بر اساس ایندکس دیتابیس (id, timestamp, symbol, direction, entry, sl, tp1, tp2)
                 sig_id = pos[0]
                 symbol = pos[2]
                 direction = pos[3]
@@ -48,18 +46,18 @@ def check_exits():
                 sl = float(pos[5])
                 tp2 = float(pos[7])
                 
-                # دریافت کندل جاری با متد استاندارد صرافی شما
+                # دریافت کندل جاری از صرافی
                 df = coinex_client.get_coinex_candles(symbol, limit=2)
                 if df is None or df.empty: 
                     continue
                 
-                # بررسی هوشمند نام ستون قیمت برای جلوگیری از خطای KeyError
+                # بررسی هوشمند ستون قیمت برای جلوگیری از KeyError
                 if 'Close' in df.columns:
                     current_price = float(df.iloc[-1]['Close'])
                 elif 'close' in df.columns:
                     current_price = float(df.iloc[-1]['close'])
                 else:
-                    current_price = float(df.iloc[-1].iloc[4]) # ایندکس پیش‌فرض ستون Close
+                    current_price = float(df.iloc[-1].iloc[4])
 
                 # منطق خروج هوشمند
                 pnl = 0.0
@@ -108,6 +106,9 @@ def heartbeat_job():
         logging.error(f"خطا در ارسال گزارش Heartbeat: {e}")
 
 def process_pair(pair):
+    """
+    تابع پردازش موازی برای هر جفت‌ارز که دقیقاً یک آرگومان (pair) دریافت می‌کند.
+    """
     try:
         df = coinex_client.get_coinex_candles(pair)
         if df is None or df.empty: 
@@ -142,11 +143,13 @@ def run_bot():
     logging.info("🤖 اسکنر هوشمند v8.2 (پشتیبانی موازی ۱۱ ارز) فعال شد.")
     database.init_db()
     
-    # اجرای پایشگر هوشمند خروج پوزیشن‌ها قبل از شروع اسکن‌های جدید واچ‌لیست
+    # ۱. ابتدا بررسی پوزیشن‌های باز انجام می‌شود (بدون مپ کردن به ارگومان‌های ترد واچ‌لیست)
     check_exits()                      
     
+    # ۲. بررسی خودارتقایی سیستم
     run_auto_optimization()
     
+    # ۳. اجرای موازی اسکنرها فقط و فقط برای تابع process_pair
     watchlist = getattr(config, 'WATCHLIST', [])
     with ThreadPoolExecutor(max_workers=12) as executor:
         executor.map(process_pair, watchlist)
