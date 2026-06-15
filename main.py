@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (نسخه فوق امن و ضدضربه - رفع قطعی تداخل آرگومان check_exits)
+# FILE PATH: main.py (نسخه نهایی، کاملاً ایمن و برطرف‌کننده قطعی تداخل‌ها)
 # ---------------------------------------------------------
 import os
 import sys
@@ -29,7 +29,7 @@ db_lock = threading.Lock()
 def check_exits(*args, **kwargs):
     """
     تابع بررسی قیمت و بستن پوزیشن‌ها در صورت رسیدن به حد سود یا ضرر.
-    پذیرش داینامیک ورودی‌ها (*args, **kwargs) اضافه شد تا تحت هیچ شرایطی خطای TypeError آرگومان رخ ندهد.
+    پذیرش داینامیک ورودی‌ها ورودی‌های اجباری سیستم را بی‌اثر می‌کند تا خطا رخ ندهد.
     """
     try:
         positions = database.get_open_positions() 
@@ -38,7 +38,6 @@ def check_exits(*args, **kwargs):
 
         for pos in positions:
             try:
-                # استخراج ایمن داده‌ها بر اساس ایندکس دقیق دیتابیس
                 sig_id = pos[0]
                 symbol = pos[2]
                 direction = pos[3]
@@ -46,12 +45,10 @@ def check_exits(*args, **kwargs):
                 sl = float(pos[5])
                 tp2 = float(pos[7])
                 
-                # دریافت کندل جاری از صرافی
                 df = coinex_client.get_coinex_candles(symbol, limit=2)
                 if df is None or df.empty: 
                     continue
                 
-                # بررسی هوشمند ستون قیمت برای جلوگیری از KeyError
                 if 'Close' in df.columns:
                     current_price = float(df.iloc[-1]['Close'])
                 elif 'close' in df.columns:
@@ -59,7 +56,6 @@ def check_exits(*args, **kwargs):
                 else:
                     current_price = float(df.iloc[-1].iloc[4])
 
-                # منطق خروج هوشمند
                 pnl = 0.0
                 should_close = False
                 
@@ -83,7 +79,6 @@ def check_exits(*args, **kwargs):
                         database.update_position_status(sig_id, 'CLOSED', pnl)
                     logging.info(f"✅ پوزیشن {symbol} بسته شد. سود/ضرر: {pnl:.2f}%")
                     
-                    # اطلاع‌رسانی خروج به تلگرام
                     try:
                         telegram_bot.send_message(f"🚨 **خروج از پوزیشن {symbol}**\nجهت: {direction}\nسود/ضرر نهایی: {pnl:.2f}%")
                     except Exception:
@@ -106,9 +101,6 @@ def heartbeat_job():
         logging.error(f"خطا در ارسال گزارش Heartbeat: {e}")
 
 def process_pair(pair):
-    """
-    تابع پردازش موازی برای هر جفت‌ارز واچ‌لیست
-    """
     try:
         df = coinex_client.get_coinex_candles(pair)
         if df is None or df.empty: 
@@ -143,13 +135,11 @@ def run_bot():
     logging.info("🤖 اسکنر هوشمند v8.2 (پشتیبانی موازی ۱۱ ارز) فعال شد.")
     database.init_db()
     
-    # اجرای پایشگر خروج پوزیشن‌ها
+    # اجرای مستقیم پایشگر خروج پوزیشن‌ها
     check_exits()                      
     
-    # بررسی پروسه خود ارتقایی
     run_auto_optimization()
     
-    # اجرای موازی اسکنرها برای واچ‌لیست جفت‌ارزها
     watchlist = getattr(config, 'WATCHLIST', [])
     with ThreadPoolExecutor(max_workers=12) as executor:
         executor.map(process_pair, watchlist)
