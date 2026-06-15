@@ -43,6 +43,7 @@ def train_model_for_symbol(symbol, mode="backtest"):
     if mode == "monthly":
         df_backtest = get_data_from_db(config.DB_PATH_BACKTEST, symbol)
         df_live = get_data_from_db(config.DB_PATH_LIVE, symbol)
+        # 🛠️ اصلاح شد: ignore_index به جای iore_index
         df = pd.concat([df_backtest, df_live], ignore_index=True)
     else:
         df = get_data_from_db(config.DB_PATH_BACKTEST, symbol)
