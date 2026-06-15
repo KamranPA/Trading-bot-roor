@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/strategy.py (نسخه نهایی، اصلاح تداخل آرگومان و دریافت هوشمند ورودی‌ها)
+# FILE PATH: src/strategy.py
 # ---------------------------------------------------------
 import os
 import json
@@ -47,45 +47,16 @@ def is_blocked_by_8h_filter(pair, current_direction):
         
     return False
 
-def generate_signal(*args, **kwargs):
-    """
-    دریافت هوشمند ورودی‌ها: 
-    جلوگیری از خطای TypeError در صورت جابه‌جا فرستاده شدن df و pair از فایل‌های دیگر.
-    """
-    df = None
-    pair = None
-    model = kwargs.get('model', None)
-
-    # ۱. پردازش آرگومان‌های موقعیتی (تشخیص نوع داده)
-    for arg in args:
-        if isinstance(arg, pd.DataFrame):
-            df = arg
-        elif isinstance(arg, str):
-            pair = arg
-        elif hasattr(arg, 'predict_signal') or hasattr(arg, 'models'):
-            model = arg
-
-    # ۲. پردازش آرگومان‌های نامی (اگر پیدا نشده باشند)
-    if df is None: df = kwargs.get('df', None)
-    if pair is None: pair = kwargs.get('pair', None)
-
-    # ۳. بررسی نهایی صحت داده‌ها
-    if df is None or pair is None:
-        return None
-
+def generate_signal(df, pair, model=None):
     # اطمینان از وجود دیتای کافی برای محاسبه اندیکاتورها (به ویژه EMA 200)
-    if len(df) < 200:
+    if df is None or len(df) < 200:
         return None
 
     idx = len(df) - 1
     candle = df.iloc[idx]
     
     # ۲. مدیریت ریسک: کنترل سقف تعداد پوزیشن‌های باز
-    try:
-        if database.get_open_positions_count() >= config.MAX_OPEN_POSITIONS:
-            return None
-    except Exception as e:
-        print(f"⚠️ خطا در بررسی تعداد پوزیشن‌های باز: {e}")
+    if database.get_open_positions_count() >= config.MAX_OPEN_POSITIONS:
         return None
 
     # --- خواندن پارامترهای اختصاصی ارز از best_params.json ---
@@ -111,52 +82,43 @@ def generate_signal(*args, **kwargs):
         pass # در صورت بروز خطا، با همان مقادیر پیش‌فرض ادامه می‌دهد
 
     # ۳. فیلتر جهت‌گیری و شتاب روند کلان با حد آستانه اختصاصی این ارز
-    # اصلاح لایه محافظتی استخراج داده برای جلوگیری از خطای KeyError یا مقدار None
-    current_adx = candle.get('feat_adx') if 'feat_adx' in candle.index else candle.get('adx', 0)
-    if pd.isna(current_adx) or float(current_adx) < adx_thresh:
+    if float(candle.get('feat_adx', 0)) < adx_thresh:
         return None
 
-    # ۴. شناسایی سطوح سویینگ قیمتی (یکپارچه‌سازی نام ستون‌ها با حروف کوچک)
+    # ۴. شناسایی سطوح سویینگ قیمتی
     last_swing_high = strategy_utils.find_last_swing(df, 'high', config.SWING_WINDOW)
     last_swing_low = strategy_utils.find_last_swing(df, 'low', config.SWING_WINDOW)
 
     if last_swing_high is None or last_swing_low is None:
         return None
 
-    # ۵. استخراج خودکار ویژگی‌ها با فیلتر ایمن جهت جلوگیری از تداخل آرگومان در تابع دیتابیس
-    # با این فیلتر، کلمات کلیدی اصلی مثل pair یا direction هرگز دوبار فرستاده نمی‌شوند.
-    reserved_keywords = {'pair', 'direction', 'entry_price', 'stop_loss', 'tp1', 'tp2', 'position_size'}
-    features_dict = {}
-    for col in df.columns:
-        if col.startswith('feat_') and col not in reserved_keywords:
-            val = candle[col]
-            features_dict[col] = 0.0 if pd.isna(val) else float(val)
+    # ۵. آماده‌سازی ویژگی‌ها برای هوش مصنوعی
+    features_dict = {
+        'feat_adx': float(candle.get('feat_adx', 0)),
+        'feat_atr_percent': float(candle.get('feat_atr_percent', 0)),
+        'feat_rsi': float(candle.get('feat_rsi', 0)),
+        'feat_trend_line': float(candle.get('feat_trend_line', 0)),
+        'feat_ema_deviation': float(candle.get('feat_ema_deviation', 0)),
+        'feat_rsi_momentum': float(candle.get('feat_rsi_momentum', 0)),
+        'feat_body_ratio': float(candle.get('feat_body_ratio', 0))
+    }
 
-    if not features_dict:
-        print(f"⚠️ هشدار: هیچ ویژگی یادگیری ماشین با پیشوند 'feat_' پیدا نشد.")
-
-    # ۶. اعمال فیلتر هوش مصنوعی اختصاصی (Multi-Model / LightGBM)
-    if model is not None and features_dict:
+    # ۶. اعمال فیلتر هوش مصنوعی اختصاصی (Multi-Model)
+    if model is not None:
         try:
-            # ارسال ویژگی‌های خودکار کشف شده به مغز مدل (TradingBrain)
-            if not model.predict_signal(pair, features_dict):
+            if not model.predict(pair, features_dict):
                 return None
         except Exception as e:
-            print(f"❌ خطا در مدل هوش مصنوعی {pair}: {e}")
+            print(f"خطا در مدل هوش مصنوعی {pair}: {e}")
             pass
 
     # ۷. مشخص کردن قیمت‌های لحظه‌ای کندل فعلی برای منطق ورود شکست سطوح
-    # اصلاح کلیدی: تغییر High و Low به حروف کوچک جهت هماهنگی با کل سیستم و دیتابیس صرافی
-    high_price = float(candle['high']) if 'high' in candle.index else float(candle.get('High', 0))
-    low_price = float(candle['low']) if 'low' in candle.index else float(candle.get('Low', 0))
+    high_price = float(candle['High'])
+    low_price = float(candle['Low'])
     
     # ۸. منطق شکست سطوح در لحظه برخورد (Intra-candle Breakout Logic)
-    current_rsi = candle.get('feat_rsi') if 'feat_rsi' in candle.index else candle.get('rsi', 50)
-    if pd.isna(current_rsi):
-        current_rsi = 50
-        
-    is_bullish_momentum = float(current_rsi) > 50
-    is_bearish_momentum = float(current_rsi) < 50
+    is_bullish_momentum = float(candle.get('feat_rsi', 50)) > 50
+    is_bearish_momentum = float(candle.get('feat_rsi', 50)) < 50
 
     if high_price > last_swing_high and is_bullish_momentum:
         entry_price = last_swing_high  # قیمت ورود دقیقاً روی سطح شکست مقاومت
@@ -167,11 +129,8 @@ def generate_signal(*args, **kwargs):
             
         # مدیریت سرمایه داینامیک با اعمال risk_multiplier
         risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0) * risk_multiplier
-        atr_val = candle.get('atr') if 'atr' in candle.index else candle.get('feat_atr_percent', 1.0)
-        if pd.isna(atr_val) or float(atr_val) <= 0:
-            atr_val = 1.0
-            
-        sl_dist = 1.5 * float(atr_val) * sl_ratio
+        atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
+        sl_dist = 1.5 * atr_val * sl_ratio
         tp_dist = sl_dist * tp_ratio
         
         stop_loss = entry_price - sl_dist
@@ -181,12 +140,12 @@ def generate_signal(*args, **kwargs):
         return {
             'pair': pair, 
             'direction': 'LONG', 
-            'entry_price': round(float(entry_price), 4),
-            'stop_loss': round(float(stop_loss), 4), 
-            'tp1': round(float(entry_price + (tp_dist / 2)), 4),
-            'tp2': round(float(entry_price + tp_dist), 4),
-            'position_size': round(float(position_size), 2), 
-            **features_dict  # اضافه کردن ایمن ویژگی‌ها بدون تداخل نام آرگومان
+            'entry_price': round(entry_price, 4),
+            'stop_loss': round(stop_loss, 4), 
+            'tp1': round(entry_price + (tp_dist / 2), 4),
+            'tp2': round(entry_price + tp_dist, 4),
+            'position_size': round(position_size, 2), 
+            **features_dict
         }
     
     elif low_price < last_swing_low and is_bearish_momentum:
@@ -198,11 +157,8 @@ def generate_signal(*args, **kwargs):
             
         # مدیریت سرمایه داینامیک با اعمال risk_multiplier
         risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0) * risk_multiplier
-        atr_val = candle.get('atr') if 'atr' in candle.index else candle.get('feat_atr_percent', 1.0)
-        if pd.isna(atr_val) or float(atr_val) <= 0:
-            atr_val = 1.0
-            
-        sl_dist = 1.5 * float(atr_val) * sl_ratio
+        atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
+        sl_dist = 1.5 * atr_val * sl_ratio
         tp_dist = sl_dist * tp_ratio
         
         stop_loss = entry_price + sl_dist
@@ -212,12 +168,12 @@ def generate_signal(*args, **kwargs):
         return {
             'pair': pair, 
             'direction': 'SHORT', 
-            'entry_price': round(float(entry_price), 4),
-            'stop_loss': round(float(stop_loss), 4), 
-            'tp1': round(float(entry_price - (tp_dist / 2)), 4),
-            'tp2': round(float(entry_price - tp_dist), 4),
-            'position_size': round(float(position_size), 2), 
-            **features_dict  # اضافه کردن ایمن ویژگی‌ها بدون تداخل نام آرگومان
+            'entry_price': round(entry_price, 4),
+            'stop_loss': round(stop_loss, 4), 
+            'tp1': round(entry_price - (tp_dist / 2), 4),
+            'tp2': round(entry_price - tp_dist, 4),
+            'position_size': round(position_size, 2), 
+            **features_dict
         }
 
     return None
