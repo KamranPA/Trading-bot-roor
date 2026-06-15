@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/backtester.py (v8.4 - Two-Phase AI Architecture)
+# FILE PATH: src/backtester.py (v8.4 - Two-Phase AI Architecture - Updated with Scoring)
 # ---------------------------------------------------------
 import os
 import sqlite3
@@ -26,6 +26,7 @@ def init_backtest_db(db_path):
                 status TEXT DEFAULT 'OPEN',
                 closed_at TEXT,
                 pnl_percent REAL,
+                signal_score REAL, -- 🌟 ستون امتیاز به دیتابیس بک‌تست اضافه شد
                 feat_adx REAL,
                 feat_vol_ratio REAL,
                 feat_atr_percent REAL,
@@ -37,6 +38,13 @@ def init_backtest_db(db_path):
                 feat_high_volume_session REAL
             )
         """)
+        
+        # 🛠️ آپدیت خودکار دیتابیس‌های قدیمی بک‌تست
+        try:
+            cursor.execute("ALTER TABLE signals ADD COLUMN signal_score REAL")
+        except sqlite3.OperationalError:
+            pass # در صورتی که ستون از قبل وجود داشته باشد، خطا را نادیده می‌گیرد
+            
         conn.commit()
 
 def run_backtest_for_symbol(symbol, db_path, brain_instance):
@@ -109,14 +117,16 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
                 total_trades_raw += 1
                 is_in_position_raw = False
                 
+                # 🌟 اضافه شدن signal_score به ساختار Insert در دیتابیس
                 cursor.execute("""
                     INSERT INTO signals (
-                        timestamp, symbol, direction, entry_price, stop_loss, tp1, tp2, status, closed_at, pnl_percent,
+                        timestamp, symbol, direction, entry_price, stop_loss, tp1, tp2, status, closed_at, pnl_percent, signal_score,
                         feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, 
                         feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'CLOSED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'CLOSED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    entry_time_raw, symbol, direction_raw, entry_price_raw, stop_loss_raw, tp1_raw, tp2_raw, current_time, pnl,
+                    entry_time_raw, symbol, direction_raw, entry_price_raw, stop_loss_raw, tp1_raw, tp2_raw, current_time, pnl, 
+                    entry_features_raw.get('signal_score', 0.0),
                     entry_features_raw['feat_adx'], entry_features_raw['feat_vol_ratio'], entry_features_raw['feat_atr_percent'],
                     entry_features_raw['feat_rsi'], entry_features_raw['feat_trend_line'], entry_features_raw['feat_ema_deviation'],
                     entry_features_raw['feat_rsi_momentum'], entry_features_raw['feat_body_ratio'], entry_features_raw['feat_high_volume_session']
@@ -147,7 +157,8 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
             'feat_ema_deviation': float(current_candle.get('feat_ema_deviation', 0)),
             'feat_rsi_momentum': float(current_candle.get('feat_rsi_momentum', 0)),
             'feat_body_ratio': float(current_candle.get('feat_body_ratio', 0)),
-            'feat_high_volume_session': float(current_candle.get('feat_high_volume_session', 0))
+            'feat_high_volume_session': float(current_candle.get('feat_high_volume_session', 0)),
+            'signal_score': 0.0 # 🌟 مقدار پیش‌فرض برای دیتای آموزشی خام
         }
 
         if high_price > last_swing_high and is_bullish_momentum:
