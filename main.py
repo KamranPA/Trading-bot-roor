@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (نسخه اصلاح‌شده و هماهنگ با اندیکاتورها)
+# FILE PATH: main.py (نسخه فوق امن - حل قطعی خطای حروف ستون‌ها در اندیکاتور)
 # ---------------------------------------------------------
 import os
 import sys
@@ -7,7 +7,6 @@ import logging
 import sqlite3
 import threading
 import datetime
-import pandas as pd
 from concurrent.futures import ThreadPoolExecutor
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -30,7 +29,6 @@ db_lock = threading.Lock()
 def check_exits(*args, **kwargs):
     """
     تابع بررسی قیمت و بستن پوزیشن‌ها در صورت رسیدن به حد سود یا ضرر.
-    کاملاً مستقل قیمت را چک می‌کند تا به محاسبات اندیکاتورها آسیبی نزند.
     """
     try:
         positions = database.get_open_positions() 
@@ -46,7 +44,6 @@ def check_exits(*args, **kwargs):
                 sl = float(pos[5])
                 tp2 = float(pos[7])
                 
-                # دریافت کندل جاری از صرافی
                 if hasattr(coinex_client, 'get_coinex_candles'):
                     df = coinex_client.get_coinex_candles(symbol, limit=2)
                 else:
@@ -55,40 +52,30 @@ def check_exits(*args, **kwargs):
                 if df is None or not hasattr(df, 'empty') or df.empty: 
                     continue
                 
-                # پیدا کردن قیمت پایانی بدون تغییر دادن ساختار اصلی دیتافریم
+                # پیدا کردن قیمت بدون دستکاری فیزیکی ستون‌ها
                 current_price = None
                 for col in ['Close', 'close']:
                     if col in df.columns:
                         current_price = float(df.iloc[-1][col])
                         break
                 
-                if current_price == None:
-                    current_price = float(df.iloc[-1].iloc[4]) # ایندکس پیش‌فرض ستون قیمت
+                if current_price is None:
+                    current_price = float(df.iloc[-1].iloc[4])
 
-                # منطق خروج هوشمند
                 pnl = 0.0
                 should_close = False
                 
                 if direction == "LONG":
-                    if current_price <= sl: 
-                        pnl = ((sl - entry) / entry) * 100
-                        should_close = True
-                    elif current_price >= tp2: 
-                        pnl = ((tp2 - entry) / entry) * 100
-                        should_close = True
+                    if current_price <= sl: pnl = ((sl - entry) / entry) * 100; should_close = True
+                    elif current_price >= tp2: pnl = ((tp2 - entry) / entry) * 100; should_close = True
                 elif direction == "SHORT":
-                    if current_price >= sl: 
-                        pnl = ((entry - sl) / entry) * 100
-                        should_close = True
-                    elif current_price <= tp2: 
-                        pnl = ((entry - tp2) / entry) * 100
-                        should_close = True
+                    if current_price >= sl: pnl = ((entry - sl) / entry) * 100; should_close = True
+                    elif current_price <= tp2: pnl = ((entry - tp2) / entry) * 100; should_close = True
                 
                 if should_close:
                     with db_lock:
                         database.update_position_status(sig_id, 'CLOSED', pnl)
                     logging.info(f"✅ پوزیشن {symbol} بسته شد. سود/ضرر: {pnl:.2f}%")
-                    
                     try:
                         telegram_bot.send_message(f"🚨 **خروج از پوزیشن {symbol}**\nجهت: {direction}\nسود/ضرر نهایی: {pnl:.2f}%")
                     except Exception:
@@ -96,7 +83,6 @@ def check_exits(*args, **kwargs):
             except Exception as pos_err:
                 logging.error(f"خطا در بررسی پوزیشن {pos}: {pos_err}")
                 continue
-
     except Exception as e:
         logging.error(f"خطا در بررسی پوزیشن‌های باز: {e}")
 
@@ -112,7 +98,7 @@ def heartbeat_job():
 
 def process_pair(pair):
     """
-    تابع پردازش موازی جفت‌ارزها بدون دستکاری ساختار دیتافریم ورودی صرافی
+    تابع پردازش موازی جفت‌ارزها - مپ کردن دوگانه ستون‌ها برای هماهنگی با فایل indicators
     """
     try:
         if hasattr(coinex_client, 'get_coinex_candles'):
@@ -123,7 +109,11 @@ def process_pair(pair):
         if df is None or not hasattr(df, 'empty') or df.empty: 
             return
             
-        # دیتای خام مستقیماً به اندیکاتورها سپرده می‌شود تا بر اساس ساختار اصلی خودش پردازش شود
+        # 🟢 تزریق جادویی: ساخت ستون‌های حروف کوچک در کنار حروف بزرگ تاindicators.py کرش نکند!
+        for col in list(df.columns):
+            df[col.lower()] = df[col]
+        
+        # فرستادن دیتای ایمن‌شده به اندیکاتورها و استراتژی
         df = indicators.calculate_indicators(df)
         signal = strategy.generate_signal(df, pair, model=BRAIN)
         
@@ -153,9 +143,7 @@ def run_bot():
     logging.info("🤖 اسکنر هوشمند v8.2 (پشتیبانی موازی ۱۱ ارز) فعال شد.")
     database.init_db()
     
-    # اجرای پایشگر خروج پوزیشن‌ها
     check_exits()                      
-    
     run_auto_optimization()
     
     watchlist = getattr(config, 'WATCHLIST', [])
