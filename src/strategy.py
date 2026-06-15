@@ -1,3 +1,5 @@
+#src/strategy.py
+
 import os
 import json
 import sqlite3
@@ -75,9 +77,10 @@ def generate_signal(df, pair, model=None):
         'feat_body_ratio': float(candle.get('feat_body_ratio', 0))
     }
 
-    # 🌟 اصلاح نهایی: استفاده از متد predict_signal و تبدیل به DataFrame
+    # اصلاح فراخوانی مدل برای هماهنگی کامل با brain.py
     if model is not None:
         try:
+            # تبدیل دیکشنری به دیتافریم برای ورودی استاندارد مدل
             df_features = pd.DataFrame([features_dict])
             if not model.predict_signal(pair, df_features):
                 return None
