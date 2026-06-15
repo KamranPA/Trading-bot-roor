@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (نسخه نهایی، کاملاً ایمن و برطرف‌کننده قطعی تداخل‌ها)
+# FILE PATH: main.py (نسخه نهایی، حل قطعی خطای KeyError: close با یکپارچه‌سازی ستون‌ها)
 # ---------------------------------------------------------
 import os
 import sys
@@ -29,7 +29,6 @@ db_lock = threading.Lock()
 def check_exits(*args, **kwargs):
     """
     تابع بررسی قیمت و بستن پوزیشن‌ها در صورت رسیدن به حد سود یا ضرر.
-    پذیرش داینامیک ورودی‌ها ورودی‌های اجباری سیستم را بی‌اثر می‌کند تا خطا رخ ندهد.
     """
     try:
         positions = database.get_open_positions() 
@@ -49,9 +48,10 @@ def check_exits(*args, **kwargs):
                 if df is None or df.empty: 
                     continue
                 
-                if 'Close' in df.columns:
-                    current_price = float(df.iloc[-1]['Close'])
-                elif 'close' in df.columns:
+                # یکپارچه‌سازی حروف ستون‌ها به حروف کوچک برای جلوگیری از KeyError
+                df.columns = df.columns.str.lower()
+                
+                if 'close' in df.columns:
                     current_price = float(df.iloc[-1]['close'])
                 else:
                     current_price = float(df.iloc[-1].iloc[4])
@@ -101,11 +101,17 @@ def heartbeat_job():
         logging.error(f"خطا در ارسال گزارش Heartbeat: {e}")
 
 def process_pair(pair):
+    """
+    تابع پردازش موازی جفت‌ارزها همراه با استانداردسازی نام ستون‌ها
+    """
     try:
         df = coinex_client.get_coinex_candles(pair)
         if df is None or df.empty: 
             return
             
+        # تبدیل تمام ستون‌ها (Close, High, Low, Open) به حروف کوچک قبل از ورود به محاسبات اندیکاتور
+        df.columns = df.columns.str.lower()
+        
         df = indicators.calculate_indicators(df)
         signal = strategy.generate_signal(df, pair, model=BRAIN)
         
@@ -135,7 +141,7 @@ def run_bot():
     logging.info("🤖 اسکنر هوشمند v8.2 (پشتیبانی موازی ۱۱ ارز) فعال شد.")
     database.init_db()
     
-    # اجرای مستقیم پایشگر خروج پوزیشن‌ها
+    # اجرای پایشگر خروج پوزیشن‌ها
     check_exits()                      
     
     run_auto_optimization()
