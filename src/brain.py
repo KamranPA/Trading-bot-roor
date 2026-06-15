@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/brain.py (v8.8 - Ultra Safe Predictor)
+# FILE PATH: src/brain.py (v8.9 - Robust Predictor)
 # ---------------------------------------------------------
 import os
 import sys
@@ -36,7 +36,7 @@ class TradingBrain:
 
     def predict_signal(self, symbol, current_features):
         """
-        دریافت ویژگی‌ها (به صورت دیکشنری، سری یا دیتافریم) و پیش‌بینی امن
+        دریافت ویژگی‌ها و پیش‌بینی امن با مدیریت خطاهای حافظه LightGBM
         """
         # اگر مدلی برای این ارز ساخته نشده است، سیگنال پیش‌فرض تایید می‌شود
         if symbol not in self.models:
@@ -53,11 +53,10 @@ class TradingBrain:
             else:
                 df_features = current_features.copy()
 
-            # ۲. استخراج لیست ویژگی‌هایی که مدل در زمان آموزش یاد گرفته است
+            # ۲. استخراج لیست ویژگی‌های آموزش دیده
             if hasattr(model, 'feature_name_'):
                 model_features = model.feature_name_
             else:
-                # ویژگی‌های پشتیبان
                 model_features = [
                     'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 
                     'feat_trend_line', 'feat_ema_deviation', 'feat_rsi_momentum', 
@@ -67,26 +66,28 @@ class TradingBrain:
             # ۳. بررسی امن ستون‌ها و پر کردن جای خالی
             for feat in model_features:
                 if feat not in df_features.columns:
-                    # نگاشت نام‌های قدیمی مثل atr به نام جدید
                     if feat == 'feat_atr_percent' and 'atr' in df_features.columns:
                         df_features['feat_atr_percent'] = df_features['atr']
                     else:
                         df_features[feat] = 0.0
 
-            # ۴. مرتب‌سازی دقیق ستون‌ها مطابق آنچه LightGBM انتظار دارد
-            df_features = df_features[model_features]
+            # ۴. مرتب‌سازی دقیق ستون‌ها و تبدیل به float32 (بسیار مهم برای رفع خطای pointer)
+            df_features = df_features[model_features].fillna(0.0)
+            df_features = df_features.astype(np.float32)
 
-            # ۵. تبدیل اجباری تمام مقادیر به اعشاری (Float) برای جلوگیری از خطای TypeError و DataFrame.dtypes
-            df_features = df_features.astype(float)
+            # ۵. اطمینان از اینکه دیتافریم خالی نیست
+            if df_features.empty or df_features.shape[1] == 0:
+                print(f"⚠️ هشدار: داده ورودی برای {symbol} خالی است.")
+                return False
 
-            # ۶. پیش‌بینی بدون کرش
+            # ۶. پیش‌بینی
             prediction = model.predict(df_features)
             
             # خروجی 1 به معنای تایید پوزیشن است
             return bool(prediction[0] == 1)
 
         except Exception as e:
-            # چاپ ارور دقیق در ترمینال برای دیباگ بدون متوقف کردن کل ربات
-            print(f"❌ خطا در پیش‌بینی {symbol}: {e}")
-            # در صورت کرش کردن محاسبات، برای امنیت سرمایه، معامله رد می‌شود
+            # چاپ ارور دقیق برای دیباگ
+            print(f"❌ خطای بحرانی در پیش‌بینی {symbol}: {e}")
+            # بازگشت ایمن در صورت شکست
             return False
