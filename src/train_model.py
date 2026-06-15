@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/train_model.py (v8.6 - Strict Order Alignment)
+# FILE PATH: src/train_model.py (v8.6.1 - Fixed Data Imbalance Crash)
 # ---------------------------------------------------------
 import sqlite3
 import pandas as pd
@@ -75,13 +75,18 @@ def train_model_for_symbol(symbol, mode="backtest"):
     # ساخت ستون هدف داخل خود دیتافریم
     df['target_label'] = np.where(df['pnl_percent'] > 0, 1, 0)
     
+    # ⚠️ بررسی تعادل دیتا: آیا حداقل یک سود و یک ضرر داریم؟
+    if df['target_label'].nunique() < 2:
+        print(f"⚠️ مدل {symbol} قابل آموزش نیست (داده‌های شما فقط شامل سود یا فقط شامل ضرر است).")
+        return
+    
     # ⚠️ اصلاح ترتیب (مهم): ابتدا فیلترها و حذف تکراری‌ها روی کل دیتافریم اعمال می‌شود
     df = df.dropna(subset=features + ['target_label'])
     df = df.sort_values(by='timestamp', ascending=True)
     df = df.drop_duplicates(subset=['timestamp'])
     
     # بررسی حداقل تعداد داده‌های تصفیه شده
-    if len(df) < 10:  # حد نصاب حداقل ۱۰ معامله برای پپلاین بک‌تست
+    if len(df) < 10: 
         print(f"⚠️ معاملات کافی برای ارتقای {symbol} پس از فیلتر موجود نیست ({len(df)}).")
         return
 
@@ -101,6 +106,7 @@ def train_model_for_symbol(symbol, mode="backtest"):
         return
 
     # --- ۴. آموزش مدل LightGBM ---
+    # اضافه شدن class_weight='balanced' برای رفع خطای Imbalance و عدم تعادل کلاس‌ها
     model = LGBMClassifier(
         n_estimators=100,       
         learning_rate=0.03,      
@@ -109,6 +115,7 @@ def train_model_for_symbol(symbol, mode="backtest"):
         min_child_samples=15,
         subsample=0.7,           
         colsample_bytree=0.8,
+        class_weight='balanced', 
         random_state=42,
         n_jobs=1,
         verbose=-1
