@@ -1,4 +1,4 @@
-name: Trading Bot - Live DB Update
+Name: Trading Bot - Live DB Update
 on:
   schedule:
     - cron: '*/30 * * * *'
@@ -27,13 +27,15 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           
-          # استیج کردن هر دو فایل دیتابیس و پارامترهای بهینه‌ساز هوش مصنوعی
-          git add data/trading_bot.db best_params.json
+          # 🛠️ اصلاح: استیج کردن تمام تغییرات در محیط اجرا
+          git add .
           
           # بررسی اینکه آیا تغییراتی برای کامیت وجود دارد یا خیر
           if ! git diff --cached --quiet; then
             git commit -m "Update DB and AI Parameters: $(date)"
-            git push
+            
+            # 🛠️ اصلاح نهایی: استفاده از force برای جلوگیری از خطاهای Rejected و تداخل در دیتابیس‌ها
+            git push origin HEAD:${{ github.ref_name }} --force
           else
             echo "No changes detected in DB or best_params.json."
           fi
