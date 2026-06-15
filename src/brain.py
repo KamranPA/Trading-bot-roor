@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/brain.py (نسخه کامل و اصلاح‌شده)
+# FILE PATH: src/brain.py (نسخه نهایی و ایمن شده)
 # ---------------------------------------------------------
 import os
 import joblib
@@ -15,13 +15,13 @@ class TradingBrain:
         self.load_all_models()
 
     def load_all_models(self):
+        """لود کردن تمام مدل‌های آموزش‌دیده از پوشه models"""
         if not os.path.exists(self.models_dir):
             logging.warning(f"⚠️ پوشه مدل‌ها یافت نشد: {self.models_dir}")
             return
             
         for file_name in os.listdir(self.models_dir):
             if file_name.endswith("_model.pkl"):
-                # استخراج نام ارز: حذف _model.pkl از آخر و تبدیل _ به /
                 pair = file_name.replace("_model.pkl", "").replace("_", "/")
                 model_path = os.path.join(self.models_dir, file_name)
                 try:
@@ -32,7 +32,7 @@ class TradingBrain:
 
     def predict_signal(self, pair, current_features):
         """
-        پیش‌بینی سیگنال بر اساس ویژگی‌های دریافتی
+        پیش‌بینی سیگنال با مدیریت خطاهای ساختاری دیتای ورودی
         """
         if pair not in self.models:
             return None 
@@ -40,23 +40,27 @@ class TradingBrain:
         try:
             model = self.models[pair]
             
-            # ۱. تبدیل دیکشنری ویژگی‌ها به DataFrame برای سازگاری با LightGBM
+            # ۱. تبدیل دیکشنری به DataFrame
             df_features = pd.DataFrame([current_features])
             
-            # ۲. اطمینان از اینکه ترتیب ستون‌ها با زمان آموزش مدل یکی است
-            # (مدل‌های LightGBM ذخیره شده با joblib ویژگی feature_name_ را دارند)
-            feature_names = model.feature_name_
-            X_test = df_features[feature_names]
+            # ۲. تطبیق ویژگی‌های ورودی با نیازهای مدل
+            # رفع مشکل KeyError: اگر مدلی ویژگی خاصی را بخواهد که در دیتا نیست، آن را با 0.0 پر می‌کند
+            required_features = model.feature_name_
+            for feat in required_features:
+                if feat not in df_features.columns:
+                    logging.warning(f"⚠️ ویژگی {feat} در دیتای ورودی نبود، مقدار 0.0 جایگزین شد.")
+                    df_features[feat] = 0.0
             
-            # ۳. دریافت احتمال (0 تا 1)
+            # ۳. انتخاب ستون‌ها بر اساس نیاز مدل
+            X_test = df_features[required_features]
+            
+            # ۴. پیش‌بینی احتمال
             prediction_prob = model.predict_proba(X_test)[0][1]
             
             logging.info(f"📊 پیش‌بینی هوشمند برای {pair}: دقت {prediction_prob:.2f}")
             
-            # ۴. بازگشت خروجی بر اساس آستانه 0.60
             return prediction_prob >= 0.60
                 
         except Exception as e:
-            # نمایش دقیق خطا برای جلوگیری از توقف سیستم
             logging.error(f"خطا در پیش‌بینی {pair}: {type(e).__name__} - {e}")
             return None
