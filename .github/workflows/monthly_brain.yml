@@ -24,11 +24,23 @@ jobs:
         python-version: '3.10'
         cache: 'pip'
 
+    - name: Install System Dependencies for LightGBM
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgomp1
+
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
         # 🛠️ اصلاح: scikit-learn حذف و صرفاً پکیج‌های سبک و حیاتی ربات شما قرار گرفتند
         pip install pandas numpy joblib lightgbm
+
+    - name: Ensure Data Directory and DB Exist
+      run: |
+        mkdir -p data
+        # ایجاد فایل‌های دیتابیس خالی در صورتی که وجود نداشته باشند تا اسکریپت کرش نکند
+        touch data/crypto_backtest.db
+        touch data/crypto_live.db
 
     - name: Execute Machine Learning Training (Monthly Mode)
       env:
