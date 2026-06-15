@@ -5,6 +5,7 @@ import datetime
 import config
 from src import database, strategy_utils
 import pandas as pd
+import logging
 
 def is_blocked_by_8h_filter(pair, current_direction):
     try:
@@ -13,7 +14,7 @@ def is_blocked_by_8h_filter(pair, current_direction):
         with sqlite3.connect(database.DB_PATH) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT direction, timestamp FROM signals WHERE symbol = ? ORDER BY id DESC LIMIT 1",
+                "SELECT direction, timestamp FROM signals WHERE pair = ? ORDER BY id DESC LIMIT 1",
                 (pair,)
             )
             last_signal = cursor.fetchone()
@@ -26,7 +27,7 @@ def is_blocked_by_8h_filter(pair, current_direction):
                     if (now - last_time).total_seconds() / 3600 < 8:
                         return True
     except Exception as e:
-        print(f"⚠️ خطا در بررسی فیلتر ۸ ساعته برای {pair}: {e}")
+        logging.error(f"⚠️ خطا در بررسی فیلتر ۸ ساعته برای {pair}: {e}")
     return False
 
 def generate_signal(df, pair, model=None):
@@ -74,12 +75,15 @@ def generate_signal(df, pair, model=None):
         'feat_body_ratio': float(candle.get('feat_body_ratio', 0))
     }
 
+    # 🌟 اصلاح نهایی: استفاده از متد predict_signal و تبدیل به DataFrame
     if model is not None:
         try:
-            if not model.predict(pair, features_dict):
+            df_features = pd.DataFrame([features_dict])
+            if not model.predict_signal(pair, df_features):
                 return None
         except Exception as e:
-            print(f"خطا در مدل هوش مصنوعی {pair}: {e}")
+            logging.error(f"خطا در فراخوانی مدل هوش مصنوعی برای {pair}: {e}")
+            return None
 
     def calculate_signal_score(direction):
         score = 50 
@@ -97,7 +101,6 @@ def generate_signal(df, pair, model=None):
     is_bullish_momentum = float(candle.get('feat_rsi', 50)) > 50
     is_bearish_momentum = float(candle.get('feat_rsi', 50)) < 50
     
-    # لاجیک ورود
     result = None
     if float(candle['High']) > last_swing_high and is_bullish_momentum and not is_blocked_by_8h_filter(pair, "LONG"):
         entry_price = last_swing_high
