@@ -31,8 +31,9 @@ class TradingBrain:
                     logging.error(f"خطا در لود مدل {pair}: {e}")
 
     def predict_signal(self, pair, current_features):
+        # 🛠️ اصلاح: اگر مدلی وجود نداشت، سیگنال خام تایید شود (True) تا سیستم در اولین اجراها متوقف نشود
         if pair not in self.models:
-            return None 
+            return True 
             
         try:
             model = self.models[pair]
@@ -53,4 +54,5 @@ class TradingBrain:
                 
         except Exception as e:
             logging.error(f"خطا در پیش‌بینی {pair}: {e}")
-            return None
+            # 🛠️ اصلاح: بازگرداندن False در صورت بروز خطای سیستمی جهت امنیت و عدم ورود به پوزیشن مشکوک
+            return False
