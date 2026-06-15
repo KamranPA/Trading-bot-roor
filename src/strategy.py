@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/strategy.py (نسخه نهایی، کاملاً اصلاح‌شده و بدون خطای تداخل آرگومان)
+# FILE PATH: src/strategy.py (نسخه نهایی، اصلاح تداخل آرگومان و دریافت هوشمند ورودی‌ها)
 # ---------------------------------------------------------
 import os
 import json
@@ -47,9 +47,34 @@ def is_blocked_by_8h_filter(pair, current_direction):
         
     return False
 
-def generate_signal(df, pair, model=None):
+def generate_signal(*args, **kwargs):
+    """
+    دریافت هوشمند ورودی‌ها: 
+    جلوگیری از خطای TypeError در صورت جابه‌جا فرستاده شدن df و pair از فایل‌های دیگر.
+    """
+    df = None
+    pair = None
+    model = kwargs.get('model', None)
+
+    # ۱. پردازش آرگومان‌های موقعیتی (تشخیص نوع داده)
+    for arg in args:
+        if isinstance(arg, pd.DataFrame):
+            df = arg
+        elif isinstance(arg, str):
+            pair = arg
+        elif hasattr(arg, 'predict_signal') or hasattr(arg, 'models'):
+            model = arg
+
+    # ۲. پردازش آرگومان‌های نامی (اگر پیدا نشده باشند)
+    if df is None: df = kwargs.get('df', None)
+    if pair is None: pair = kwargs.get('pair', None)
+
+    # ۳. بررسی نهایی صحت داده‌ها
+    if df is None or pair is None:
+        return None
+
     # اطمینان از وجود دیتای کافی برای محاسبه اندیکاتورها (به ویژه EMA 200)
-    if df is None or len(df) < 200:
+    if len(df) < 200:
         return None
 
     idx = len(df) - 1
