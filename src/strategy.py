@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/strategy.py
+# FILE PATH: src/strategy.py (نسخه اصلاح‌شده و هماهنگ با سیستم خودکار LightGBM)
 # ---------------------------------------------------------
 import os
 import json
@@ -92,24 +92,21 @@ def generate_signal(df, pair, model=None):
     if last_swing_high is None or last_swing_low is None:
         return None
 
-    # ۵. آماده‌سازی ویژگی‌ها برای هوش مصنوعی
-    features_dict = {
-        'feat_adx': float(candle.get('feat_adx', 0)),
-        'feat_atr_percent': float(candle.get('feat_atr_percent', 0)),
-        'feat_rsi': float(candle.get('feat_rsi', 0)),
-        'feat_trend_line': float(candle.get('feat_trend_line', 0)),
-        'feat_ema_deviation': float(candle.get('feat_ema_deviation', 0)),
-        'feat_rsi_momentum': float(candle.get('feat_rsi_momentum', 0)),
-        'feat_body_ratio': float(candle.get('feat_body_ratio', 0))
-    }
+    # ۵. استخراج خودکار و کاملاً داینامیک ویژگی‌ها برای هوش مصنوعی
+    # سیستم به صورت خودکار تمام ستون‌هایی که با feat_ شروع می‌شوند را پیدا و ریست می‌کند.
+    features_dict = {col: float(candle[col]) for col in df.columns if col.startswith('feat_')}
 
-    # ۶. اعمال فیلتر هوش مصنوعی اختصاصی (Multi-Model)
-    if model is not None:
+    if not features_dict:
+        print(f"⚠️ هشداد: هیچ ویژگی با پیشوند 'feat_' پیدا نشد. سیگنال بدون فیلتر AI بررسی می‌شود.")
+
+    # ۶. اعمال فیلتر هوش مصنوعی اختصاصی (Multi-Model / LightGBM)
+    if model is not None and features_dict:
         try:
+            # ارسال ویژگی‌های خودکار کشف شده به مغز مدل (TradingBrain)
             if not model.predict_signal(pair, features_dict):
                 return None
         except Exception as e:
-            print(f"خطا در مدل هوش مصنوعی {pair}: {e}")
+            print(f"❌ خطا در مدل هوش مصنوعی {pair}: {e}")
             pass
 
     # ۷. مشخص کردن قیمت‌های لحظه‌ای کندل فعلی برای منطق ورود شکست سطوح
@@ -145,7 +142,7 @@ def generate_signal(df, pair, model=None):
             'tp1': round(entry_price + (tp_dist / 2), 4),
             'tp2': round(entry_price + tp_dist, 4),
             'position_size': round(position_size, 2), 
-            **features_dict
+            **features_dict  # اضافه کردن تمام ویژگی‌های هوش مصنوعی به خروجی برای ذخیره خودکار در DB
         }
     
     elif low_price < last_swing_low and is_bearish_momentum:
@@ -173,7 +170,7 @@ def generate_signal(df, pair, model=None):
             'tp1': round(entry_price - (tp_dist / 2), 4),
             'tp2': round(entry_price - tp_dist, 4),
             'position_size': round(position_size, 2), 
-            **features_dict
+            **features_dict  # اضافه کردن تمام ویژگی‌های هوش مصنوعی به خروجی برای ذخیره خودکار در DB
         }
 
     return None
