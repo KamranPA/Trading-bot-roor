@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (نسخه نهایی و کامل - ثبت هوشمند امتیازات در لایو)
+# FILE PATH: main.py (نسخه نهایی و کامل - رفع مشکل گیت‌هاب اکشنز و ثبت امتیاز لایو)
 # ---------------------------------------------------------
 import os
 import sys
@@ -95,7 +95,7 @@ def process_pair(pair):
                 # ارسال سیگنال لایو به تلگرام
                 telegram_bot.format_and_send_signal(signal)
             else:
-                # 🌟 ثبت ثبت دقیق امتیاز برای لاگ‌های بدون سیگنال (ثبت رفتار بازار)
+                # ثبت دقیق امتیاز برای لاگ‌های بدون سیگنال (ثبت رفتار بازار)
                 database.log_scan_status(pair, "nosignal", current_score)
                 
     except Exception as e:
@@ -130,9 +130,18 @@ def run_bot():
     run_auto_optimization()
     
     watchlist = getattr(config, 'WATCHLIST', [])
-    # اجرای موازی اسکن جفت‌ارزها بر اساس ظرفیت واچ‌لیست
+    logging.info(f"📋 تعداد ارزهای واچ‌لیست جهت اسکن: {len(watchlist)} ارز -> {watchlist}")
+    
+    if not watchlist:
+        logging.warning("⚠️ واچ‌لیست خالی است! لطفا فایل config.py را بررسی کنید.")
+        return
+
+    # اجرای موازی اسکن جفت‌ارزها و اجبار برنامه به منتظر ماندن
     with ThreadPoolExecutor(max_workers=12) as executor:
-        executor.map(process_pair, watchlist)
+        # تبدیل به لیست (list) برای مجبور کردن گیت‌هاب اکشنز به منتظر ماندن تا پایان پردازش تمام ارزها
+        list(executor.map(process_pair, watchlist))
+        
+    logging.info("🏁 چرخه اسکن تمام واچ‌لیست به پایان رسید و داده‌ها ذخیره شدند.")
 
 if __name__ == "__main__":
     # ارسال گزارش هارت‌بیت روزانه در ساعت ۲۲ شب به وقت UTC
