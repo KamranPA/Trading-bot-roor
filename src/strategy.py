@@ -81,7 +81,11 @@ def generate_signal(*args, **kwargs):
     candle = df.iloc[idx]
     
     # ۲. مدیریت ریسک: کنترل سقف تعداد پوزیشن‌های باز
-    if database.get_open_positions_count() >= config.MAX_OPEN_POSITIONS:
+    try:
+        if database.get_open_positions_count() >= config.MAX_OPEN_POSITIONS:
+            return None
+    except Exception as e:
+        print(f"⚠️ خطا در بررسی تعداد پوزیشن‌های باز: {e}")
         return None
 
     # --- خواندن پارامترهای اختصاصی ارز از best_params.json ---
@@ -107,10 +111,12 @@ def generate_signal(*args, **kwargs):
         pass # در صورت بروز خطا، با همان مقادیر پیش‌فرض ادامه می‌دهد
 
     # ۳. فیلتر جهت‌گیری و شتاب روند کلان با حد آستانه اختصاصی این ارز
-    if float(candle.get('feat_adx', 0)) < adx_thresh:
+    # اصلاح لایه محافظتی استخراج داده برای جلوگیری از خطای KeyError یا مقدار None
+    current_adx = candle.get('feat_adx') if 'feat_adx' in candle.index else candle.get('adx', 0)
+    if pd.isna(current_adx) or float(current_adx) < adx_thresh:
         return None
 
-    # ۴. شناسایی سطوح سویینگ قیمتی
+    # ۴. شناسایی سطوح سویینگ قیمتی (یکپارچه‌سازی نام ستون‌ها با حروف کوچک)
     last_swing_high = strategy_utils.find_last_swing(df, 'high', config.SWING_WINDOW)
     last_swing_low = strategy_utils.find_last_swing(df, 'low', config.SWING_WINDOW)
 
@@ -120,11 +126,11 @@ def generate_signal(*args, **kwargs):
     # ۵. استخراج خودکار ویژگی‌ها با فیلتر ایمن جهت جلوگیری از تداخل آرگومان در تابع دیتابیس
     # با این فیلتر، کلمات کلیدی اصلی مثل pair یا direction هرگز دوبار فرستاده نمی‌شوند.
     reserved_keywords = {'pair', 'direction', 'entry_price', 'stop_loss', 'tp1', 'tp2', 'position_size'}
-    features_dict = {
-        col: float(candle[col]) 
-        for col in df.columns 
-        if col.startswith('feat_') and col not in reserved_keywords
-    }
+    features_dict = {}
+    for col in df.columns:
+        if col.startswith('feat_') and col not in reserved_keywords:
+            val = candle[col]
+            features_dict[col] = 0.0 if pd.isna(val) else float(val)
 
     if not features_dict:
         print(f"⚠️ هشدار: هیچ ویژگی یادگیری ماشین با پیشوند 'feat_' پیدا نشد.")
@@ -140,12 +146,17 @@ def generate_signal(*args, **kwargs):
             pass
 
     # ۷. مشخص کردن قیمت‌های لحظه‌ای کندل فعلی برای منطق ورود شکست سطوح
-    high_price = float(candle['High'])
-    low_price = float(candle['Low'])
+    # اصلاح کلیدی: تغییر High و Low به حروف کوچک جهت هماهنگی با کل سیستم و دیتابیس صرافی
+    high_price = float(candle['high']) if 'high' in candle.index else float(candle.get('High', 0))
+    low_price = float(candle['low']) if 'low' in candle.index else float(candle.get('Low', 0))
     
     # ۸. منطق شکست سطوح در لحظه برخورد (Intra-candle Breakout Logic)
-    is_bullish_momentum = float(candle.get('feat_rsi', 50)) > 50
-    is_bearish_momentum = float(candle.get('feat_rsi', 50)) < 50
+    current_rsi = candle.get('feat_rsi') if 'feat_rsi' in candle.index else candle.get('rsi', 50)
+    if pd.isna(current_rsi):
+        current_rsi = 50
+        
+    is_bullish_momentum = float(current_rsi) > 50
+    is_bearish_momentum = float(current_rsi) < 50
 
     if high_price > last_swing_high and is_bullish_momentum:
         entry_price = last_swing_high  # قیمت ورود دقیقاً روی سطح شکست مقاومت
@@ -156,8 +167,11 @@ def generate_signal(*args, **kwargs):
             
         # مدیریت سرمایه داینامیک با اعمال risk_multiplier
         risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0) * risk_multiplier
-        atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
-        sl_dist = 1.5 * atr_val * sl_ratio
+        atr_val = candle.get('atr') if 'atr' in candle.index else candle.get('feat_atr_percent', 1.0)
+        if pd.isna(atr_val) or float(atr_val) <= 0:
+            atr_val = 1.0
+            
+        sl_dist = 1.5 * float(atr_val) * sl_ratio
         tp_dist = sl_dist * tp_ratio
         
         stop_loss = entry_price - sl_dist
@@ -167,11 +181,11 @@ def generate_signal(*args, **kwargs):
         return {
             'pair': pair, 
             'direction': 'LONG', 
-            'entry_price': round(entry_price, 4),
-            'stop_loss': round(stop_loss, 4), 
-            'tp1': round(entry_price + (tp_dist / 2), 4),
-            'tp2': round(entry_price + tp_dist, 4),
-            'position_size': round(position_size, 2), 
+            'entry_price': round(float(entry_price), 4),
+            'stop_loss': round(float(stop_loss), 4), 
+            'tp1': round(float(entry_price + (tp_dist / 2)), 4),
+            'tp2': round(float(entry_price + tp_dist), 4),
+            'position_size': round(float(position_size), 2), 
             **features_dict  # اضافه کردن ایمن ویژگی‌ها بدون تداخل نام آرگومان
         }
     
@@ -184,8 +198,11 @@ def generate_signal(*args, **kwargs):
             
         # مدیریت سرمایه داینامیک با اعمال risk_multiplier
         risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0) * risk_multiplier
-        atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
-        sl_dist = 1.5 * atr_val * sl_ratio
+        atr_val = candle.get('atr') if 'atr' in candle.index else candle.get('feat_atr_percent', 1.0)
+        if pd.isna(atr_val) or float(atr_val) <= 0:
+            atr_val = 1.0
+            
+        sl_dist = 1.5 * float(atr_val) * sl_ratio
         tp_dist = sl_dist * tp_ratio
         
         stop_loss = entry_price + sl_dist
@@ -195,11 +212,11 @@ def generate_signal(*args, **kwargs):
         return {
             'pair': pair, 
             'direction': 'SHORT', 
-            'entry_price': round(entry_price, 4),
-            'stop_loss': round(stop_loss, 4), 
-            'tp1': round(entry_price - (tp_dist / 2), 4),
-            'tp2': round(entry_price - tp_dist, 4),
-            'position_size': round(position_size, 2), 
+            'entry_price': round(float(entry_price), 4),
+            'stop_loss': round(float(stop_loss), 4), 
+            'tp1': round(float(entry_price - (tp_dist / 2)), 4),
+            'tp2': round(float(entry_price - tp_dist), 4),
+            'position_size': round(float(position_size), 2), 
             **features_dict  # اضافه کردن ایمن ویژگی‌ها بدون تداخل نام آرگومان
         }
 
