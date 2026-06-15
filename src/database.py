@@ -6,7 +6,7 @@ import os
 import logging
 import datetime
 
-# مسیر فایل دیتابیس - اطمینان حاصل کنید پوشه data وجود دارد
+# مسیر فایل دیتابیس
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 if not os.path.exists(DATA_DIR):
@@ -18,7 +18,7 @@ def init_db():
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         
-        # جدول سیگنال‌های فعال (پوزیشن‌ها)
+        # جدول سیگنال‌های فعال
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,7 +36,7 @@ def init_db():
             )
         """)
         
-        # جدول لاگ‌های اسکن (با ستون امتیاز)
+        # جدول لاگ‌های اسکن
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS scan_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,16 +47,15 @@ def init_db():
             )
         """)
         
-        # آپدیت امن دیتابیس‌های قدیمی (در صورت وجود ستون امتیاز اضافه می‌شود)
         try:
             cursor.execute("ALTER TABLE scan_logs ADD COLUMN signal_score REAL DEFAULT 0.0")
         except sqlite3.OperationalError:
-            pass # ستون قبلاً وجود دارد
+            pass
             
         conn.commit()
 
 def log_scan_status(symbol, status, signal_score=0.0):
-    """ثبت لاگ اسکن به همراه امتیاز در دیتابیس (ارتقا یافته برای دریافت ۳ ورودی)"""
+    """ثبت لاگ اسکن با دریافت امتیاز"""
     try:
         timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         with sqlite3.connect(DB_PATH, timeout=15) as conn:
@@ -67,10 +66,10 @@ def log_scan_status(symbol, status, signal_score=0.0):
             """, (timestamp, symbol, status, signal_score))
             conn.commit()
     except Exception as e:
-        logging.error(f"خطا در ثبت لاگ در دیتابیس: {e}")
+        logging.error(f"خطا در ثبت لاگ دیتابیس: {e}")
 
 def save_signal_advanced(pair, direction, entry_price, sl, tp1, tp2, position_size, signal_score=0.0, **kwargs):
-    """ذخیره سیگنال جدید در دیتابیس"""
+    """ذخیره سیگنال جدید"""
     try:
         timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         with sqlite3.connect(DB_PATH, timeout=15) as conn:
@@ -84,13 +83,23 @@ def save_signal_advanced(pair, direction, entry_price, sl, tp1, tp2, position_si
         logging.error(f"خطا در ذخیره سیگنال: {e}")
 
 def get_open_positions():
-    """دریافت پوزیشن‌های باز برای بررسی حد سود و ضرر"""
+    """دریافت پوزیشن‌های باز"""
     try:
         with sqlite3.connect(DB_PATH, timeout=10) as conn:
             return conn.execute("SELECT * FROM signals WHERE status = 'OPEN'").fetchall()
     except Exception as e:
         logging.error(f"خطا در خواندن پوزیشن‌های باز: {e}")
         return []
+
+def get_open_positions_count():
+    """شمارش پوزیشن‌های باز (اضافه شده برای رفع خطا)"""
+    try:
+        with sqlite3.connect(DB_PATH, timeout=10) as conn:
+            count = conn.execute("SELECT count(*) FROM signals WHERE status = 'OPEN'").fetchone()[0]
+            return count
+    except Exception as e:
+        logging.error(f"خطا در شمارش پوزیشن‌های باز: {e}")
+        return 0
 
 def update_position_status(sig_id, status, pnl=0.0):
     """به‌روزرسانی وضعیت پوزیشن"""
