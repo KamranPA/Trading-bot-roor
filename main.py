@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (اصلاح شده: مدیریت امن پوزیشن‌ها)
+# FILE PATH: main.py (نسخه نهایی و اصلاح شده)
 # ---------------------------------------------------------
 import os
 import sys
@@ -27,21 +27,22 @@ BRAIN = TradingBrain()
 db_lock = threading.Lock()
 
 def check_exits():
-    """
-    تابع جدید برای بررسی قیمت و بستن پوزیشن‌ها در صورت رسیدن به حد سود یا ضرر
-    جایگزین منطق مخرب قبلی
-    """
+    """بررسی قیمت و بستن پوزیشن‌ها در صورت رسیدن به حد سود یا ضرر"""
     try:
-        positions = database.get_open_positions() # تابعی که در database.py تعریف کردیم
+        positions = database.get_open_positions() 
         for pos in positions:
-            # فرض بر اینکه ساختار دیتابیس (id=0, symbol=2, direction=3, entry=4, sl=5, tp1=6, tp2=7)
-            sig_id, _, symbol, direction, entry, sl, tp1, tp2, status, _, _, *_ = pos
+            # استفاده از دیکشنری برای دسترسی ایمن به ستون‌ها
+            sig_id = pos['id']
+            symbol = pos['symbol']
+            direction = pos['direction']
+            entry = pos['entry_price']
+            sl = pos['stop_loss']
+            tp2 = pos['tp2']
             
             df = coinex_client.get_coinex_candles(symbol, limit=1)
             if df is None or df.empty: continue
             current_price = df.iloc[-1]['Close']
             
-            # منطق خروج هوشمند
             pnl = 0
             should_close = False
             if direction == "LONG":
@@ -58,7 +59,6 @@ def check_exits():
         logging.error(f"خطا در بررسی پوزیشن‌های باز: {e}")
 
 def heartbeat_job():
-    # ... (بدون تغییر)
     try:
         watchlist_count = len(getattr(config, 'WATCHLIST', []))
         models_dir = os.path.join(BASE_DIR, "src", "models")
@@ -69,7 +69,6 @@ def heartbeat_job():
         logging.error(f"خطا در ارسال گزارش Heartbeat: {e}")
 
 def process_pair(pair):
-    # ... (بدون تغییر)
     try:
         df = coinex_client.get_coinex_candles(pair)
         if df is None or df.empty: return
@@ -77,6 +76,9 @@ def process_pair(pair):
         signal = strategy.generate_signal(df, pair, model=BRAIN)
         with db_lock:
             if signal:
+                # 🛠️ اصلاح رفع خطای multiple values:
+                # اگر در دیکشنری signal کلید 'pair' وجود دارد، آن را حذف کنید
+                signal.pop('pair', None) 
                 database.save_signal_advanced(pair=pair, **signal)
                 database.log_scan_status(pair, "SIGNAL SENT")
                 telegram_bot.format_and_send_signal(signal)
@@ -86,7 +88,6 @@ def process_pair(pair):
         logging.error(f"خطا در پردازش {pair}: {e}")
 
 def run_auto_optimization():
-    # ... (بدون تغییر)
     db_path = database.DB_PATH 
     try:
         if os.path.exists(db_path):
@@ -99,20 +100,18 @@ def run_auto_optimization():
         logging.error(f"خطا در پروسه خودارتقایی: {e}")
 
 def run_bot():
-    logging.info("🤖 اسکنر هوشمند v8.2 (پشتیبانی موازی ۱۱ ارز) فعال شد.")
+    logging.info("🤖 اسکنر هوشمند v8.2 فعال شد.")
     database.init_db()
     
-    # جایگزین کردن منطق مخرب با منطق پایشگر
-    # database.manage_open_positions()  <-- این خط غیرفعال شد
-    check_exits()                      # <-- اضافه شدن پایشگر هوشمند
-    
+    check_exits()
     run_auto_optimization()
+    
     watchlist = getattr(config, 'WATCHLIST', [])
     with ThreadPoolExecutor(max_workers=12) as executor:
         executor.map(process_pair, watchlist)
 
 if __name__ == "__main__":
-    current_hour = datetime.datetime.utcnow().hour
-    if current_hour == 22:
+    # اجرای heartbeat فقط در ساعت 22 UTC
+    if datetime.datetime.utcnow().hour == 22:
         heartbeat_job()
     run_bot()
