@@ -1,106 +1,106 @@
+# ---------------------------------------------------------
+# FILE PATH: src/database.py (اصلاح شده: مدیریت هوشمند پوزیشن‌ها)
+# ---------------------------------------------------------
 import sqlite3
 import os
-import logging
-import datetime
+import config
 
-# تنظیم مسیر دیتابیس
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(BASE_DIR, "data")
-if not os.path.exists(DATA_DIR): 
-    os.makedirs(DATA_DIR)
-DB_PATH = os.path.join(DATA_DIR, "trading_bot.db")
+# مسیر پیش‌فرض برای دیتابیس لایو (منبع حقیقت ربات اصلی)
+DB_PATH = os.path.join("data", config.DB_NAME)
 
-def init_db():
-    """مقداردهی اولیه و ایجاد جداول (با لحاظ ستون‌های امتیاز)"""
-    with sqlite3.connect(DB_PATH) as conn:
+def get_db_path(mode="live"):
+    """
+    تشخیص هوشمند مسیر دیتابیس بر اساس وضعیت لایو یا بکتست
+    """
+    if mode == "backtest":
+        return os.path.join("data", config.DB_NAME_BACKTEST)
+    return DB_PATH
+
+def init_db(mode="live"):
+    """
+    ایجاد دیتابیس و جداول با ساختار جامع
+    """
+    if not os.path.exists("data"):
+        os.makedirs("data")
+        
+    target_path = get_db_path(mode)
+    
+    with sqlite3.connect(target_path) as conn:
         cursor = conn.cursor()
         
-        # ایجاد جدول سیگنال‌ها
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
                 timestamp TEXT, 
-                pair TEXT, 
+                symbol TEXT, 
                 direction TEXT, 
                 entry_price REAL, 
-                sl REAL, 
-                tp1 REAL, 
-                tp2 REAL, 
-                status TEXT, 
-                pnl REAL DEFAULT 0, 
-                position_size REAL, 
-                signal_score REAL DEFAULT 0.0
+                stop_loss REAL, 
+                tp1 REAL, tp2 REAL,  -- اضافه شده برای منطق خروج
+                status TEXT DEFAULT 'OPEN',
+                closed_at TEXT,
+                pnl_percent REAL,
+                feat_adx REAL, feat_vol_ratio REAL, feat_atr_percent REAL, 
+                feat_rsi REAL, feat_trend_line REAL, feat_ema_deviation REAL, 
+                feat_rsi_momentum REAL, feat_body_ratio REAL, feat_high_volume_session REAL
             )
         """)
         
-        # ایجاد جدول لاگ‌های اسکن
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS scan_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
                 timestamp TEXT, 
                 symbol TEXT, 
-                result TEXT, 
-                signal_score REAL DEFAULT 0.0
+                result TEXT
             )
         """)
-        
-        # آپدیت امن برای اضافه کردن ستون در صورت نبودن
-        try: 
-            cursor.execute("ALTER TABLE scan_logs ADD COLUMN signal_score REAL DEFAULT 0.0")
-        except sqlite3.OperationalError: 
-            pass
-        
         conn.commit()
 
-def log_scan_status(symbol, status, signal_score=0.0):
-    """ثبت لاگ اسکن با ۳ ورودی الزامی"""
-    try:
-        timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        with sqlite3.connect(DB_PATH, timeout=15) as conn:
-            conn.execute("""
-                INSERT INTO scan_logs (timestamp, symbol, result, signal_score) 
-                VALUES (?, ?, ?, ?)
-            """, (timestamp, symbol, status, float(signal_score)))
-            conn.commit()
-    except Exception as e: 
-        logging.error(f"DB Error in log_scan_status: {e}")
+def get_open_positions():
+    """دریافت لیست تمام پوزیشن‌های باز جهت بررسی قیمت"""
+    if not os.path.exists(DB_PATH): return []
+    with sqlite3.connect(DB_PATH) as conn:
+        return conn.execute("SELECT * FROM signals WHERE status = 'OPEN'").fetchall()
+
+def update_position_status(signal_id, status, pnl=None):
+    """ثبت نتیجه نهایی معامله در دیتابیس"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE signals SET status = ?, pnl_percent = ?, closed_at = datetime('now') WHERE id = ?",
+            (status, pnl, signal_id)
+        )
+        conn.commit()
 
 def get_open_positions_count():
-    """شمارش پوزیشن‌های باز"""
     try:
-        with sqlite3.connect(DB_PATH, timeout=10) as conn:
-            return conn.execute("SELECT count(*) FROM signals WHERE status = 'OPEN'").fetchone()[0]
-    except Exception as e: 
-        logging.error(f"Error in get_open_positions_count: {e}")
-        return 0
+        if not os.path.exists(DB_PATH): return 0
+        with sqlite3.connect(DB_PATH) as conn:
+            return conn.execute("SELECT COUNT(*) FROM signals WHERE status = 'OPEN'").fetchone()[0]
+    except: return 0
 
-def save_signal_advanced(pair, direction, entry_price, sl, tp1, tp2, position_size, signal_score=0.0, **kwargs):
-    """ذخیره سیگنال جدید با امتیاز"""
-    try:
-        timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        with sqlite3.connect(DB_PATH, timeout=15) as conn:
-            conn.execute("""
-                INSERT INTO signals (timestamp, pair, direction, entry_price, sl, tp1, tp2, status, position_size, signal_score) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?)
-            """, (timestamp, pair, direction, entry_price, sl, tp1, tp2, position_size, float(signal_score)))
-            conn.commit()
-    except Exception as e: 
-        logging.error(f"Save Signal Error: {e}")
+def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1=0, tp2=0, **kwargs):
+    """ذخیره سیگنال با فیلدهای TP برای مدیریت خروج"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO signals (timestamp, symbol, direction, entry_price, stop_loss, tp1, tp2) VALUES (datetime('now'), ?, ?, ?, ?, ?, ?)", 
+            (pair, direction, entry_price, stop_loss, tp1, tp2)
+        )
+        conn.commit()
 
-def update_position_status(sig_id, status, pnl=0.0):
-    """به‌روزرسانی وضعیت پوزیشن"""
-    try:
-        with sqlite3.connect(DB_PATH, timeout=10) as conn:
-            conn.execute("UPDATE signals SET status = ?, pnl = ? WHERE id = ?", (status, pnl, sig_id))
-            conn.commit()
-    except Exception as e: 
-        logging.error(f"Error in update_position_status: {e}")
+def log_scan_status(pair, status):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO scan_logs (timestamp, symbol, result) VALUES (datetime('now'), ?, ?)", 
+            (pair, status)
+        )
+        conn.commit()
 
-def get_open_positions():
-    """دریافت لیست پوزیشن‌های باز"""
-    try:
-        with sqlite3.connect(DB_PATH, timeout=10) as conn:
-            return conn.execute("SELECT * FROM signals WHERE status = 'OPEN'").fetchall()
-    except Exception as e: 
-        logging.error(f"Error in get_open_positions: {e}")
-        return []
+def manage_open_positions():
+    """
+    اصلاح شده: این تابع دیگر پوزیشن‌ها را خودکار نمی‌بندد.
+    در ربات اصلی (main.py) باید از تابع check_exits استفاده شود تا 
+    فقط در صورت لمس SL یا TP پوزیشن بسته شود.
+    """
+    # این تابع اکنون خالی می‌ماند تا از بستن اجباری جلوگیری شود.
+    # در صورت نیاز به پاکسازی‌های دیگر (غیر از بستن پوزیشن‌ها) می‌توانید اینجا بنویسید.
+    pass
