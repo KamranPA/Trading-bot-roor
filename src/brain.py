@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/brain.py (سیستم لودینگ و پیش‌بینی هوشمند و خودکار LightGBM)
+# FILE PATH: src/brain.py (نسخه اصلاح‌شده و هماهنگ با فرمت نام‌گذاری چسبیده)
 # ---------------------------------------------------------
 import os
 import joblib
@@ -24,11 +24,19 @@ class TradingBrain:
             
         for file_name in os.listdir(self.models_dir):
             if file_name.endswith("_model.pkl"):
-                # تبدیل فرمت نام فایل به جفت ارز استاندارد (مثال: BTC_USDT -> BTC/USDT)
-                pair = file_name.replace("_model.pkl", "").replace("_", "/")
+                # ۱. استخراج نام پایه ارز (مثال: SOLUSDT_model.pkl -> SOLUSDT)
+                base_name = file_name.replace("_model.pkl", "")
+                
+                # ۲. تبدیل فرمت چسبیده به فرمت استاندارد صرافی با اسلش (SOLUSDT -> SOL/USDT)
+                if base_name.endswith("USDT"):
+                    pair = base_name.replace("USDT", "/USDT")
+                else:
+                    # پشتیبانی از ساختار قدیمی یا ارزهای دارای خط فاصله
+                    pair = base_name.replace("_", "/")
+                
                 model_path = os.path.join(self.models_dir, file_name)
                 try:
-                    # لود کردن باندل ذخیره شده (شامل مدل لایت‌جی‌بی‌ام و لیست ویژگی‌های زمان آموزش)
+                    # لود کردن باندل ذخیره شده (شامل مدل لایت‌جی‌بی‌ام و لیست ویژگی‌ها)
                     self.models[pair] = joblib.load(model_path)
                     logging.info(f"🧠 مدل اختصاصی {pair} با موفقیت بارگذاری شد.")
                 except Exception as e:
@@ -39,8 +47,11 @@ class TradingBrain:
         پیش‌بینی هوشمند احتمال موفقیت شکست (Breakout) بر اساس مدل LightGBM اختصاصی هر ارز
         تطبیق خودکار ویژگی‌ها (Feature Alignment) جهت جلوگیری از ارور عدم تطابق ستون‌ها
         """
+        # نرمال‌سازی نام جفت ارز (اطمینان از وجود اسلش)
+        if "/" not in pair and pair.endswith("USDT"):
+            pair = pair.replace("USDT", "/USDT")
+
         if pair not in self.models:
-            # اگر مدلی برای این ارز آموزش ندیده، سیگنال خام فیلتر نمی‌شود و صادر می‌گردد (سیستم پایدار)
             logging.warning(f"⚠️ مدلی برای جفت ارز {pair} یافت نشد. فیلتر هوش مصنوعی اعمال نمی‌شود.")
             return True 
             
@@ -53,8 +64,7 @@ class TradingBrain:
             # ۱. تبدیل دیکشنری ویژگی‌های فعلی بازار به DataFrame
             df_features = pd.DataFrame([current_features])
             
-            # ۲. تطبیق خودکار: اگر ویژگی جدیدی در فایل اندیکاتورها اضافه شده ولی مدل قدیمی آن را نمی‌شناسد، 
-            # یا برعکس، مدل ستونی را می‌خواهد که در بازار نیست، با مقدار 0.0 پر می‌شود تا لایت‌جی‌بی‌ام کرش نکند.
+            # ۲. تطبیق خودکار: پر کردن ستون‌های جا افتاده با 0.0 جهت جلوگیری از کرش لایت‌جی‌بی‌ام
             for feat in required_features:
                 if feat not in df_features.columns:
                     df_features[feat] = 0.0
@@ -72,4 +82,4 @@ class TradingBrain:
                 
         except Exception as e:
             logging.error(f"❌ خطا در پیش‌بینی جفت ارز {pair}: {type(e).__name__} - {e}")
-            return True # در صورت بروز خطای سیستمی، ربات به کار خود ادامه می‌دهد تا سودها از دست نروند
+            return True # در صورت بروز خطای سیستمی، ربات به کار خود ادامه می‌دهد
