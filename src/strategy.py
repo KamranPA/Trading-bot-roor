@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/strategy.py (نسخه اصلاح‌شده و هماهنگ با سیستم خودکار LightGBM)
+# FILE PATH: src/strategy.py (نسخه نهایی، کاملاً اصلاح‌شده و بدون خطای تداخل آرگومان)
 # ---------------------------------------------------------
 import os
 import json
@@ -92,12 +92,17 @@ def generate_signal(df, pair, model=None):
     if last_swing_high is None or last_swing_low is None:
         return None
 
-    # ۵. استخراج خودکار و کاملاً داینامیک ویژگی‌ها برای هوش مصنوعی
-    # سیستم به صورت خودکار تمام ستون‌هایی که با feat_ شروع می‌شوند را پیدا و ریست می‌کند.
-    features_dict = {col: float(candle[col]) for col in df.columns if col.startswith('feat_')}
+    # ۵. استخراج خودکار ویژگی‌ها با فیلتر ایمن جهت جلوگیری از تداخل آرگومان در تابع دیتابیس
+    # با این فیلتر، کلمات کلیدی اصلی مثل pair یا direction هرگز دوبار فرستاده نمی‌شوند.
+    reserved_keywords = {'pair', 'direction', 'entry_price', 'stop_loss', 'tp1', 'tp2', 'position_size'}
+    features_dict = {
+        col: float(candle[col]) 
+        for col in df.columns 
+        if col.startswith('feat_') and col not in reserved_keywords
+    }
 
     if not features_dict:
-        print(f"⚠️ هشداد: هیچ ویژگی با پیشوند 'feat_' پیدا نشد. سیگنال بدون فیلتر AI بررسی می‌شود.")
+        print(f"⚠️ هشدار: هیچ ویژگی یادگیری ماشین با پیشوند 'feat_' پیدا نشد.")
 
     # ۶. اعمال فیلتر هوش مصنوعی اختصاصی (Multi-Model / LightGBM)
     if model is not None and features_dict:
@@ -142,7 +147,7 @@ def generate_signal(df, pair, model=None):
             'tp1': round(entry_price + (tp_dist / 2), 4),
             'tp2': round(entry_price + tp_dist, 4),
             'position_size': round(position_size, 2), 
-            **features_dict  # اضافه کردن تمام ویژگی‌های هوش مصنوعی به خروجی برای ذخیره خودکار در DB
+            **features_dict  # اضافه کردن ایمن ویژگی‌ها بدون تداخل نام آرگومان
         }
     
     elif low_price < last_swing_low and is_bearish_momentum:
@@ -170,7 +175,7 @@ def generate_signal(df, pair, model=None):
             'tp1': round(entry_price - (tp_dist / 2), 4),
             'tp2': round(entry_price - tp_dist, 4),
             'position_size': round(position_size, 2), 
-            **features_dict  # اضافه کردن تمام ویژگی‌های هوش مصنوعی به خروجی برای ذخیره خودکار در DB
+            **features_dict  # اضافه کردن ایمن ویژگی‌ها بدون تداخل نام آرگومان
         }
 
     return None
