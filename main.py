@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (اصلاح شده: مدیریت امن پوزیشن‌ها)
+# FILE PATH: main.py (اصلاح شده: پشتیبانی از ثبت امتیاز سیگنال)
 # ---------------------------------------------------------
 import os
 import sys
@@ -29,12 +29,11 @@ db_lock = threading.Lock()
 def check_exits():
     """
     تابع جدید برای بررسی قیمت و بستن پوزیشن‌ها در صورت رسیدن به حد سود یا ضرر
-    جایگزین منطق مخرب قبلی
     """
     try:
-        positions = database.get_open_positions() # تابعی که در database.py تعریف کردیم
+        positions = database.get_open_positions() 
         for pos in positions:
-            # فرض بر اینکه ساختار دیتابیس (id=0, symbol=2, direction=3, entry=4, sl=5, tp1=6, tp2=7)
+            # خواندن اطلاعات پوزیشن (باگ‌های عدم تطابق ستون‌ها با *_ هندل شده است)
             sig_id, _, symbol, direction, entry, sl, tp1, tp2, status, _, _, *_ = pos
             
             df = coinex_client.get_coinex_candles(symbol, limit=1)
@@ -58,7 +57,6 @@ def check_exits():
         logging.error(f"خطا در بررسی پوزیشن‌های باز: {e}")
 
 def heartbeat_job():
-    # ... (بدون تغییر)
     try:
         watchlist_count = len(getattr(config, 'WATCHLIST', []))
         models_dir = os.path.join(BASE_DIR, "src", "models")
@@ -69,24 +67,30 @@ def heartbeat_job():
         logging.error(f"خطا در ارسال گزارش Heartbeat: {e}")
 
 def process_pair(pair):
-    # ... (بدون تغییر)
     try:
         df = coinex_client.get_coinex_candles(pair)
         if df is None or df.empty: return
         df = indicators.calculate_indicators(df)
+        
         signal = strategy.generate_signal(df, pair, model=BRAIN)
+        
         with db_lock:
             if signal:
+                # 🌟 استخراج امتیاز محاسبه شده از سیگنال
+                score = signal.get('signal_score', 0.0)
+                
                 database.save_signal_advanced(pair=pair, **signal)
-                database.log_scan_status(pair, "SIGNAL SENT")
+                # 🌟 ارسال امتیاز برای ثبت در لاگ اسکن
+                database.log_scan_status(pair, "SIGNAL SENT", score)
+                
                 telegram_bot.format_and_send_signal(signal)
             else:
-                database.log_scan_status(pair, "nosignal")
+                # 🌟 ثبت امتیاز صفر در زمان‌هایی که سیگنال تایید نشده است
+                database.log_scan_status(pair, "nosignal", 0.0)
     except Exception as e:
         logging.error(f"خطا در پردازش {pair}: {e}")
 
 def run_auto_optimization():
-    # ... (بدون تغییر)
     db_path = database.DB_PATH 
     try:
         if os.path.exists(db_path):
@@ -102,11 +106,9 @@ def run_bot():
     logging.info("🤖 اسکنر هوشمند v8.2 (پشتیبانی موازی ۱۱ ارز) فعال شد.")
     database.init_db()
     
-    # جایگزین کردن منطق مخرب با منطق پایشگر
-    # database.manage_open_positions()  <-- این خط غیرفعال شد
-    check_exits()                      # <-- اضافه شدن پایشگر هوشمند
-    
+    check_exits()                      
     run_auto_optimization()
+    
     watchlist = getattr(config, 'WATCHLIST', [])
     with ThreadPoolExecutor(max_workers=12) as executor:
         executor.map(process_pair, watchlist)
