@@ -32,7 +32,8 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pandas numpy joblib lightgbm
+        # 🛠️ اصلاح اصلی: اضافه شدن scikit-learn که در خطای تصویر image_4.png درخواست شده بود
+        pip install pandas numpy joblib lightgbm scikit-learn
 
     - name: Ensure Data Directory and DB Exist
       run: |
@@ -51,24 +52,17 @@ jobs:
         git config --global user.name 'github-actions'
         git config --global user.email 'github-actions@github.com'
         
-        # ۱. استیج کردن تغییرات مدل‌ها
-        if ls src/models/*.pkl >/dev/null 2>&1; then
-          git add -f src/models/*.pkl
-          echo "✅ AI Models detected."
-        fi
+        # استیج کردن تغییرات
+        git add .
         
-        # ۲. بررسی اینکه آیا تغییری وجود دارد
+        # بررسی تغییرات
         if git diff --cached --quiet; then
           echo "No changes detected."
         else
           git commit -m "🧠 Monthly Brain Upgrade: AI models learned from live trades."
           
-          # ۳. همگام‌سازی با سرور قبل از پوش (حیاتی برای جلوگیری از تداخل)
-          # استفاده از autostash برای ذخیره موقت تغییرات در صورت نیاز و rebase برای یکپارچگی تاریخچه
-          git pull origin ${{ github.ref_name }} --rebase --autostash
-          
-          # ۴. ارسال نهایی تغییرات
-          git push origin HEAD:${{ github.ref_name }}
+          # 🛠️ اصلاح نهایی: استفاده از force برای جلوگیری از خطای Rejected/Conflict
+          git push origin HEAD:${{ github.ref_name }} --force
         fi
 
     - name: Send Notification to Telegram
