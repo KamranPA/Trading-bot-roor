@@ -21,6 +21,7 @@ jobs:
         with:
           python-version: '3.10'
 
+      # 🛠️ نصب وابستگی‌های سیستمی برای اجرای صحیح LightGBM
       - name: Install System Dependencies for LightGBM
         run: |
           sudo apt-get update
@@ -32,24 +33,28 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pandas requests ccxt numpy joblib yfinance lightgbm
 
+      # ۱. دریافت داده‌های بازار
       - name: Fetch Market Historical Data
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python fetcher.py
 
+      # ۲. اجرای بک‌تستر
       - name: Run Backtest
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/backtester.py
 
+      # ۳. بهینه‌سازی پارامترها
       - name: Run Optimizer
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python src/optimizer.py
 
+      # ۴. آموزش مدل هوش مصنوعی
       - name: Train AI Model
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -62,19 +67,17 @@ jobs:
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # استیج کردن فایل‌ها
-          if [ -f "data/crypto_backtest.db" ]; then git add -f data/crypto_backtest.db; fi
-          if [ -f "backtest_table_summary.csv" ]; then git add backtest_table_summary.csv; fi
-          if ls src/models/*.pkl >/dev/null 2>&1; then git add -f src/models/*.pkl; fi
-          if [ -f "best_params.json" ]; then git add best_params.json; fi
+          # استیج کردن تمام تغییرات (فایل‌های دیتابیس، مدل‌ها و غیره)
+          git add .
           
-          # 🔥 اصلاح اصلی: بررسی تغییرات و کامیت کردن پیش از Pull
+          # بررسی اینکه آیا تغییری برای کامیت وجود دارد
           if git diff --cached --quiet; then
             echo "No changes detected, skipping commit."
           else
-            git commit -m "Auto-update: Forced Multi-Models, Deep Backtest DB & Table Summary"
+            # کامیت کردن تمام تغییراتِ استیج شده
+            git commit -m "Auto-update: Saving backtest results and trained models"
             
-            # اکنون که تغییرات کامیت شده‌اند، Pull بدون خطا انجام می‌شود
+            # دریافت آخرین تغییرات از مخزن اصلی برای جلوگیری از تداخل (Conflict)
             echo "🔄 Pulling latest changes from remote..."
             git pull origin main --rebase
             
