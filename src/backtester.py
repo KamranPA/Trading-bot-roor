@@ -54,6 +54,7 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
 
     df = pd.read_csv(file_path)
     if len(df) < 250:
+        print(f"⚠️ دیتای {symbol} برای بکتست کافی نیست (کمتر از ۲۵۰ کندل)")
         return None
 
     df = indicators.calculate_indicators(df)
@@ -62,9 +63,7 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
-    # ==========================================
     # فاز ۱: تولید دیتای خام برای آموزش هوش مصنوعی
-    # ==========================================
     is_in_position_raw = False
     entry_price_raw, direction_raw, stop_loss_raw, tp1_raw, tp2_raw = 0.0, "", 0.0, 0.0, 0.0
     entry_time_raw, entry_features_raw = "", {}
@@ -110,9 +109,7 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
         elif low_price < last_swing_low and is_bearish:
             is_in_position_raw, direction_raw, entry_price_raw, stop_loss_raw, tp1_raw, tp2_raw, entry_time_raw, entry_features_raw = True, "SHORT", last_swing_low, last_swing_low + sl_dist, last_swing_low - sl_dist, last_swing_low - (sl_dist * 2), current_time, features_snapshot
 
-    # ==========================================
     # فاز ۲: ارزیابی هوش مصنوعی (Out-of-Sample)
-    # ==========================================
     ai_total_trades, ai_winning_trades, ai_total_pnl = 0, 0, 0.0
     is_in_position_ai = False
     entry_price_ai, direction_ai, stop_loss_ai, tp2_ai = 0.0, "", 0.0, 0.0
@@ -174,11 +171,14 @@ def run_all_backtests():
     init_backtest_db(db_path)
     brain = TradingBrain()
     summary_results = [res for s in config.WATCHLIST if (res := run_backtest_for_symbol(s, db_path, brain))]
+    
     if summary_results:
-        # ذخیره مستقیم در ریشه پروژه جهت شناسایی توسط گیت‌هاب اکشنز
-        report_path = os.path.join(os.getcwd(), "backtest_table_summary.csv")
+        # استفاده از مسیر مطلق برای اطمینان از قرارگیری در ریشه پروژه
+        report_path = os.path.abspath(os.path.join(os.getcwd(), "backtest_table_summary.csv"))
         pd.DataFrame(summary_results).to_csv(report_path, index=False, encoding='utf-8')
-        print(f"✅ فایل نهایی در ریشه پروژه ذخیره شد: {report_path}")
+        print(f"✅ فایل نهایی در مسیر ذخیره شد: {report_path}")
+    else:
+        print("❌ اخطار: هیچ بکتست موفقی انجام نشد؛ فایلی ساخته نشد.")
 
 if __name__ == "__main__":
     run_all_backtests()
