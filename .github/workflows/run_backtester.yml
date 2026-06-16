@@ -12,71 +12,32 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install System Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgomp1
-
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pandas requests ccxt numpy joblib yfinance lightgbm
+          python -m pip install pandas requests ccxt numpy joblib yfinance lightgbm
 
-      # ۱. دریافت داده‌ها
-      - name: Fetch Market Historical Data
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: python fetcher.py
+      # مرحله حیاتی دیباگ: دیدن محتویات پوشه قبل از اجرا
+      - name: Debug Environment
+        run: |
+          echo "Current Path: $(pwd)"
+          ls -F
 
-      # ۲. اجرای بک‌تستر (تولید فایل در ریشه)
+      # اجرای بک‌تستر با لاگ‌گیری دقیق
       - name: Run Backtest
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: python src/backtester.py
+        run: |
+          python src/backtester.py
+          echo "Checking if file exists after run:"
+          ls -l backtest_table_summary.csv || echo "FILE WAS NOT CREATED BY PYTHON"
 
-      # ۳. بهینه‌سازی
-      - name: Run Optimizer
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: python src/optimizer.py
-
-      # ۴. آموزش مدل
-      - name: Train AI Model
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: python src/train_model.py
-
-      # 🧠 آپلود نتیجه به عنوان Artifact (برای دسترسی فوری و همیشگی)
       - name: Upload Backtest Report
         uses: actions/upload-artifact@v4
         with:
           name: backtest-report
           path: backtest_table_summary.csv
-
-      # ۵. کامیت و پوش هوشمند
-      - name: Commit and Push Results
-        run: |
-          git config --global user.name 'github-actions'
-          git config --global user.email 'github-actions@github.com'
-          
-          # استیج کردن فایل خروجی ریشه و سایر تغییرات
-          git add backtest_table_summary.csv
-          git add .
-          
-          if git diff --cached --quiet; then
-            echo "No changes detected, skipping commit."
-          else
-            git commit -m "Auto-update: Saving backtest results and trained models [skip ci]"
-            git pull origin main --rebase
-            git push origin main
-          fi
+          if-no-files-found: error # اگر فایل ساخته نشد، همینجا اکشن خطا بدهد تا بفهمیم مشکل کجاست
