@@ -1,50 +1,47 @@
 # ---------------------------------------------------------
-# FILE PATH: src/strategy_utils.py (Robust Version)
+# FILE PATH: src/strategy_utils.py (v9.0 - Look-Ahead Bias Fixed & Cleaned)
 # ---------------------------------------------------------
 import pandas as pd
 import numpy as np
 
 def find_last_swing(df, swing_type='high', window=3):
+    """
+    پیدا کردن آخرین سقف یا کف سوینگ واقعی بدون نگاه به آینده (Anti Look-Ahead Bias).
+    این متد کاملاً با ساختار بکتست و ربات لایو همخوانی دارد.
+    """
     try:
-        if len(df) < window * 2: return None
+        if len(df) < (window * 2 + 1): 
+            return None
+            
+        # تبدیل ستون‌ها به آرایه برای افزایش سرعت پردازش روی گوشی و سرور
+        highs = df['High'].to_numpy()
+        lows = df['Low'].to_numpy()
+        
+        # حرکت از انتهای آرایه (آخرین کندل‌ها) به سمت گذشته برای پیدا کردن اولین سوینگ معتبر
+        # از اندکس -window-1 شروع می‌کنیم چون خود کندل‌های آخر هنوز برای تایید سوینگ به کندل‌های بعدی نیاز دارند
+        start_idx = len(df) - window - 1
+        
         if swing_type == 'high':
-            swing_series = df['High'].rolling(window=window*2+1, center=True).max()
-            swings = df[df['High'] == swing_series]
-            if not swings.empty: return float(swings.iloc[-1]['High'])
+            for i in range(start_idx, window - 1, -1):
+                current_val = highs[i]
+                # بررسی اینکه آیا مقدار فعلی از تمام کندل‌های بازه window قبل و بعد خود بزرگتر است یا خیر
+                left_side = highs[i - window:i]
+                right_side = highs[i + 1:i + window + 1]
+                
+                if np.all(current_val >= left_side) and np.all(current_val >= right_side):
+                    return float(current_val)
+                    
         elif swing_type == 'low':
-            swing_series = df['Low'].rolling(window=window*2+1, center=True).min()
-            swings = df[df['Low'] == swing_series]
-            if not swings.empty: return float(swings.iloc[-1]['Low'])
+            for i in range(start_idx, window - 1, -1):
+                current_val = lows[i]
+                # بررسی اینکه آیا مقدار فعلی از تمام کندل‌های بازه window قبل و بعد خود کوچکتر است یا خیر
+                left_side = lows[i - window:i]
+                right_side = lows[i + 1:i + window + 1]
+                
+                if np.all(current_val <= left_side) and np.all(current_val <= right_side):
+                    return float(current_val)
+                    
         return None
-    except: return None
-
-def calculate_indicators(df):
-    df = df.copy()
-    # اطمینان از اینکه همه ستون‌ها عددی هستند
-    df = df.apply(pd.to_numeric, errors='coerce').fillna(0)
-    
-    # اندیکاتورها
-    df['feat_trend_line'] = np.where(df['Close'] > df['Close'].rolling(window=20).mean(), 1.0, 0.0)
-    
-    # فرمول ساده‌شده ADX برای جلوگیری از خطای سری‌های زمانی
-    tr = df['High'] - df['Low']
-    df['feat_adx'] = tr.rolling(window=14).mean().fillna(25.0)
-    
-    df['feat_atr_percent'] = (tr.rolling(window=14).mean() / df['Close']) * 100
-    
-    delta = df['Close'].diff()
-    up = delta.clip(lower=0)
-    down = -1 * delta.clip(upper=0)
-    ema_up = up.ewm(com=13, adjust=False).mean()
-    ema_down = down.ewm(com=13, adjust=False).mean()
-    rs = ema_up / (ema_down + 1e-10)
-    df['feat_rsi'] = 100 - (100 / (1 + rs))
-    
-    ema_20 = df['Close'].ewm(span=20, adjust=False).mean()
-    df['feat_ema_deviation'] = (df['Close'] - ema_20) / ema_20 * 100
-    df['feat_rsi_momentum'] = df['feat_rsi'].diff().fillna(0)
-    df['feat_body_ratio'] = abs(df['Close'] - df['Open']) / (df['High'] - df['Low'] + 0.0001)
-    df['feat_high_volume_session'] = np.where((df['High'] - df['Low']) > (df['High'] - df['Low']).rolling(20).mean(), 1.0, 0.0)
-    df['feat_vol_ratio'] = (df['High'] - df['Low']) / ((df['High'] - df['Low']).rolling(window=10).mean() + 1e-10)
-
-    return df.fillna(0)
+    except Exception as e:
+        # برگشت امن در صورت رخ دادن هرگونه خطای غیرمنتظره در ساختار دیتامپ
+        return None
