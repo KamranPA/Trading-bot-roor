@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/train_model.py (v8.6.1 - Fixed Data Imbalance Crash)
+# FILE PATH: src/train_model.py (v9.0 - Anti-Crash Evaluation & Scoring Aligned)
 # ---------------------------------------------------------
 import sqlite3
 import pandas as pd
@@ -13,6 +13,7 @@ try:
     from lightgbm import LGBMClassifier
 except ImportError:
     print("CRITICAL: LightGBM is not installed. Run 'pip install lightgbm'")
+    sys.path.insert(0, BASE_DIR)
     sys.exit(1)
 
 # تنظیم مسیر پایه
@@ -80,7 +81,7 @@ def train_model_for_symbol(symbol, mode="backtest"):
         print(f"⚠️ مدل {symbol} قابل آموزش نیست (داده‌های شما فقط شامل سود یا فقط شامل ضرر است).")
         return
     
-    # ⚠️ اصلاح ترتیب (مهم): ابتدا فیلترها و حذف تکراری‌ها روی کل دیتافریم اعمال می‌شود
+    # ابتدا فیلترها و حذف تکراری‌ها روی کل دیتافریم اعمال می‌شود
     df = df.dropna(subset=features + ['target_label'])
     df = df.sort_values(by='timestamp', ascending=True)
     df = df.drop_duplicates(subset=['timestamp'])
@@ -106,7 +107,6 @@ def train_model_for_symbol(symbol, mode="backtest"):
         return
 
     # --- ۴. آموزش مدل LightGBM ---
-    # اضافه شدن class_weight='balanced' برای رفع خطای Imbalance و عدم تعادل کلاس‌ها
     model = LGBMClassifier(
         n_estimators=100,       
         learning_rate=0.03,      
@@ -121,12 +121,15 @@ def train_model_for_symbol(symbol, mode="backtest"):
         verbose=-1
     )
     
-    # ارزیابی دقیق بدون خطای طول ماتریس
-    model.fit(
-        X_train, 
-        y_train,
-        eval_set=[(X_test, y_test)]  
-    )
+    # 🛠️ اصلاح امنیتی بسیار مهم: اگر دیتای تست تنوع کلاس نداشت، بدون eval_set فیت کن تا کرش نکند
+    if len(np.unique(y_test)) < 2:
+        model.fit(X_train, y_train)
+    else:
+        model.fit(
+            X_train, 
+            y_train,
+            eval_set=[(X_test, y_test)]  
+        )
 
     # --- ۵. ذخیره‌سازی ---
     safe_symbol_name = symbol.replace('/', '_')
