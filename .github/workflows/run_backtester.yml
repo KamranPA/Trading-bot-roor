@@ -84,5 +84,3 @@ jobs:
             # ارسال نهایی
             git push origin main
           fi
-
-اصلاح میخواد؟
