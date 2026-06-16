@@ -1,35 +1,88 @@
-name: backtester and optimizer
+name: Run Backtester and Optimizer
 
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+  workflow_dispatch: # امکان اجرای دستی از تب Actions گیت‌هاب
 
 permissions:
   contents: write
 
 jobs:
-  run-bot-and-backtest:
+  backtest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0 # دریافت کل تاریخچه برای حل مشکلات Merge
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
+      # 🛠️ نصب وابستگی‌های سیستمی برای اجرای صحیح LightGBM
+      - name: Install System Dependencies for LightGBM
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgomp1
+
       - name: Install dependencies
-        run: pip install pandas requests ccxt numpy joblib yfinance lightgbm
-      
-      - name: Run Bot
-        run: python main.py
-        
-      - name: Run Backtester and Optimizer
-        run: python src/backtester.py
-        
-      - name: Upload Backtest Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: backtest-report
-          # این خط تضمین می‌کند فایل دقیقا از ریشه پروژه برداشته شود
-          path: backtest_table_summary.csv
-          if-no-files-found: error
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pandas requests ccxt numpy joblib yfinance lightgbm
+
+      # ۱. دریافت داده‌های بازار
+      - name: Fetch Market Historical Data
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python fetcher.py
+
+      # ۲. اجرای بک‌تستر
+      - name: Run Backtest
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python src/backtester.py
+
+      # ۳. بهینه‌سازی پارامترها
+      - name: Run Optimizer
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python src/optimizer.py
+
+      # ۴. آموزش مدل هوش مصنوعی
+      - name: Train AI Model
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python src/train_model.py
+
+      # ۵. کامیت و پوش هوشمند با استراتژی رفع تداخل
+      - name: Commit and Push Results
+        run: |
+          git config --global user.name 'github-actions'
+          git config --global user.email 'github-actions@github.com'
+          
+          # استیج کردن تمام تغییرات (فایل‌های دیتابیس، مدل‌ها و غیره)
+          git add .
+          
+          # بررسی اینکه آیا تغییری برای کامیت وجود دارد
+          if git diff --cached --quiet; then
+            echo "No changes detected, skipping commit."
+          else
+            # کامیت کردن تمام تغییراتِ استیج شده
+            git commit -m "Auto-update: Saving backtest results and trained models"
+            
+            # دریافت آخرین تغییرات از مخزن اصلی برای جلوگیری از تداخل (Conflict)
+            echo "🔄 Pulling latest changes from remote..."
+            git pull origin main --rebase
+            
+            # ارسال نهایی
+            git push origin main
+          fi
+
+اصلاح میخواد؟
