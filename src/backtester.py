@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/backtester.py (فایل کامل و بدون حذفیات)
+# FILE PATH: src/backtester.py (فایل نهایی و اصلاح شده)
 # ---------------------------------------------------------
 import os
 import sqlite3
@@ -109,7 +109,7 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
         elif low_price < last_swing_low and is_bearish:
             is_in_position_raw, direction_raw, entry_price_raw, stop_loss_raw, tp1_raw, tp2_raw, entry_time_raw, entry_features_raw = True, "SHORT", last_swing_low, last_swing_low + sl_dist, last_swing_low - sl_dist, last_swing_low - (sl_dist * 2), current_time, features_snapshot
 
-    # فاز ۲: ارزیابی هوش مصنوعی (Out-of-Sample)
+    # فاز ۲: ارزیابی هوش مصنوعی
     ai_total_trades, ai_winning_trades, ai_total_pnl = 0, 0, 0.0
     is_in_position_ai = False
     entry_price_ai, direction_ai, stop_loss_ai, tp2_ai = 0.0, "", 0.0, 0.0
@@ -160,7 +160,6 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
 
     conn.close()
     win_rate_ai = (ai_winning_trades / ai_total_trades * 100) if ai_total_trades > 0 else 0
-    print(f"📈 {symbol} | آموزش خام: {total_trades_raw} | تست AI: {ai_total_trades} | وین‌ریت: {win_rate_ai:.1f}%")
     return {"symbol": symbol, "total_trades": ai_total_trades, "win_rate": round(win_rate_ai, 2), "total_pnl_percent": round(ai_total_pnl, 2)}
 
 def run_all_backtests():
@@ -170,15 +169,23 @@ def run_all_backtests():
         except: pass
     init_backtest_db(db_path)
     brain = TradingBrain()
-    summary_results = [res for s in config.WATCHLIST if (res := run_backtest_for_symbol(s, db_path, brain))]
     
+    # اجرای حلقه با مدیریت خطا
+    summary_results = []
+    for s in config.WATCHLIST:
+        try:
+            res = run_backtest_for_symbol(s, db_path, brain)
+            if res:
+                summary_results.append(res)
+        except Exception as e:
+            print(f"❌ خطا در پردازش {s}: {e}")
+            
     if summary_results:
-        # استفاده از مسیر مطلق برای اطمینان از قرارگیری در ریشه پروژه
-        report_path = os.path.abspath(os.path.join(os.getcwd(), "backtest_table_summary.csv"))
+        report_path = os.path.abspath("backtest_table_summary.csv")
         pd.DataFrame(summary_results).to_csv(report_path, index=False, encoding='utf-8')
-        print(f"✅ فایل نهایی در مسیر ذخیره شد: {report_path}")
+        print(f"✅ فایل نهایی در ریشه پروژه ذخیره شد: {report_path}")
     else:
-        print("❌ اخطار: هیچ بکتست موفقی انجام نشد؛ فایلی ساخته نشد.")
+        print("❌ اخطار: لیستی برای ذخیره وجود ندارد.")
 
 if __name__ == "__main__":
     run_all_backtests()
