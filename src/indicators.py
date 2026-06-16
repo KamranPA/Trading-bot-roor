@@ -7,17 +7,18 @@ import numpy as np
 import config
 
 def calculate_indicators(df):
-    """📊 محاسبه سنسورهای هوشمند (بدون وابستگی به پارامترهای حجمی)"""
+    """📊 محاسبه سنسورهای هوشمند (با اصلاح قطعی باگ RSI و بدون فیلتر حجم)"""
     if df is None or df.empty or len(df) < 50:
         return df
 
     # ۱. محاسبات پایه قیمت
     df['ema_200'] = df['Close'].ewm(span=200, adjust=False).mean()
     
-    # ۲. محاسبات RSI
+    # ۲. 🛠️ اصلاح قطعی و ریاضی باگ RSI
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta > 0, 0)).rolling(window=14).mean()
+    # اصلاح شد: برای محاسبه میانگین ضررها فقط قیمت‌های منفی بررسی می‌شوند
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / (loss + 1e-10)
     df['feat_rsi'] = 100 - (100 / (1 + rs))
     
@@ -40,13 +41,15 @@ def calculate_indicators(df):
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)) * 100
     df['feat_adx'] = dx.rolling(window=14).mean().fillna(25.0)
 
-    # ۵. سنسورهای ۹‌گانه (بدون استفاده از config برای حجم)
+    # ۵. سنسورهای حجمی (کاملا خنثی و بی‌اثر شدند تا نقش فیلتر نداشته باشند)
+    # مقادیر ثابت داده شد تا دیتابیس ارور کمبود ستون ندهد
     df['feat_vol_ratio'] = 1.0 
+    df['feat_high_volume_session'] = 0.0 
+    
+    # ۶. سنسورهای روند و کندل
     df['feat_trend_line'] = np.where(df['Close'] > df['ema_200'], 1.0, 0.0)
     df['feat_ema_deviation'] = ((df['Close'] - df['ema_200']) / df['ema_200']) * 100
     df['feat_rsi_momentum'] = df['feat_rsi'].diff().fillna(0.0)
     df['feat_body_ratio'] = (abs(df['Close'] - df['Open']) / (df['High'] - df['Low'] + 1e-10))
-    df['feat_high_volume_session'] = 0.0 
-    df['feat_vol_confirm'] = 1.0
 
     return df.fillna(0.0)
