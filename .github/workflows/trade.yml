@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: .github/workflows/trade.yml (نسخه اصلاح شده و ضد خطا)
+# FILE PATH: .github/workflows/trade.yml (نسخه کنترل دستی و اسکنر واقعی)
 # ---------------------------------------------------------
 name: trade
 
@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch: # 👈 قابلیت کلیدی: دکمه اجرای دستی را در پنل گیت‌هاب فعال می‌کند
 
 permissions:
   contents: write
@@ -34,14 +35,14 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Set Permissions
-        run: chmod +x main.py test_telegram.py
+        run: chmod +x main.py
 
-      # ⚡ اجرای اسکریپت تست تلگرام برای اطمینان از ارسال موفق سیگنال فرضی
+      # ⚡ اجرای اسکریپت اصلی ربات برای اسکن واقعی ۱۱ جفت‌ارز بازار به صورت ایمن
       - name: Run Bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python test_telegram.py
+        run: python main.py
 
       - name: Commit and Push Database & AI Parameters
         run: |
