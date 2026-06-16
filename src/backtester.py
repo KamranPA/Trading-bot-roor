@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/backtester.py (v8.7 - Fixed short position sl_dist bug)
+# FILE PATH: src/backtester.py (v9.0 - Fully Integrated with Scoring)
 # ---------------------------------------------------------
 import os
 import sqlite3
@@ -9,7 +9,7 @@ from src import indicators, strategy_utils
 from src.brain import TradingBrain
 
 def init_backtest_db(db_path):
-    """اطمینان از وجود ساختار جدول سیگنال‌ها در دیتابیس بکتست"""
+    """اطمینان از وجود ساختار جدول سیگنال‌ها در دیتابیس بکتست با ستون‌های جدید امتیازدهی"""
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
@@ -34,16 +34,19 @@ def init_backtest_db(db_path):
                 feat_ema_deviation REAL,
                 feat_rsi_momentum REAL,
                 feat_body_ratio REAL,
-                feat_high_volume_session REAL
+                feat_high_volume_session REAL,
+                total_score REAL DEFAULT 0.0,
+                ai_score REAL DEFAULT 0.0,
+                rsi_score REAL DEFAULT 0.0,
+                adx_score REAL DEFAULT 0.0,
+                ema_score REAL DEFAULT 0.0
             )
         """)
         conn.commit()
 
 def run_backtest_for_symbol(symbol, db_path, brain_instance):
     """
-    اجرای تست گذشته در دو فاز:
-    فاز ۱: تزریق سیگنال‌های خام به دیتابیس بکتست برای آموزش هوش مصنوعی (۸۰٪ دیتا)
-    فاز ۲: ارزیابی و شبیه‌سازی لایو با فیلتر هوش مصنوعی (۲۰٪ دیتا)
+    اجرای تست گذشته در دو فاز کاملاً هماهنگ با سیستم امتیازدهی و هوش مصنوعی جدید
     """
     safe_name = symbol.replace('/', '_')
     file_path = os.path.join(config.BASE_DIR, "data", "4h", f"{safe_name}_history.csv")
@@ -56,18 +59,18 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
     if len(df) < 250:
         return None
 
+    # محاسبه مجدد اندیکاتورها با فرمول جدید و اصلاح‌شده RSI
     df = indicators.calculate_indicators(df)
     
     # تعیین نقطه برش برای ایزوله کردن گذشته (آموزش) و آینده (تست)
     split_idx = int(len(df) * 0.8)
     
-    # ==========================================
-    # فاز ۱: تولید دیتای خام برای آموزش هوش مصنوعی
-    # (از کندل ۲۰۰ تا نقطه Split)
-    # ==========================================
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
+    # ==========================================
+    # فاز ۱: تولید دیتای خام برای آموزش هوش مصنوعی
+    # ==========================================
     is_in_position_raw = False
     entry_price_raw = 0.0
     direction_raw = ""
@@ -113,13 +116,16 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
                     INSERT INTO signals (
                         timestamp, symbol, direction, entry_price, stop_loss, tp1, tp2, status, closed_at, pnl_percent,
                         feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, 
-                        feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'CLOSED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session,
+                        total_score, ai_score, rsi_score, adx_score, ema_score
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'CLOSED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     entry_time_raw, symbol, direction_raw, entry_price_raw, stop_loss_raw, tp1_raw, tp2_raw, current_time, pnl,
                     entry_features_raw['feat_adx'], entry_features_raw['feat_vol_ratio'], entry_features_raw['feat_atr_percent'],
                     entry_features_raw['feat_rsi'], entry_features_raw['feat_trend_line'], entry_features_raw['feat_ema_deviation'],
-                    entry_features_raw['feat_rsi_momentum'], entry_features_raw['feat_body_ratio'], entry_features_raw['feat_high_volume_session']
+                    entry_features_raw['feat_rsi_momentum'], entry_features_raw['feat_body_ratio'], entry_features_raw['feat_high_volume_session'],
+                    entry_features_raw.get('total_score', 0.0), entry_features_raw.get('ai_score', 0.0),
+                    entry_features_raw.get('rsi_score', 0.0), entry_features_raw.get('adx_score', 0.0), entry_features_raw.get('ema_score', 0.0)
                 ))
                 conn.commit()
             continue
@@ -153,7 +159,8 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
             'feat_ema_deviation': float(current_candle.get('feat_ema_deviation', 0)),
             'feat_rsi_momentum': float(current_candle.get('feat_rsi_momentum', 0)),
             'feat_body_ratio': float(current_candle.get('feat_body_ratio', 0)),
-            'feat_high_volume_session': float(current_candle.get('feat_high_volume_session', 0))
+            'feat_high_volume_session': float(current_candle.get('feat_high_volume_session', 0)),
+            'total_score': 0.0, 'ai_score': 0.0, 'rsi_score': 0.0, 'adx_score': 0.0, 'ema_score': 0.0
         }
 
         if high_price > last_swing_high and is_bullish_momentum:
@@ -176,11 +183,8 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
             entry_time_raw = current_time
             entry_features_raw = features_snapshot
 
-    conn.close()
-
     # ==========================================
     # فاز ۲: ارزیابی هوش مصنوعی در محیط لایو (Out-of-Sample)
-    # (از نقطه Split تا انتها - فقط برای گزارش‌گیری)
     # ==========================================
     ai_total_trades = 0
     ai_winning_trades = 0
@@ -246,17 +250,24 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
         is_bullish_momentum = float(current_candle.get('feat_rsi', 50)) > 50
         is_bearish_momentum = float(current_candle.get('feat_rsi', 50)) < 50
 
-        # 🧠 تشخیص هوش مصنوعی
+        # 🧠 فیکس ساختاری هماهنگ با هوش مصنوعی و سیستم امتیازدهی جدید
         ai_approved = False
+        features_dict = {
+            'feat_adx': float(current_candle.get('feat_adx', 0)),
+            'feat_vol_ratio': float(current_candle.get('feat_vol_ratio', 0)),
+            'feat_atr_percent': atr_val,
+            'feat_rsi': float(current_candle.get('feat_rsi', 0)),
+            'feat_trend_line': float(current_candle.get('feat_trend_line', 0)),
+            'feat_ema_deviation': float(current_candle.get('feat_ema_deviation', 0)),
+            'feat_rsi_momentum': float(current_candle.get('feat_rsi_momentum', 0)),
+            'feat_body_ratio': float(current_candle.get('feat_body_ratio', 0)),
+            'feat_high_volume_session': float(current_candle.get('feat_high_volume_session', 0))
+        }
+
         if brain_instance and symbol in brain_instance.models:
             try:
-                features_list = [
-                    'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 
-                    'feat_trend_line', 'feat_ema_deviation', 'feat_rsi_momentum', 
-                    'feat_body_ratio', 'feat_high_volume_session'
-                ]
-                features_df = df.iloc[[i]][features_list]
-                ai_approved = brain_instance.predict_signal(symbol, features_df)
+                # اصلاح مهم: ارسال دیکشنری به جای دیتافریم تک‌خطی برای جلوگیری از کرش
+                ai_approved = brain_instance.predict_signal(symbol, features_dict)
             except:
                 ai_approved = False
         else:
@@ -273,12 +284,12 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
             is_in_position_ai = True
             direction_ai = "SHORT"
             entry_price_ai = last_swing_low
-            # 🛠️ اصلاح: جایگزینی فرمول صحیح sl_dist به جای متغیر تعریف نشده pnl
             stop_loss_ai = entry_price_ai + sl_dist
             tp2_ai = entry_price_ai - (sl_dist * 2)
 
+    conn.close()
+
     win_rate_ai = (ai_winning_trades / ai_total_trades * 100) if ai_total_trades > 0 else 0
-    
     print(f"📈 {symbol} | آموزش خام: {total_trades_raw} پوزیشن | تست AI (لایو): {ai_total_trades} معامله، وین‌ریت: {win_rate_ai:.1f}%، سود: {ai_total_pnl:.1f}%")
     
     return {
@@ -290,9 +301,16 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
 
 def run_all_backtests():
     db_path = config.DB_PATH_BACKTEST
-    init_backtest_db(db_path)
     
-    print("📊 شروع پروسه دوفازی: تزریق دیتای گذشته و شبیه‌سازی لایو با هوش مصنوعی...")
+    # برای اطمینان از اعمال ستون‌های جدید امتیازدهی، دیتابیس بکتست قدیمی را حذف می‌کنیم
+    if os.path.exists(db_path):
+        try:
+            os.remove(db_path)
+        except:
+            pass
+
+    init_backtest_db(db_path)
+    print("📊 شروع پروسه دوفازی بکتست: محاسبات تمیز RSI + هماهنگی با هوش مصنوعی...")
     
     brain = TradingBrain()
     
