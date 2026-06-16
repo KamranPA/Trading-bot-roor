@@ -7,8 +7,6 @@ on:
   push:
     branches:
       - main
-  schedule:
-    - cron: '*/15 * * * *' # اجرای خودکار هر ۱۵ دقیقه یک‌بار
 
 permissions:
   contents: write
