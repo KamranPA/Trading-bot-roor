@@ -1,10 +1,13 @@
-name: trade
+name: backtester and optimizer
 
 on:
   push:
     branches:
       - main
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   run-bot-and-backtest:
@@ -27,4 +30,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: backtest-report
+          # این خط تضمین می‌کند فایل دقیقا از ریشه پروژه برداشته شود
           path: backtest_table_summary.csv
+          if-no-files-found: error
