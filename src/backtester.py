@@ -175,9 +175,10 @@ def run_all_backtests():
     brain = TradingBrain()
     summary_results = [res for s in config.WATCHLIST if (res := run_backtest_for_symbol(s, db_path, brain))]
     if summary_results:
-        report_path = os.path.abspath(os.path.join(config.BASE_DIR, "backtest_table_summary.csv"))
+        # ذخیره مستقیم در ریشه پروژه جهت شناسایی توسط گیت‌هاب اکشنز
+        report_path = os.path.join(os.getcwd(), "backtest_table_summary.csv")
         pd.DataFrame(summary_results).to_csv(report_path, index=False, encoding='utf-8')
-        print(f"✅ فایل نهایی در مسیر ذخیره شد: {report_path}")
+        print(f"✅ فایل نهایی در ریشه پروژه ذخیره شد: {report_path}")
 
 if __name__ == "__main__":
     run_all_backtests()
