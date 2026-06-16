@@ -1,179 +1,60 @@
 # ---------------------------------------------------------
 # FILE PATH: src/strategy.py
 # ---------------------------------------------------------
-import os
-import json
-import sqlite3
-import datetime
-import config
-from src import database, strategy_utils
 import pandas as pd
+import numpy as np
 
-def is_blocked_by_8h_filter(pair, current_direction):
+def calculate_indicators(df):
     """
-    بررسی دیتابیس لایو: اگر در ۸ ساعت گذشته سیگنالی برای این ارز و دقیقاً در همین جهت صادر شده باشد، 
-    معامله جدید بلاک می‌شود.
+    محاسبه سنسورهای هوشمند برای مدل یادگیری ماشین
+    - رفع باگ محاسبات RSI
+    - حذف فیلترهای حجمی طبق درخواست شما
     """
-    try:
-        if not os.path.exists(database.DB_PATH):
-            return False
+    if df is None or df.empty or len(df) < 50:
+        return df
 
-        with sqlite3.connect(database.DB_PATH) as conn:
-            cursor = conn.cursor()
-            # استخراج آخرین سیگنال همین ارز از دیتابیس
-            cursor.execute(
-                "SELECT direction, timestamp FROM signals WHERE symbol = ? ORDER BY id DESC LIMIT 1",
-                (pair,)
-            )
-            last_signal = cursor.fetchone()
-
-            if last_signal:
-                last_direction, last_time_str = last_signal
-                
-                # بررسی شرط هم‌جهت بودن (مثلا لانگ بعد از لانگ)
-                if last_direction == current_direction:
-                    # تبدیل رشته زمانی دیتابیس (فرمت YYYY-MM-DD HH:MM:SS) به آبجکت زمان
-                    clean_time_str = last_time_str.split('.')[0]
-                    last_time = datetime.datetime.strptime(clean_time_str, '%Y-%m-%d %H:%M:%S')
-                    now = datetime.datetime.utcnow() # SQLite از زمان UTC استفاده می‌کند
-                    
-                    # محاسبه اختلاف زمان به ساعت
-                    diff_hours = (now - last_time).total_seconds() / 3600
-                    
-                    if diff_hours < 8:
-                        return True # سیگنال مسدود است
-    except Exception as e:
-        print(f"⚠️ خطا در بررسی فیلتر ۸ ساعته برای {pair}: {e}")
-        
-    return False
-
-def generate_signal(df, pair, model=None):
-    # اطمینان از وجود دیتای کافی برای محاسبه اندیکاتورها (به ویژه EMA 200)
-    if df is None or len(df) < 200:
-        return None
-
-    idx = len(df) - 1
-    candle = df.iloc[idx]
+    # ۱. محاسبات پایه
+    df['ema_200'] = df['Close'].ewm(span=200, adjust=False).mean()
     
-    # ۲. مدیریت ریسک: کنترل سقف تعداد پوزیشن‌های باز
-    if database.get_open_positions_count() >= config.MAX_OPEN_POSITIONS:
-        return None
-
-    # --- خواندن پارامترهای اختصاصی ارز از best_params.json ---
-    adx_thresh = config.ADX_THRESHOLD
-    tp_ratio = 1.5  # ضریب پیش‌فرض سود
-    sl_ratio = 1.0  # ضریب پیش‌فرض ضرر
-    risk_multiplier = 1.0 # ضریب پیش‌فرض حجم معامله
+    # ۲. محاسبه دقیق RSI (اصلاح شده)
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     
-    try:
-        params_file = os.path.join(config.BASE_DIR, "best_params.json")
-        if os.path.exists(params_file):
-            with open(params_file, 'r') as f:
-                all_params = json.load(f)
-                
-                # خواندن تنظیمات اختصاصی یا استفاده از DEFAULT به عنوان جایگزین
-                pair_params = all_params.get(pair, all_params.get("DEFAULT", {}))
-                
-                adx_thresh = pair_params.get('adx_threshold', adx_thresh)
-                tp_ratio = pair_params.get('tp_ratio', tp_ratio)
-                sl_ratio = pair_params.get('sl_ratio', sl_ratio)
-                risk_multiplier = pair_params.get('risk_multiplier', risk_multiplier)
-    except Exception as e:
-        pass # در صورت بروز خطا، با همان مقادیر پیش‌فرض ادامه می‌دهد
-
-    # ۳. فیلتر جهت‌گیری و شتاب روند کلان با حد آستانه اختصاصی این ارز
-    if float(candle.get('feat_adx', 0)) < adx_thresh:
-        return None
-
-    # ۴. شناسایی سطوح سویینگ قیمتی
-    last_swing_high = strategy_utils.find_last_swing(df, 'high', config.SWING_WINDOW)
-    last_swing_low = strategy_utils.find_last_swing(df, 'low', config.SWING_WINDOW)
-
-    if last_swing_high is None or last_swing_low is None:
-        return None
-
-    # ۵. آماده‌سازی ویژگی‌ها برای هوش مصنوعی
-    features_dict = {
-        'feat_adx': float(candle.get('feat_adx', 0)),
-        'feat_atr_percent': float(candle.get('feat_atr_percent', 0)),
-        'feat_rsi': float(candle.get('feat_rsi', 0)),
-        'feat_trend_line': float(candle.get('feat_trend_line', 0)),
-        'feat_ema_deviation': float(candle.get('feat_ema_deviation', 0)),
-        'feat_rsi_momentum': float(candle.get('feat_rsi_momentum', 0)),
-        'feat_body_ratio': float(candle.get('feat_body_ratio', 0))
-    }
-
-    # ۶. اعمال فیلتر هوش مصنوعی اختصاصی (Multi-Model)
-    if model is not None:
-        try:
-            if not model.predict_signal(pair, features_dict):
-                return None
-        except Exception as e:
-            print(f"خطا در مدل هوش مصنوعی {pair}: {e}")
-            pass
-
-    # ۷. مشخص کردن قیمت‌های لحظه‌ای کندل فعلی برای منطق ورود شکست سطوح
-    high_price = float(candle['High'])
-    low_price = float(candle['Low'])
+    # جلوگیری از تقسیم بر صفر
+    rs = gain / (loss + 1e-10)
+    df['feat_rsi'] = 100 - (100 / (1 + rs))
     
-    # ۸. منطق شکست سطوح در لحظه برخورد (Intra-candle Breakout Logic)
-    is_bullish_momentum = float(candle.get('feat_rsi', 50)) > 50
-    is_bearish_momentum = float(candle.get('feat_rsi', 50)) < 50
-
-    if high_price > last_swing_high and is_bullish_momentum:
-        entry_price = last_swing_high  # قیمت ورود دقیقاً روی سطح شکست مقاومت
-        
-        # ---> چک کردن فیلتر ۸ ساعته دقیقا در لحظه تایید ورود <---
-        if is_blocked_by_8h_filter(pair, "LONG"):
-            return None
-            
-        # مدیریت سرمایه داینامیک با اعمال risk_multiplier
-        risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0) * risk_multiplier
-        atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
-        sl_dist = 1.5 * atr_val * sl_ratio
-        tp_dist = sl_dist * tp_ratio
-        
-        stop_loss = entry_price - sl_dist
-        sl_percent = (sl_dist / entry_price) * 100
-        position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL) if sl_percent > 0 else 0
-
-        return {
-            'pair': pair, 
-            'direction': 'LONG', 
-            'entry_price': round(entry_price, 4),
-            'stop_loss': round(stop_loss, 4), 
-            'tp1': round(entry_price + (tp_dist / 2), 4),
-            'tp2': round(entry_price + tp_dist, 4),
-            'position_size': round(position_size, 2), 
-            **features_dict
-        }
+    # ۳. محاسبه ATR برای نوسان‌سنجی
+    high_low = df['High'] - df['Low']
+    high_close = (df['High'] - df['Close'].shift()).abs()
+    low_close = (df['Low'] - df['Close'].shift()).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    df['atr'] = tr.rolling(window=14).mean()
+    df['feat_atr_percent'] = (df['atr'] / df['Close']) * 100
     
-    elif low_price < last_swing_low and is_bearish_momentum:
-        entry_price = last_swing_low  # قیمت ورود دقیقاً روی سطح شکست حمایت
-        
-        # ---> چک کردن فیلتر ۸ ساعته دقیقا در لحظه تایید ورود <---
-        if is_blocked_by_8h_filter(pair, "SHORT"):
-            return None
-            
-        # مدیریت سرمایه داینامیک با اعمال risk_multiplier
-        risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0) * risk_multiplier
-        atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
-        sl_dist = 1.5 * atr_val * sl_ratio
-        tp_dist = sl_dist * tp_ratio
-        
-        stop_loss = entry_price + sl_dist
-        sl_percent = (sl_dist / entry_price) * 100
-        position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL) if sl_percent > 0 else 0
+    # ۴. محاسبه ADX برای قدرت روند
+    up_move = df['High'].diff()
+    down_move = df['Low'].diff()
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+    tr_smooth = tr.rolling(window=14).sum()
+    
+    plus_di = 100 * (pd.Series(plus_dm).rolling(window=14).sum() / (tr_smooth + 1e-10))
+    minus_di = 100 * (pd.Series(minus_dm).rolling(window=14).sum() / (tr_smooth + 1e-10))
+    
+    dx = (abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)) * 100
+    df['feat_adx'] = dx.rolling(window=14).mean().fillna(25.0)
 
-        return {
-            'pair': pair, 
-            'direction': 'SHORT', 
-            'entry_price': round(entry_price, 4),
-            'stop_loss': round(stop_loss, 4), 
-            'tp1': round(entry_price - (tp_dist / 2), 4),
-            'tp2': round(entry_price - tp_dist, 4),
-            'position_size': round(position_size, 2), 
-            **features_dict
-        }
+    # ۵. سنسورهای قیمت‌محور (فیلترهای حجمی حذف شدند)
+    df['feat_trend_line'] = np.where(df['Close'] > df['ema_200'], 1.0, 0.0)
+    df['feat_ema_deviation'] = ((df['Close'] - df['ema_200']) / df['ema_200']) * 100
+    df['feat_rsi_momentum'] = df['feat_rsi'].diff().fillna(0.0)
+    df['feat_body_ratio'] = (abs(df['Close'] - df['Open']) / (df['High'] - df['Low'] + 1e-10))
+    
+    # مقداردهی خنثی برای ستون‌های سابقِ حجمی جهت جلوگیری از خطای مدل
+    df['feat_vol_ratio'] = 1.0 
+    df['feat_high_volume_session'] = 0.0
+    df['feat_vol_confirm'] = 1.0
 
-    return None
+    return df.fillna(0.0)
