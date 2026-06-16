@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (نسخه اصلاح شده با سیستم ثبت امتیازات)
+# FILE PATH: main.py (v9.1 - Live Telegram & Anti-Crash Fixed)
 # ---------------------------------------------------------
 import os
 import sys
@@ -73,15 +73,11 @@ def process_pair(pair):
         if df is None or df.empty: return
         df = indicators.calculate_indicators(df)
         
-        # فرض می‌کنیم تابع استراتژی شما اصلاح شده و علاوه بر سیگنال، امتیازات را هم برمی‌گرداند.
-        # برای جلوگیری از خطا، استراتژی باید یک دیکشنری حاوی اطلاعات امتیاز یا خود سیگنال برگرداند.
+        # دریافت خروجی استراتژی شامل سیگنال و امتیازات وزنی
         res = strategy.generate_signal(df, pair, model=BRAIN)
-        
-        # استخراج اطلاعات امتیازدهی در صورت وجود در خروجی استراتژی
-        # اگر استراتژی شما فقط خودِ دیکشنری سیگنال را می‌دهد، امتیازها را از درون آن یا به صورت پیش‌فرض استخراج می‌کنیم
         signal = res if isinstance(res, dict) else None
         
-        # مقادیر پیش‌فرض امتیاز برای ثبت در scan_logs در صورتی که در خروجی استراتژی فیلد مجزا ندارند
+        # استخراج امن امتیازها جهت ثبت دقیق در جدول scan_logs
         t_score = res.get('total_score', 0.0) if isinstance(res, dict) else 0.0
         ai_s = res.get('ai_score', 0.0) if isinstance(res, dict) else 0.0
         rsi_s = res.get('rsi_score', 0.0) if isinstance(res, dict) else 0.0
@@ -90,24 +86,41 @@ def process_pair(pair):
 
         with db_lock:
             if signal and signal.get('direction') is not None:
-                # حذف کلیدهای اضافی برای جلوگیری از خطای multiple values
+                # کپی برای جلوگیری از خراب شدن دیتای ارسالی به تلگرام
+                tele_signal = signal.copy()
+                
+                # رفع مشکل توکن تلگرام با جفت ارز جدید پالیگان (POL)
+                if pair == "POL/USDT":
+                    tele_signal['pair_display'] = "MATIC/USDT (POL)"
+                else:
+                    tele_signal['pair_display'] = pair
+
+                # حذف کلیدهای اضافی برای جلوگیری از خطاهای ساختاری دیتابیس
                 signal.pop('pair', None) 
                 signal.pop('symbol', None)
                 
-                # پاکسازی کلیدهای مربوط به امتیاز قبل از ذخیره در جدول اصلی سیگنال‌ها (اگر وجود دارند)
+                # پاکسازی کلیدهای مربوط به امتیاز قبل از ذخیره در جدول اصلی سیگنال‌ها
                 for k in ['total_score', 'ai_score', 'rsi_score', 'adx_score', 'ema_score']:
                     signal.pop(k, None)
 
+                # ذخیره در دیتابیس لایو و ثبت وضعیت لاگ
                 database.save_signal_advanced(pair=pair, **signal)
                 database.log_scan_status(pair, "SIGNAL SENT", total=t_score, ai=ai_s, rsi=rsi_s, adx=adx_s, ema=ema_s)
-                telegram_bot.format_and_send_signal(signal)
+                
+                # 🛠️ اصلاح امنیتی: ارسال تلگرام در بلاک ایزوله شده جهت جلوگیری از کرش کل اسکریپت
+                try:
+                    telegram_bot.format_and_send_signal(tele_signal)
+                    logging.info(f"🚀 سیگنال {pair} با موفقیت به تلگرام مخابره شد.")
+                except Exception as t_err:
+                    logging.error(f"⚠️ خطا در ارسال پیام تلگرام برای {pair}: {t_err}")
             else:
+                # اگر هوش مصنوعی رد کرده باشد یا امتیاز کم باشد، فیلد direction نال است و لاگ nosignal می‌خورد
                 database.log_scan_status(pair, "nosignal", total=t_score, ai=ai_s, rsi=rsi_s, adx=adx_s, ema=ema_s)
     except Exception as e:
         logging.error(f"خطا در پردازش {pair}: {e}")
 
 def run_auto_optimization():
-    db_path = database.DB_PATH 
+    db_path = database.DB_PATH_LIVE
     try:
         if os.path.exists(db_path):
             with sqlite3.connect(db_path) as conn:
@@ -130,6 +143,7 @@ def run_bot():
         executor.map(process_pair, watchlist)
 
 if __name__ == "__main__":
+    # هماهنگی لایو با ساعت سرور گیت‌هاب (ساعت ۲۲ اوتی‌سی)
     if datetime.datetime.utcnow().hour == 22:
         heartbeat_job()
     run_bot()
