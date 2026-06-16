@@ -106,7 +106,7 @@ def generate_signal(df, pair, model=None):
     # ۶. اعمال فیلتر هوش مصنوعی اختصاصی (Multi-Model)
     if model is not None:
         try:
-            if not model.predict(pair, features_dict):
+            if not model.predict_signal(pair, features_dict):
                 return None
         except Exception as e:
             print(f"خطا در مدل هوش مصنوعی {pair}: {e}")
