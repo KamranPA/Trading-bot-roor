@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (v9.1 - Live Telegram & Anti-Crash Fixed)
+# FILE PATH: main.py (v9.2 - Database Path Fix & Fully Complete)
 # ---------------------------------------------------------
 import os
 import sys
@@ -107,7 +107,7 @@ def process_pair(pair):
                 database.save_signal_advanced(pair=pair, **signal)
                 database.log_scan_status(pair, "SIGNAL SENT", total=t_score, ai=ai_s, rsi=rsi_s, adx=adx_s, ema=ema_s)
                 
-                # 🛠️ اصلاح امنیتی: ارسال تلگرام در بلاک ایزوله شده جهت جلوگیری از کرش کل اسکریپت
+                # ارسال تلگرام در بلاک ایزوله شده جهت جلوگیری از کرش کل اسکریپت
                 try:
                     telegram_bot.format_and_send_signal(tele_signal)
                     logging.info(f"🚀 سیگنال {pair} با موفقیت به تلگرام مخابره شد.")
@@ -120,7 +120,8 @@ def process_pair(pair):
         logging.error(f"خطا در پردازش {pair}: {e}")
 
 def run_auto_optimization():
-    db_path = database.DB_PATH_LIVE
+    # 🎯 رفع باگ: مسیر دیتابیس لایو به درستی از ماژول config فراخوانی می‌شود
+    db_path = config.DB_PATH_LIVE
     try:
         if os.path.exists(db_path):
             with sqlite3.connect(db_path) as conn:
