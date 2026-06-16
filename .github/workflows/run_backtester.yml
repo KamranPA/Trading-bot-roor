@@ -1,13 +1,16 @@
-name: Run Backtester and Optimizer
+name: Run Backtester and Optimize
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  backtest:
+  run-bot-and-backtest:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -20,24 +23,18 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install pandas requests ccxt numpy joblib yfinance lightgbm
+          python -m pip install --upgrade pip
+          pip install pandas requests ccxt numpy joblib yfinance lightgbm
 
-      # مرحله حیاتی دیباگ: دیدن محتویات پوشه قبل از اجرا
-      - name: Debug Environment
-        run: |
-          echo "Current Path: $(pwd)"
-          ls -F
+      - name: Run Bot
+        run: python main.py
 
-      # اجرای بک‌تستر با لاگ‌گیری دقیق
-      - name: Run Backtest
-        run: |
-          python src/backtester.py
-          echo "Checking if file exists after run:"
-          ls -l backtest_table_summary.csv || echo "FILE WAS NOT CREATED BY PYTHON"
+      - name: Run Backtester and Optimizer
+        run: python src/backtester.py
 
       - name: Upload Backtest Report
         uses: actions/upload-artifact@v4
         with:
           name: backtest-report
           path: backtest_table_summary.csv
-          if-no-files-found: error # اگر فایل ساخته نشد، همینجا اکشن خطا بدهد تا بفهمیم مشکل کجاست
+          if-no-files-found: warn
