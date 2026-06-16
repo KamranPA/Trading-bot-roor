@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/database.py (نسخه نهایی و ایمن‌سازی شده)
+# FILE PATH: src/database.py (نسخه نهایی با جدول امتیازدهی)
 # ---------------------------------------------------------
 import sqlite3
 import os
@@ -16,7 +16,7 @@ def get_db_path(mode="live"):
     return DB_PATH
 
 def init_db(mode="live"):
-    """ایجاد دیتابیس و جداول با ساختار جامع"""
+    """ایجاد دیتابیس و جداول با ساختار جامع و ستون‌های امتیازدهی"""
     if not os.path.exists(os.path.join(BASE_DIR, "data")):
         os.makedirs(os.path.join(BASE_DIR, "data"))
         
@@ -43,12 +43,18 @@ def init_db(mode="live"):
             )
         """)
         
+        # 🛠️ اصلاح جدول scan_logs: اضافه شدن ستون‌های امتیاز نهایی و تفکیکی
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS scan_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
                 timestamp TEXT, 
                 symbol TEXT, 
-                result TEXT
+                result TEXT,
+                total_score REAL DEFAULT 0.0,
+                ai_score REAL DEFAULT 0.0,
+                rsi_score REAL DEFAULT 0.0,
+                adx_score REAL DEFAULT 0.0,
+                ema_score REAL DEFAULT 0.0
             )
         """)
         conn.commit()
@@ -57,7 +63,6 @@ def get_open_positions():
     """دریافت لیست پوزیشن‌های باز با قابلیت دسترسی به نام ستون"""
     if not os.path.exists(DB_PATH): return []
     with sqlite3.connect(DB_PATH) as conn:
-        # 🛠️ اصلاح کلیدی: استفاده از Row برای دسترسی راحت‌تر به ستون‌ها در main.py
         conn.row_factory = sqlite3.Row 
         return conn.execute("SELECT * FROM signals WHERE status = 'OPEN'").fetchall()
 
@@ -86,11 +91,14 @@ def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1=0, tp2=0, 
         )
         conn.commit()
 
-def log_scan_status(pair, status):
+# 🛠️ اصلاح تابع ثبت لاگ برای ذخیره کردن امتیازها در دیتابیس
+def log_scan_status(pair, status, total=0.0, ai=0.0, rsi=0.0, adx=0.0, ema=0.0):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            "INSERT INTO scan_logs (timestamp, symbol, result) VALUES (datetime('now'), ?, ?)", 
-            (pair, status)
+            """INSERT INTO scan_logs 
+               (timestamp, symbol, result, total_score, ai_score, rsi_score, adx_score, ema_score) 
+               VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?)""", 
+            (pair, status, total, ai, rsi, adx, ema)
         )
         conn.commit()
 
