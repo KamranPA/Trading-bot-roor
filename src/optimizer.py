@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/optimizer.py (v8.5 - Fixed LightGBM Alignment & Safe Copy)
+# FILE PATH: src/optimizer.py (v9.0 - Fully Aligned with Scoring & Strategy)
 # ---------------------------------------------------------
 import os
 import sys
@@ -19,25 +19,14 @@ from src.brain import TradingBrain
 
 def evaluate_parameters(symbol, df, adx_th, swing_w):
     """
-    ارزیابی سریع ترکیب پارامترها بر روی دیتای بکتست با ساختار ستون‌های LightGBM
+    ارزیابی سریع ترکیب پارامترها بر روی دیتای بکتست با ساختار دیکشنری برای LightGBM
     """
-    # شبیه‌سازی فیلترهای اندیکاتور بر اساس پارامترهای جدید
     df_copy = df.copy()
     
-    # اطمینان از وجود ستون‌های ویژگی (Features)
-    features_list = [
-        'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 
-        'feat_trend_line', 'feat_ema_deviation', 'feat_rsi_momentum', 
-        'feat_body_ratio', 'feat_high_volume_session'
-    ]
-    
-    # اگر اندیکاتورها از قبل محاسبه نشده‌اند، مجدداً محاسبه شوند
     if 'feat_adx' not in df_copy.columns:
         df_copy = indicators.calculate_indicators(df_copy)
     
     split_idx = int(len(df_copy) * 0.8)
-    
-    # بارگذاری مغز مدل برای پیش‌بینی هوشمند در فاز ارزیابی اپتیمایزر
     brain = TradingBrain()
     
     ai_total_trades = 0
@@ -50,7 +39,6 @@ def evaluate_parameters(symbol, df, adx_th, swing_w):
     stop_loss = 0.0
     tp2 = 0.0
 
-    # تست پارامترها روی بخش داده‌های آزمایشی (Out-of-Sample)
     for i in range(split_idx, len(df_copy)):
         current_candle = df_copy.iloc[i]
         close_price = float(current_candle['Close'])
@@ -93,7 +81,6 @@ def evaluate_parameters(symbol, df, adx_th, swing_w):
         if last_swing_high is None or last_swing_low is None:
             continue
 
-        # استخراج امن مقدار ATR
         atr_val = 1.0
         if 'feat_atr_percent' in current_candle:
             atr_val = float(current_candle['feat_atr_percent'])
@@ -104,12 +91,23 @@ def evaluate_parameters(symbol, df, adx_th, swing_w):
         is_bullish_momentum = float(current_candle.get('feat_rsi', 50)) > 50
         is_bearish_momentum = float(current_candle.get('feat_rsi', 50)) < 50
 
-        # فیلتر تایید هوش مصنوعی لایت‌جی‌بی‌ام با فرمت دیتافریم مجاز
+        # 🛠️ اصلاح حیاتی: استفاده از دیکشنری به جای دیتافریم برای متد پیش‌بینی
         ai_approved = False
+        features_dict = {
+            'feat_adx': float(current_candle.get('feat_adx', 0)),
+            'feat_vol_ratio': float(current_candle.get('feat_vol_ratio', 0)),
+            'feat_atr_percent': atr_val,
+            'feat_rsi': float(current_candle.get('feat_rsi', 0)),
+            'feat_trend_line': float(current_candle.get('feat_trend_line', 0)),
+            'feat_ema_deviation': float(current_candle.get('feat_ema_deviation', 0)),
+            'feat_rsi_momentum': float(current_candle.get('feat_rsi_momentum', 0)),
+            'feat_body_ratio': float(current_candle.get('feat_body_ratio', 0)),
+            'feat_high_volume_session': float(current_candle.get('feat_high_volume_session', 0))
+        }
+
         if symbol in brain.models:
             try:
-                features_df = df_copy.iloc[[i]][features_list]
-                ai_approved = brain.predict_signal(symbol, features_df)
+                ai_approved = brain.predict_signal(symbol, features_dict)
             except:
                 ai_approved = False
         else:
@@ -133,13 +131,11 @@ def evaluate_parameters(symbol, df, adx_th, swing_w):
 def optimize_all_symbols():
     print("⚙️ شروع بهینه‌سازی هوشمند پارامترهای استراتژی برای LightGBM...")
     
-    # فضاهای تست پارامترها
     adx_options = [20, 22, 25]
     swing_options = [5, 7, 10]
     
     best_params_dict = {}
     
-    # لود کردن تنظیمات قدیمی در صورت وجود
     params_file = os.path.join(config.BASE_DIR, "best_params.json")
     if os.path.exists(params_file):
         try:
@@ -152,7 +148,6 @@ def optimize_all_symbols():
         safe_name = symbol.replace('/', '_')
         file_path = os.path.join(config.BASE_DIR, "data", "4h", f"{safe_name}_history.csv")
         
-        # 🛠️ اصلاح: بررسی وجود فایل دیتا جهت جلوگیری از خطای AttributeError روی مقدار None
         if not os.path.exists(file_path):
             print(f"⚠️ دیتای تاریخچه برای {symbol} یافت نشد، عبور از اپتیمایزر.")
             continue
@@ -171,7 +166,6 @@ def optimize_all_symbols():
             for swing_w in swing_options:
                 pnl, trades = evaluate_parameters(symbol, df, adx_th, swing_w)
                 
-                # معیار سنجش: بیشترین سود کل به شرط داشتن حداقل ۲ معامله در فاز تست
                 if trades >= 2 and pnl > best_pnl:
                     best_pnl = pnl
                     best_adx = adx_th
@@ -179,12 +173,18 @@ def optimize_all_symbols():
                     
         print(f"🎯 بهترین تنظیمات برای {symbol} -> ADX: {best_adx} | Swing Window: {best_swing} | سود فاز تست: {best_pnl:.2f}%")
         
-        best_params_dict[symbol] = {
-            "ADX_THRESHOLD": int(best_adx),
-            "SWING_WINDOW": int(best_swing)
-        }
+        # 🛠️ اصلاح کلیدهای دیکشنری برای هماهنگی با فایل strategy.py
+        if symbol not in best_params_dict:
+            best_params_dict[symbol] = {}
+            
+        best_params_dict[symbol].update({
+            "adx_threshold": int(best_adx),
+            "swing_window": int(best_swing),
+            "tp_ratio": 1.5,
+            "sl_ratio": 1.0,
+            "risk_multiplier": 1.0
+        })
 
-    # ذخیره نهایی فایل پارامترهای بهینه شده برای لایو و بکتست‌های بعدی
     with open(params_file, "w") as f:
         json.dump(best_params_dict, f, indent=4)
     print("✅ فایل تنظیمات داینامیک ربات (best_params.json) با موفقیت به‌روزرسانی شد.")
