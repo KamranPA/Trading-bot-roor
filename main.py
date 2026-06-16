@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (نسخه نهایی و اصلاح شده)
+# FILE PATH: main.py (نسخه اصلاح شده با سیستم ثبت امتیازات)
 # ---------------------------------------------------------
 import os
 import sys
@@ -31,7 +31,6 @@ def check_exits():
     try:
         positions = database.get_open_positions() 
         for pos in positions:
-            # استفاده از دیکشنری برای دسترسی ایمن به ستون‌ها
             sig_id = pos['id']
             symbol = pos['symbol']
             direction = pos['direction']
@@ -73,17 +72,37 @@ def process_pair(pair):
         df = coinex_client.get_coinex_candles(pair)
         if df is None or df.empty: return
         df = indicators.calculate_indicators(df)
-        signal = strategy.generate_signal(df, pair, model=BRAIN)
+        
+        # فرض می‌کنیم تابع استراتژی شما اصلاح شده و علاوه بر سیگنال، امتیازات را هم برمی‌گرداند.
+        # برای جلوگیری از خطا، استراتژی باید یک دیکشنری حاوی اطلاعات امتیاز یا خود سیگنال برگرداند.
+        res = strategy.generate_signal(df, pair, model=BRAIN)
+        
+        # استخراج اطلاعات امتیازدهی در صورت وجود در خروجی استراتژی
+        # اگر استراتژی شما فقط خودِ دیکشنری سیگنال را می‌دهد، امتیازها را از درون آن یا به صورت پیش‌فرض استخراج می‌کنیم
+        signal = res if isinstance(res, dict) else None
+        
+        # مقادیر پیش‌فرض امتیاز برای ثبت در scan_logs در صورتی که در خروجی استراتژی فیلد مجزا ندارند
+        t_score = res.get('total_score', 0.0) if isinstance(res, dict) else 0.0
+        ai_s = res.get('ai_score', 0.0) if isinstance(res, dict) else 0.0
+        rsi_s = res.get('rsi_score', 0.0) if isinstance(res, dict) else 0.0
+        adx_s = res.get('adx_score', 0.0) if isinstance(res, dict) else 0.0
+        ema_s = res.get('ema_score', 0.0) if isinstance(res, dict) else 0.0
+
         with db_lock:
-            if signal:
-                # 🛠️ اصلاح رفع خطای multiple values:
-                # اگر در دیکشنری signal کلید 'pair' وجود دارد، آن را حذف کنید
+            if signal and signal.get('direction') is not None:
+                # حذف کلیدهای اضافی برای جلوگیری از خطای multiple values
                 signal.pop('pair', None) 
+                signal.pop('symbol', None)
+                
+                # پاکسازی کلیدهای مربوط به امتیاز قبل از ذخیره در جدول اصلی سیگنال‌ها (اگر وجود دارند)
+                for k in ['total_score', 'ai_score', 'rsi_score', 'adx_score', 'ema_score']:
+                    signal.pop(k, None)
+
                 database.save_signal_advanced(pair=pair, **signal)
-                database.log_scan_status(pair, "SIGNAL SENT")
+                database.log_scan_status(pair, "SIGNAL SENT", total=t_score, ai=ai_s, rsi=rsi_s, adx=adx_s, ema=ema_s)
                 telegram_bot.format_and_send_signal(signal)
             else:
-                database.log_scan_status(pair, "nosignal")
+                database.log_scan_status(pair, "nosignal", total=t_score, ai=ai_s, rsi=rsi_s, adx=adx_s, ema=ema_s)
     except Exception as e:
         logging.error(f"خطا در پردازش {pair}: {e}")
 
@@ -100,7 +119,7 @@ def run_auto_optimization():
         logging.error(f"خطا در پروسه خودارتقایی: {e}")
 
 def run_bot():
-    logging.info("🤖 اسکنر هوشمند v8.2 فعال شد.")
+    logging.info("🤖 اسکنر هوشمند فعال شد.")
     database.init_db()
     
     check_exits()
@@ -111,7 +130,6 @@ def run_bot():
         executor.map(process_pair, watchlist)
 
 if __name__ == "__main__":
-    # اجرای heartbeat فقط در ساعت 22 UTC
     if datetime.datetime.utcnow().hour == 22:
         heartbeat_job()
     run_bot()
