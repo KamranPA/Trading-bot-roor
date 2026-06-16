@@ -1,9 +1,14 @@
 # ---------------------------------------------------------
-# FILE PATH: src/backtester.py (فایل نهایی و اصلاح شده)
+# FILE PATH: src/backtester.py (فایل نهایی و اصلاح شده برای GitHub Actions)
 # ---------------------------------------------------------
 import os
+import sys
 import sqlite3
 import pandas as pd
+
+# اصلاح مسیر اجرای پایتون برای شناسایی ماژول‌ها از ریشه پروژه
+sys.path.append(os.getcwd())
+
 import config
 from src import indicators, strategy_utils
 from src.brain import TradingBrain
@@ -16,40 +21,25 @@ def init_backtest_db(db_path):
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                timestamp TEXT, 
-                symbol TEXT, 
-                direction TEXT, 
-                entry_price REAL, 
-                stop_loss REAL, 
-                tp1 REAL,
-                tp2 REAL,
-                status TEXT DEFAULT 'OPEN',
-                closed_at TEXT,
-                pnl_percent REAL,
-                feat_adx REAL,
-                feat_vol_ratio REAL,
-                feat_atr_percent REAL,
-                feat_rsi REAL,
-                feat_trend_line REAL,
-                feat_ema_deviation REAL,
-                feat_rsi_momentum REAL,
-                feat_body_ratio REAL,
-                feat_high_volume_session REAL,
-                total_score REAL DEFAULT 0.0,
-                ai_score REAL DEFAULT 0.0,
-                rsi_score REAL DEFAULT 0.0,
-                adx_score REAL DEFAULT 0.0,
-                ema_score REAL DEFAULT 0.0
+                timestamp TEXT, symbol TEXT, direction TEXT, entry_price REAL, 
+                stop_loss REAL, tp1 REAL, tp2 REAL, status TEXT DEFAULT 'OPEN',
+                closed_at TEXT, pnl_percent REAL, feat_adx REAL, feat_vol_ratio REAL,
+                feat_atr_percent REAL, feat_rsi REAL, feat_trend_line REAL,
+                feat_ema_deviation REAL, feat_rsi_momentum REAL, feat_body_ratio REAL,
+                feat_high_volume_session REAL, total_score REAL DEFAULT 0.0,
+                ai_score REAL DEFAULT 0.0, rsi_score REAL DEFAULT 0.0,
+                adx_score REAL DEFAULT 0.0, ema_score REAL DEFAULT 0.0
             )
         """)
         conn.commit()
 
 def run_backtest_for_symbol(symbol, db_path, brain_instance):
     safe_name = symbol.replace('/', '_')
-    file_path = os.path.join(config.BASE_DIR, "data", "4h", f"{safe_name}_history.csv")
+    # استفاده از مسیر مطلق بر اساس ریشه پروژه
+    file_path = os.path.join(os.getcwd(), "data", "4h", f"{safe_name}_history.csv")
     
     if not os.path.exists(file_path):
-        print(f"⚠️ دیتای بکتستر برای {symbol} یافت نشد!")
+        print(f"⚠️ دیتای بکتستر برای {symbol} یافت نشد! مسیر: {file_path}")
         return None
 
     df = pd.read_csv(file_path)
@@ -170,7 +160,6 @@ def run_all_backtests():
     init_backtest_db(db_path)
     brain = TradingBrain()
     
-    # اجرای حلقه با مدیریت خطا
     summary_results = []
     for s in config.WATCHLIST:
         try:
@@ -181,7 +170,7 @@ def run_all_backtests():
             print(f"❌ خطا در پردازش {s}: {e}")
             
     if summary_results:
-        report_path = os.path.abspath("backtest_table_summary.csv")
+        report_path = os.path.join(os.getcwd(), "backtest_table_summary.csv")
         pd.DataFrame(summary_results).to_csv(report_path, index=False, encoding='utf-8')
         print(f"✅ فایل نهایی در ریشه پروژه ذخیره شد: {report_path}")
     else:
