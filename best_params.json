@@ -10,11 +10,11 @@
     },
     "ETH/USDT": {
         "ADX_THRESHOLD": 20,
-        "SWING_WINDOW": 5
+        "SWING_WINDOW": 10
     },
     "SOL/USDT": {
         "ADX_THRESHOLD": 20,
-        "SWING_WINDOW": 7
+        "SWING_WINDOW": 10
     },
     "POL/USDT": {
         "adx_threshold": 35.0,
@@ -50,11 +50,11 @@
     },
     "LTC/USDT": {
         "ADX_THRESHOLD": 25,
-        "SWING_WINDOW": 10
+        "SWING_WINDOW": 7
     },
     "BCH/USDT": {
         "ADX_THRESHOLD": 20,
-        "SWING_WINDOW": 7
+        "SWING_WINDOW": 10
     },
     "ATOM/USDT": {
         "ADX_THRESHOLD": 15,
