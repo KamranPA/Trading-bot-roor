@@ -86,7 +86,7 @@
     "LTC/USDT": {
         "ADX_THRESHOLD": 25,
         "SWING_WINDOW": 7,
-        "adx_threshold": 20,
+        "adx_threshold": 25,
         "swing_window": 7,
         "tp_ratio": 1.5,
         "sl_ratio": 1.0,
