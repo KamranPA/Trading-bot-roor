@@ -172,7 +172,10 @@ def generate_signal(df, pair, model=None):
         
         stop_loss = entry_price - sl_dist
         sl_percent = (sl_dist / entry_price) * 100
-        position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL) if sl_percent > 0 else 0
+        
+        # 🟢 اصلاح باگ حجم: اعمال فیلتر سقف سرمایه (حداکثر ۱۰ درصد سرمایه برای هر معامله)
+        max_allowed_size = config.TOTAL_CAPITAL * getattr(config, 'MAX_POSITION_SIZE_PCT', 0.10)
+        position_size = min(risk_usd / (sl_percent / 100.0), max_allowed_size) if sl_percent > 0 else 0
 
         score_data.update({
             'pair': pair, 
@@ -200,7 +203,10 @@ def generate_signal(df, pair, model=None):
         
         stop_loss = entry_price + sl_dist
         sl_percent = (sl_dist / entry_price) * 100
-        position_size = min(risk_usd / (sl_percent / 100.0), config.TOTAL_CAPITAL) if sl_percent > 0 else 0
+        
+        # 🟢 اصلاح باگ حجم: اعمال فیلتر سقف سرمایه (حداکثر ۱۰ درصد سرمایه برای هر معامله)
+        max_allowed_size = config.TOTAL_CAPITAL * getattr(config, 'MAX_POSITION_SIZE_PCT', 0.10)
+        position_size = min(risk_usd / (sl_percent / 100.0), max_allowed_size) if sl_percent > 0 else 0
 
         score_data.update({
             'pair': pair, 
