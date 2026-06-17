@@ -116,12 +116,27 @@ def evaluate_parameters(symbol, df, adx_th, swing_w):
             is_in_position = True
             direction = "LONG"
             entry_price = last_swing_high
+            
+            # 🟢 اصلاح منطق: قرار دادن حد ضرر زیر آخرین کف نوسانی (Swing Low) 
+            # و اعمال حد سود بر اساس ساختار بازار 
+            dynamic_sl_dist = entry_price - last_swing_low
+            if dynamic_sl_dist > 0:
+                sl_dist = dynamic_sl_dist
+                
             stop_loss = entry_price - sl_dist
             tp2 = entry_price + (sl_dist * 2)
+            
         elif low_price < last_swing_low and is_bearish_momentum and ai_approved:
             is_in_position = True
             direction = "SHORT"
             entry_price = last_swing_low
+            
+            # 🟢 اصلاح منطق: محاسبه فاصله از قیمت ورود تا سقف نوسانی (Swing High)
+            # این موضوع باعث می‌شود پوزیشن‌های Short کاملاً مطابق با منطق بازار نزولی بهینه شوند
+            dynamic_sl_dist = last_swing_high - entry_price
+            if dynamic_sl_dist > 0:
+                sl_dist = dynamic_sl_dist
+                
             stop_loss = entry_price + sl_dist
             tp2 = entry_price - (sl_dist * 2)
 
