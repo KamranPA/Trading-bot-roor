@@ -1,10 +1,9 @@
 # ---------------------------------------------------------
-# FILE PATH: src/optimizer.py (v9.0 - Fully Aligned with Scoring & Strategy)
+# FILE PATH: src/optimizer.py (v9.1 - Fully Aligned & Wrapper Added)
 # ---------------------------------------------------------
 import os
 import sys
 import json
-import sqlite3
 import pandas as pd
 import numpy as np
 
@@ -14,7 +13,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 import config
-from src import indicators, strategy_utils, backtester
+from src import indicators, strategy_utils
 from src.brain import TradingBrain
 
 def evaluate_parameters(symbol, df, adx_th, swing_w):
@@ -91,7 +90,7 @@ def evaluate_parameters(symbol, df, adx_th, swing_w):
         is_bullish_momentum = float(current_candle.get('feat_rsi', 50)) > 50
         is_bearish_momentum = float(current_candle.get('feat_rsi', 50)) < 50
 
-        # 🛠️ اصلاح حیاتی: استفاده از دیکشنری به جای دیتافریم برای متد پیش‌بینی
+        # استفاده از دیکشنری برای متد پیش‌بینی هوش مصنوعی
         ai_approved = False
         features_dict = {
             'feat_adx': float(current_candle.get('feat_adx', 0)),
@@ -173,7 +172,6 @@ def optimize_all_symbols():
                     
         print(f"🎯 بهترین تنظیمات برای {symbol} -> ADX: {best_adx} | Swing Window: {best_swing} | سود فاز تست: {best_pnl:.2f}%")
         
-        # 🛠️ اصلاح کلیدهای دیکشنری برای هماهنگی با فایل strategy.py
         if symbol not in best_params_dict:
             best_params_dict[symbol] = {}
             
@@ -188,6 +186,10 @@ def optimize_all_symbols():
     with open(params_file, "w") as f:
         json.dump(best_params_dict, f, indent=4)
     print("✅ فایل تنظیمات داینامیک ربات (best_params.json) با موفقیت به‌روزرسانی شد.")
+
+def optimize_all(mode="live"):
+    """تابع واسط برای سازگاری کامل با main.py"""
+    optimize_all_symbols()
 
 if __name__ == "__main__":
     optimize_all_symbols()
