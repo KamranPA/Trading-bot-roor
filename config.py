@@ -18,10 +18,10 @@ TIMEFRAME = "4h"
 CANDLES_LIMIT = 500    
 
 # تنظیمات معاملاتی پایه و مدیریت ریسک
-MAX_OPEN_POSITIONS = 3
+MAX_OPEN_POSITIONS = 10
 ADX_THRESHOLD = 15.0   
 SWING_WINDOW = 3       
-TOTAL_CAPITAL = 1000.0
+TOTAL_CAPITAL = 10000.0
 RISK_PERCENT = 1.0
 
 # نسبت‌های پیش‌فرض مدیریت پوزیشن
