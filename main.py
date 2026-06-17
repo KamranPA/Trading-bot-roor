@@ -1,14 +1,14 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (v9.2 - Database Path Fix & Fully Complete)
+# FILE PATH: main.py (نسخه نهایی سازگار با Supabase PostgreSQL)
 # ---------------------------------------------------------
 import os
 import sys
 import logging
-import sqlite3
 import threading
 import datetime
 from concurrent.futures import ThreadPoolExecutor
 
+# اضافه کردن مسیر پروژه به سیستم
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
@@ -27,7 +27,7 @@ BRAIN = TradingBrain()
 db_lock = threading.Lock()
 
 def check_exits():
-    """بررسی قیمت و بستن پوزیشن‌ها در صورت رسیدن به حد سود یا ضرر"""
+    """بررسی قیمت و بستن پوزیشن‌ها در دیتابیس ابری"""
     try:
         positions = database.get_open_positions() 
         for pos in positions:
@@ -55,7 +55,7 @@ def check_exits():
                 database.update_position_status(sig_id, 'CLOSED', pnl)
                 logging.info(f"✅ پوزیشن {symbol} بسته شد. سود/ضرر: {pnl:.2f}%")
     except Exception as e:
-        logging.error(f"خطا در بررسی پوزیشن‌های باز: {e}")
+        logging.error(f"خطا در بررسی پوزیشن‌های باز ابری: {e}")
 
 def heartbeat_job():
     try:
@@ -73,11 +73,9 @@ def process_pair(pair):
         if df is None or df.empty: return
         df = indicators.calculate_indicators(df)
         
-        # دریافت خروجی استراتژی شامل سیگنال و امتیازات وزنی
         res = strategy.generate_signal(df, pair, model=BRAIN)
         signal = res if isinstance(res, dict) else None
         
-        # استخراج امن امتیازها جهت ثبت دقیق در جدول scan_logs
         t_score = res.get('total_score', 0.0) if isinstance(res, dict) else 0.0
         ai_s = res.get('ai_score', 0.0) if isinstance(res, dict) else 0.0
         rsi_s = res.get('rsi_score', 0.0) if isinstance(res, dict) else 0.0
@@ -86,55 +84,40 @@ def process_pair(pair):
 
         with db_lock:
             if signal and signal.get('direction') is not None:
-                # کپی برای جلوگیری از خراب شدن دیتای ارسالی به تلگرام
                 tele_signal = signal.copy()
-                
-                # رفع مشکل توکن تلگرام با جفت ارز جدید پالیگان (POL)
-                if pair == "POL/USDT":
-                    tele_signal['pair_display'] = "MATIC/USDT (POL)"
-                else:
-                    tele_signal['pair_display'] = pair
+                tele_signal['pair_display'] = "MATIC/USDT (POL)" if pair == "POL/USDT" else pair
 
-                # حذف کلیدهای اضافی برای جلوگیری از خطاهای ساختاری دیتابیس
                 signal.pop('pair', None) 
                 signal.pop('symbol', None)
-                
-                # پاکسازی کلیدهای مربوط به امتیاز قبل از ذخیره در جدول اصلی سیگنال‌ها
                 for k in ['total_score', 'ai_score', 'rsi_score', 'adx_score', 'ema_score']:
                     signal.pop(k, None)
 
-                # ذخیره در دیتابیس لایو و ثبت وضعیت لاگ
                 database.save_signal_advanced(pair=pair, **signal)
                 database.log_scan_status(pair, "SIGNAL SENT", total=t_score, ai=ai_s, rsi=rsi_s, adx=adx_s, ema=ema_s)
                 
-                # ارسال تلگرام در بلاک ایزوله شده جهت جلوگیری از کرش کل اسکریپت
                 try:
                     telegram_bot.format_and_send_signal(tele_signal)
                     logging.info(f"🚀 سیگنال {pair} با موفقیت به تلگرام مخابره شد.")
                 except Exception as t_err:
-                    logging.error(f"⚠️ خطا در ارسال پیام تلگرام برای {pair}: {t_err}")
+                    logging.error(f"⚠️ خطا در ارسال تلگرام برای {pair}: {t_err}")
             else:
-                # اگر هوش مصنوعی رد کرده باشد یا امتیاز کم باشد، فیلد direction نال است و لاگ nosignal می‌خورد
                 database.log_scan_status(pair, "nosignal", total=t_score, ai=ai_s, rsi=rsi_s, adx=adx_s, ema=ema_s)
     except Exception as e:
         logging.error(f"خطا در پردازش {pair}: {e}")
 
 def run_auto_optimization():
-    # 🎯 رفع باگ: مسیر دیتابیس لایو به درستی از ماژول config فراخوانی می‌شود
-    db_path = config.DB_PATH_LIVE
+    # بررسی دیتابیس ابری به جای فایل محلی
     try:
-        if os.path.exists(db_path):
-            with sqlite3.connect(db_path) as conn:
-                count = conn.execute("SELECT count(*) FROM signals").fetchone()[0]
-            if count > 0 and count % 50 == 0:
-                logging.info("⚙️ سیستم به حد نصاب رسید: اجرای پروسه ارتقای خودکار...")
-                optimizer.optimize_all(mode="live")
+        count = database.get_open_positions_count()
+        if count % 50 == 0 and count > 0:
+            logging.info("⚙️ سیستم به حد نصاب رسید: اجرای پروسه ارتقای خودکار...")
+            optimizer.optimize_all(mode="live")
     except Exception as e:
         logging.error(f"خطا در پروسه خودارتقایی: {e}")
 
 def run_bot():
     logging.info("🤖 اسکنر هوشمند فعال شد.")
-    database.init_db()
+    database.init_db() # دیتابیس ابری را آماده می‌کند
     
     check_exits()
     run_auto_optimization()
@@ -144,7 +127,6 @@ def run_bot():
         executor.map(process_pair, watchlist)
 
 if __name__ == "__main__":
-    # هماهنگی لایو با ساعت سرور گیت‌هاب (ساعت ۲۲ اوتی‌سی)
     if datetime.datetime.utcnow().hour == 22:
         heartbeat_job()
     run_bot()
