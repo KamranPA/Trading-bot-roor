@@ -17,21 +17,25 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       
-      # این بخش برای دیتابیس ابری دیگر لازم نیست اما برای جلوگیری از خطا دست نمی‌زنیم
       - name: Set Permissions
         run: |
           mkdir -p data
           chmod -R 777 data/
+          
+      # 🛑 این مرحله حیاتی است: غیرفعال کردن IPv6 برای اتصال قطعی به دیتابیس
+      - name: Force IPv4 (Disable IPv6)
+        run: |
+          sudo sysctl -w net.ipv6.conf.all.disable_ipv6=1
+          sudo sysctl -w net.ipv6.conf.default.disable_ipv6=1
+          sudo sysctl -w net.ipv6.conf.lo.disable_ipv6=1
       
       - name: Run Bot
         env:
           PYTHONPATH: ${{ github.workspace }}
-          # 🟢 اضافه کردن آدرس دیتابیس ابری
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          # سایر متغیرهای لازم را اینجا اضافه کنید
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
-          # 🛠️ اصلاح داینامیک: تبدیل خودکار پورت به 6543 در صورتی که در سکرت اشتباهاً 5432 باشد
+          # تبدیل خودکار پورت به 6543 برای امنیت بیشتر
           if [[ "$DATABASE_URL" == *":5432"* ]]; then
             export DATABASE_URL="${DATABASE_URL//:5432/:6543}"
           fi
@@ -42,10 +46,8 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           
-          # 🛠️ اصلاح: دیتابیس دیگر فایل نیست، فقط پارامترهای AI را پوش می‌کنیم
           git add best_params.json 2>/dev/null || echo "No tracked files to add."
           
-          # بررسی تغییرات
           if ! git diff --cached --quiet; then
             git commit -m "Update AI Parameters: $(date)"
             git push origin HEAD:${{ github.ref_name }} --force
