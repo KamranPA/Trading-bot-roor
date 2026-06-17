@@ -1,7 +1,7 @@
 name: Test Cloud Database Connection
 
 on:
-  workflow_dispatch: # اجرای دستی از تب Actions
+  workflow_dispatch:
 
 jobs:
   test-connection:
@@ -19,19 +19,25 @@ jobs:
         run: |
           pip install psycopg2-binary pandas
 
-      - name: Run Connection Test
+      - name: Create and Run Test Script
         env:
-          # اطمینان حاصل کنید که DATABASE_URL در Secrets تعریف شده باشد
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
-          python -c "
+          cat <<EOF > test_script.py
           import os
           import psycopg2
+          
+          db_url = os.environ.get('DATABASE_URL')
+          # اضافه کردن sslmode برای امنیت بیشتر
+          if db_url and 'sslmode' not in db_url:
+              db_url += '?sslmode=require'
+              
           try:
-              conn = psycopg2.connect(os.environ['DATABASE_URL'])
-              print('✅ اتصال به Supabase با موفقیت برقرار شد!')
+              conn = psycopg2.connect(db_url)
+              print("✅ اتصال با موفقیت برقرار شد!")
               conn.close()
           except Exception as e:
-              print(f'❌ خطا در اتصال: {e}')
+              print(f"❌ خطا: {e}")
               exit(1)
-          "
+          EOF
+          python test_script.py
