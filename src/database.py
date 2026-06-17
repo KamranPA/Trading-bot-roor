@@ -1,13 +1,16 @@
 # ---------------------------------------------------------
-# FILE PATH: src/database.py (نسخه بهینه‌شده با آدرس جدید Pooler)
+# FILE PATH: src/database.py (نسخه بهینه‌شده با آدرس جدید Pooler و اتصال به تلگرام)
 # ---------------------------------------------------------
 import os
 import psycopg2
 from psycopg2.extras import DictCursor
+import requests  # اضافه شده برای ارسال پیام به تلگرام
 import config
 
-# دریافت آدرس دیتابیس از متغیر محیطی گیت‌هاب (DATABASE_URL جدید متصل به Pooler)
+# دریافت آدرس دیتابیس و اطلاعات تلگرام از متغیرهای محیطی گیت‌هاب
 DATABASE_URL = os.environ.get("DATABASE_URL")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 def get_connection():
     """ایجاد اتصال ایمن و پایدار به دیتابیس ابری PostgreSQL با استفاده از Connection Pooler"""
@@ -89,7 +92,7 @@ def get_open_positions_count():
         return 0
 
 def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1=0, tp2=0, **kwargs):
-    """ذخیره سیگنال جدید"""
+    """ذخیره سیگنال جدید و ارسال همزمان به تلگرام"""
     with get_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -98,6 +101,35 @@ def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1=0, tp2=0, 
                 (pair, direction, entry_price, stop_loss, tp1, tp2)
             )
         conn.commit()
+        
+    # 🚀 ارسال پیام به تلگرام
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        emoji = "🟢 BUY (LONG)" if direction.upper() == "LONG" else "🔴 SELL (SHORT)"
+        message = (
+            f"🚨 **NEW TRADING SIGNAL** 🚨\n\n"
+            f"🪙 **Pair:** {pair}\n"
+            f"📊 **Action:** {emoji}\n\n"
+            f"🎯 **Entry Price:** {entry_price}\n"
+            f"🛡️ **Stop Loss:** {stop_loss}\n"
+            f"💰 **TP1:** {tp1}\n"
+            f"💰 **TP2:** {tp2}\n\n"
+            f"🤖 *Automated AI Bot*"
+        )
+        
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+            payload = {
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": message,
+                "parse_mode": "Markdown"
+            }
+            response = requests.post(url, json=payload, timeout=10)
+            if response.status_code == 200:
+                print("✅ سیگنال با موفقیت به تلگرام ارسال شد.")
+            else:
+                print(f"❌ خطا در ارسال به تلگرام: {response.text}")
+        except Exception as e:
+            print(f"⚠️ خطای ارتباطی با تلگرام: {e}")
 
 def log_scan_status(pair, status, total=0.0, ai=0.0, rsi=0.0, adx=0.0, ema=0.0):
     """ذخیره امتیازهای اسکن"""
