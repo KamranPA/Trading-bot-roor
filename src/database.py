@@ -1,107 +1,112 @@
 # ---------------------------------------------------------
-# FILE PATH: src/database.py (نسخه نهایی با جدول امتیازدهی)
+# FILE PATH: src/database.py (نسخه نهایی سازگار با PostgreSQL/Supabase)
 # ---------------------------------------------------------
-import sqlite3
 import os
+import psycopg2
+from psycopg2.extras import DictCursor
 import config
 
-# استفاده از مسیر مطلق برای جلوگیری از خطاهای مسیر در GitHub Actions
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, "data", config.DB_NAME)
+# دریافت آدرس دیتابیس از متغیر محیطی گیت‌هاب (که در مرحله قبل ست کردید)
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
-def get_db_path(mode="live"):
-    """تشخیص هوشمند مسیر دیتابیس"""
-    if mode == "backtest":
-        return os.path.join(BASE_DIR, "data", config.DB_NAME_BACKTEST)
-    return DB_PATH
+def get_connection():
+    """ایجاد اتصال به دیتابیس ابری PostgreSQL"""
+    if not DATABASE_URL:
+        raise ValueError("❌ DATABASE_URL در محیط تنظیم نشده است!")
+    # DictCursor باعث می‌شود خروجی‌ها مثل دیتابیس قبلی (sqlite3.Row) قابل دسترسی باشند
+    return psycopg2.connect(DATABASE_URL, cursor_factory=DictCursor)
 
 def init_db(mode="live"):
-    """ایجاد دیتابیس و جداول با ساختار جامع و ستون‌های امتیازدهی"""
-    if not os.path.exists(os.path.join(BASE_DIR, "data")):
-        os.makedirs(os.path.join(BASE_DIR, "data"))
-        
-    target_path = get_db_path(mode)
+    """ایجاد جداول در دیتابیس ابری (PostgreSQL)"""
+    # در دیتابیس ابری نیازی به ساخت پوشه data نیست
     
-    with sqlite3.connect(target_path) as conn:
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS signals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                timestamp TEXT, 
-                symbol TEXT, 
-                direction TEXT, 
-                entry_price REAL, 
-                stop_loss REAL, 
-                tp1 REAL, tp2 REAL,
-                status TEXT DEFAULT 'OPEN',
-                closed_at TEXT,
-                pnl_percent REAL,
-                feat_adx REAL, feat_vol_ratio REAL, feat_atr_percent REAL, 
-                feat_rsi REAL, feat_trend_line REAL, feat_ema_deviation REAL, 
-                feat_rsi_momentum REAL, feat_body_ratio REAL, feat_high_volume_session REAL
-            )
-        """)
-        
-        # 🛠️ اصلاح جدول scan_logs: اضافه شدن ستون‌های امتیاز نهایی و تفکیکی
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS scan_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                timestamp TEXT, 
-                symbol TEXT, 
-                result TEXT,
-                total_score REAL DEFAULT 0.0,
-                ai_score REAL DEFAULT 0.0,
-                rsi_score REAL DEFAULT 0.0,
-                adx_score REAL DEFAULT 0.0,
-                ema_score REAL DEFAULT 0.0
-            )
-        """)
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            # PostgreSQL از SERIAL برای افزایش خودکار ID استفاده می‌کند
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS signals (
+                    id SERIAL PRIMARY KEY, 
+                    timestamp TEXT, 
+                    symbol TEXT, 
+                    direction TEXT, 
+                    entry_price REAL, 
+                    stop_loss REAL, 
+                    tp1 REAL, tp2 REAL,
+                    status TEXT DEFAULT 'OPEN',
+                    closed_at TEXT,
+                    pnl_percent REAL,
+                    feat_adx REAL, feat_vol_ratio REAL, feat_atr_percent REAL, 
+                    feat_rsi REAL, feat_trend_line REAL, feat_ema_deviation REAL, 
+                    feat_rsi_momentum REAL, feat_body_ratio REAL, feat_high_volume_session REAL
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS scan_logs (
+                    id SERIAL PRIMARY KEY, 
+                    timestamp TEXT, 
+                    symbol TEXT, 
+                    result TEXT,
+                    total_score REAL DEFAULT 0.0,
+                    ai_score REAL DEFAULT 0.0,
+                    rsi_score REAL DEFAULT 0.0,
+                    adx_score REAL DEFAULT 0.0,
+                    ema_score REAL DEFAULT 0.0
+                )
+            """)
         conn.commit()
 
 def get_open_positions():
-    """دریافت لیست پوزیشن‌های باز با قابلیت دسترسی به نام ستون"""
-    if not os.path.exists(DB_PATH): return []
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row 
-        return conn.execute("SELECT * FROM signals WHERE status = 'OPEN'").fetchall()
+    """دریافت لیست پوزیشن‌های باز"""
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM signals WHERE status = 'OPEN'")
+            rows = cursor.fetchall()
+            # تبدیل به دیکشنری جهت سازگاری با کدهای موجود شما
+            return [dict(row) for row in rows]
 
 def update_position_status(signal_id, status, pnl=None):
     """ثبت نتیجه نهایی معامله"""
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            "UPDATE signals SET status = ?, pnl_percent = ?, closed_at = datetime('now') WHERE id = ?",
-            (status, pnl, signal_id)
-        )
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            # استفاده از %s در PostgreSQL به جای علامت سوال ?
+            cursor.execute(
+                "UPDATE signals SET status = %s, pnl_percent = %s, closed_at = CURRENT_TIMESTAMP WHERE id = %s",
+                (status, pnl, signal_id)
+            )
         conn.commit()
 
 def get_open_positions_count():
     try:
-        if not os.path.exists(DB_PATH): return 0
-        with sqlite3.connect(DB_PATH) as conn:
-            return conn.execute("SELECT COUNT(*) FROM signals WHERE status = 'OPEN'").fetchone()[0]
-    except: return 0
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT COUNT(*) FROM signals WHERE status = 'OPEN'")
+                return cursor.fetchone()[0]
+    except: 
+        return 0
 
 def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1=0, tp2=0, **kwargs):
-    """ذخیره سیگنال (دقت کنید در main.py کلید pair حذف می‌شود تا تداخل ایجاد نکند)"""
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            "INSERT INTO signals (timestamp, symbol, direction, entry_price, stop_loss, tp1, tp2) VALUES (datetime('now'), ?, ?, ?, ?, ?, ?)", 
-            (pair, direction, entry_price, stop_loss, tp1, tp2)
-        )
+    """ذخیره سیگنال جدید"""
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """INSERT INTO signals (timestamp, symbol, direction, entry_price, stop_loss, tp1, tp2) 
+                   VALUES (CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s)""", 
+                (pair, direction, entry_price, stop_loss, tp1, tp2)
+            )
         conn.commit()
 
-# 🛠️ اصلاح تابع ثبت لاگ برای ذخیره کردن امتیازها در دیتابیس
 def log_scan_status(pair, status, total=0.0, ai=0.0, rsi=0.0, adx=0.0, ema=0.0):
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            """INSERT INTO scan_logs 
-               (timestamp, symbol, result, total_score, ai_score, rsi_score, adx_score, ema_score) 
-               VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?)""", 
-            (pair, status, total, ai, rsi, adx, ema)
-        )
+    """ذخیره امتیازهای اسکن"""
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """INSERT INTO scan_logs 
+                   (timestamp, symbol, result, total_score, ai_score, rsi_score, adx_score, ema_score) 
+                   VALUES (CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s)""", 
+                (pair, status, total, ai, rsi, adx, ema)
+            )
         conn.commit()
 
 def manage_open_positions():
-    """این تابع برای جلوگیری از بستن اجباری غیرفعال است."""
     pass
