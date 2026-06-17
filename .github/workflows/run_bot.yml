@@ -31,6 +31,10 @@ jobs:
           # سایر متغیرهای لازم را اینجا اضافه کنید
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
+          # 🛠️ اصلاح داینامیک: تبدیل خودکار پورت به 6543 در صورتی که در سکرت اشتباهاً 5432 باشد
+          if [[ "$DATABASE_URL" == *":5432"* ]]; then
+            export DATABASE_URL="${DATABASE_URL//:5432/:6543}"
+          fi
           python main.py
           
       - name: Commit and Push AI Parameters
