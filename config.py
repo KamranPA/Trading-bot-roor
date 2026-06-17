@@ -1,16 +1,15 @@
 # ---------------------------------------------------------
-# FILE PATH: config.py (v9.0 - Fully Aligned with Scoring & Pipeline)
+# FILE PATH: config.py (v9.1 - Cloud Aligned)
 # ---------------------------------------------------------
 import os
 
 # تعیین مسیر پایه پروژه (Root Directory)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# دیتابیس اصلی و لایو (تبدیل به مسیر مطلق برای پایداری در گیت‌هاب اکشنز)
+# 🛠️ توجه: مسیرهای دیتابیس محلی (SQLite) غیرفعال شدند چون ربات اکنون از DATABASE_URL (PostgreSQL) استفاده می‌کند.
+# DB_NAME, DB_PATH_LIVE و DB_PATH_BACKTEST صرفاً جهت حفظ ساختار باقی مانده‌اند.
 DB_NAME = "trading_bot.db"
 DB_PATH_LIVE = os.path.join(BASE_DIR, "data", DB_NAME)
-
-# دیتابیس مجزا و اختصاصی برای بکتست و آموزش هوش مصنوعی (مسیر مطلق)
 DB_NAME_BACKTEST = "trading_bot_backtest.db"
 DB_PATH_BACKTEST = os.path.join(BASE_DIR, "data", DB_NAME_BACKTEST)
 
@@ -20,18 +19,17 @@ CANDLES_LIMIT = 500
 
 # تنظیمات معاملاتی پایه و مدیریت ریسک
 MAX_OPEN_POSITIONS = 3
-ADX_THRESHOLD = 15.0   # مقدار پیش‌فرض که توسط اپتیمایزر بازنویسی می‌شود
-SWING_WINDOW = 3       # مقدار پیش‌فرض که توسط اپتیمایزر بازنویسی می‌شود
+ADX_THRESHOLD = 15.0   
+SWING_WINDOW = 3       
 TOTAL_CAPITAL = 1000.0
 RISK_PERCENT = 1.0
 
-# 🛠️ اضافه شده: نسبت‌های پیش‌فرض مدیریت پوزیشن برای هماهنگی کامل با اپتیمایزر و استراتژی
+# نسبت‌های پیش‌فرض مدیریت پوزیشن
 TP_RATIO = 1.5
 SL_RATIO = 1.0
 RISK_MULTIPLIER = 1.0
 
-# 🧠 اضافه شده: وزن‌های سیستم امتیازدهی استراتژی جدید (بین ۰ تا ۱۰۰)
-# این مقادیر تعیین می‌کنند که هر بخش چقدر در فیلتر نهایی پوزیشن‌ها سهم دارد
+# وزن‌های سیستم امتیازدهی استراتژی
 WEIGHT_RSI = 30
 WEIGHT_ADX = 25
 WEIGHT_EMA = 25
