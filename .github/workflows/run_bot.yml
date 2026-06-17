@@ -17,6 +17,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       
+      # این بخش برای دیتابیس ابری دیگر لازم نیست اما برای جلوگیری از خطا دست نمی‌زنیم
       - name: Set Permissions
         run: |
           mkdir -p data
@@ -25,24 +26,25 @@ jobs:
       - name: Run Bot
         env:
           PYTHONPATH: ${{ github.workspace }}
+          # 🟢 اضافه کردن آدرس دیتابیس ابری
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # سایر متغیرهای لازم را اینجا اضافه کنید
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
           python main.py
           
-      - name: Commit and Push Database & AI Parameters
+      - name: Commit and Push AI Parameters
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           
-          # 🛠️ اصلاح: اطمینان از اینکه فقط فایل‌های دیتابیس و تنظیمات استیج شوند
-          git add data/*.db best_params.json 2>/dev/null || echo "No tracked files to add."
+          # 🛠️ اصلاح: دیتابیس دیگر فایل نیست، فقط پارامترهای AI را پوش می‌کنیم
+          git add best_params.json 2>/dev/null || echo "No tracked files to add."
           
           # بررسی تغییرات
           if ! git diff --cached --quiet; then
-            git commit -m "Update DB and AI Parameters: $(date)"
-            
-            # 🛠️ اصلاح حیاتی: استفاده از --force برای جلوگیری از خطای Rejected
-            # استفاده از HEAD:${{ github.ref_name }} تضمین می‌کند همیشه روی شاخه درست پوش می‌شود
+            git commit -m "Update AI Parameters: $(date)"
             git push origin HEAD:${{ github.ref_name }} --force
           else
-            echo "No changes detected in DB or best_params.json."
+            echo "No changes detected in best_params.json."
           fi
