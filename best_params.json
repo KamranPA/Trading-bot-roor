@@ -46,7 +46,7 @@
         "ADX_THRESHOLD": 15,
         "SWING_WINDOW": 3,
         "adx_threshold": 20,
-        "swing_window": 5,
+        "swing_window": 7,
         "tp_ratio": 1.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
@@ -54,7 +54,7 @@
     "LINK/USDT": {
         "ADX_THRESHOLD": 15,
         "SWING_WINDOW": 3,
-        "adx_threshold": 20,
+        "adx_threshold": 25,
         "swing_window": 7,
         "tp_ratio": 1.5,
         "sl_ratio": 1.0,
@@ -68,8 +68,8 @@
     "AVAX/USDT": {
         "ADX_THRESHOLD": 15,
         "SWING_WINDOW": 3,
-        "adx_threshold": 25,
-        "swing_window": 10,
+        "adx_threshold": 20,
+        "swing_window": 5,
         "tp_ratio": 1.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
@@ -86,7 +86,7 @@
     "LTC/USDT": {
         "ADX_THRESHOLD": 25,
         "SWING_WINDOW": 7,
-        "adx_threshold": 22,
+        "adx_threshold": 20,
         "swing_window": 7,
         "tp_ratio": 1.5,
         "sl_ratio": 1.0,
@@ -95,8 +95,8 @@
     "BCH/USDT": {
         "ADX_THRESHOLD": 20,
         "SWING_WINDOW": 10,
-        "adx_threshold": 20,
-        "swing_window": 5,
+        "adx_threshold": 25,
+        "swing_window": 10,
         "tp_ratio": 1.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
@@ -105,7 +105,7 @@
         "ADX_THRESHOLD": 15,
         "SWING_WINDOW": 3,
         "adx_threshold": 20,
-        "swing_window": 10,
+        "swing_window": 5,
         "tp_ratio": 1.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
