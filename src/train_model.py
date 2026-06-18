@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/train_model.py (v9.2 - Full Logic Restored & Cloud Aligned)
+# FILE PATH: src/train_model.py (v9.3 - Time-Decay Weighted & Cloud Aligned)
 # ---------------------------------------------------------
 import pandas as pd
 import numpy as np
@@ -23,11 +23,10 @@ import config
 from src import database # 🟢 استفاده از ماژول دیتابیس جدید
 
 def get_data_from_db(symbol):
-    """استخراج امن دیتا از دیتابیس ابری (PostgreSQL)"""
+    """استخراج امن دیتا از دیتابیس ابری (PostgreSQL/Supabase)"""
     try:
         query = "SELECT * FROM signals WHERE symbol = %s AND status = 'CLOSED'"
         with database.get_connection() as conn:
-            # تبدیل به دیتافریم
             df_res = pd.read_sql_query(query, conn, params=(symbol,))
             df_res.columns = [col.lower() for col in df_res.columns]
             return df_res
@@ -36,8 +35,7 @@ def get_data_from_db(symbol):
         return pd.DataFrame()
 
 def train_model_for_symbol(symbol, mode="backtest"):
-    # --- ۱. تجمیع داده‌ها (حفظ منطق اصلی) ---
-    # در دیتابیس ابری، تمام داده‌ها در یک جدول هستند، اما برای حفظ منطقِ ماهانه شما:
+    # --- ۱. تجمیع داده‌ها ---
     df = get_data_from_db(symbol)
     
     if df.empty:
@@ -67,8 +65,7 @@ def train_model_for_symbol(symbol, mode="backtest"):
         return
     
     df = df.dropna(subset=features + ['target_label'])
-    # استفاده از timestamp برای مرتب‌سازی (مطمئن شوید در دیتابیس ابری این ستون موجود است)
-    df = df.sort_values(by='timestamp', ascending=True)
+    df = df.sort_values(by='timestamp', ascending=True).reset_index(drop=True)
     df = df.drop_duplicates(subset=['timestamp'])
     
     if len(df) < 10: 
@@ -78,36 +75,57 @@ def train_model_for_symbol(symbol, mode="backtest"):
     X = df[features]
     y = df['target_label'].to_numpy()
 
-    # --- ۳. تقسیم داده‌ها ---
-    split_idx = int(len(X) * 0.8)
-    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-    y_train, y_test = y[:split_idx], y[split_idx:]
+    # --- ۳. سیستم ضد اورفیت: وزن‌دهی زمانی (Time-Decay) ---
+    # داده‌های جدیدتر وزن بسیار بیشتری دارند تا مدل رفتار اخیر بازار را بهتر بشناسد
+    decay_factor = 0.995
+    sample_weights = np.power(decay_factor, np.arange(len(df)-1, -1, -1))
 
-    if len(X_test) != len(y_test) or len(X_train) != len(y_train):
+    # --- ۴. تنظیمات پویای آموزش بر اساس حالت اجرا ---
+    # در حالت monthly مدل با تمام دیتای وزن‌دار آموزش می‌بیند تا کاملا آپدیت باشد
+    if mode == "monthly":
+        X_train, y_train = X, y
+        train_weights = sample_weights
+        eval_set = None
+    else:
+        # در حالت backtest همچنان اسپیلیت زمانی را برای ارزیابی حفظ می‌کنیم
+        split_idx = int(len(X) * 0.8)
+        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
+        train_weights = sample_weights[:split_idx]
+        eval_set = [(X_test, y_test)]
+
+    if mode != "monthly" and (len(X_test) != len(y_test) or len(X_train) != len(y_train)):
         print(f"⚠️ خطای داخلی عدم تطابق اندکس‌ها؛ انصراف از آموزش برای {symbol}")
         return
 
-    # --- ۴. آموزش مدل ---
+    # --- ۵. آموزش مدل (با تنظیمات کنترل‌شده برای جلوگیری از حفظ کردن چارت) ---
     model = LGBMClassifier(
-        n_estimators=100, learning_rate=0.03, max_depth=5,
-        num_leaves=15, min_child_samples=15, subsample=0.7,
-        colsample_bytree=0.8, class_weight='balanced', 
-        random_state=42, n_jobs=1, verbose=-1
+        n_estimators=120, 
+        learning_rate=0.03, 
+        max_depth=4,              # کاهش عمق برای جلوگیری از اورفیت شدید
+        num_leaves=10,            # برگ‌های کمتر، تعمیم‌پذیری بیشتر
+        min_child_samples=20, 
+        subsample=0.8,
+        colsample_bytree=0.8, 
+        class_weight='balanced', 
+        random_state=42, 
+        n_jobs=1, 
+        verbose=-1
     )
     
-    if len(np.unique(y_test)) < 2:
-        model.fit(X_train, y_train)
+    if eval_set and len(np.unique(y_test)) >= 2:
+        model.fit(X_train, y_train, sample_weight=train_weights, eval_set=eval_set)
     else:
-        model.fit(X_train, y_train, eval_set=[(X_test, y_test)])
+        model.fit(X_train, y_train, sample_weight=train_weights)
 
-    # --- ۵. ذخیره‌سازی ---
+    # --- ۶. ذخیره‌سازی ابری/لوکال ---
     safe_symbol_name = symbol.replace('/', '_')
     models_dir = os.path.join(BASE_DIR, "src", "models")
     os.makedirs(models_dir, exist_ok=True)
     model_path = os.path.join(models_dir, f"{safe_symbol_name}_model.pkl")
     
     joblib.dump(model, model_path)
-    print(f"🎯 مدل {symbol} با موفقیت ارتقا یافت.")
+    print(f"🎯 مدل {symbol} با موفقیت ارتقا یافت (Mode: {mode}).")
 
 def train_all(mode="backtest"):
     for symbol in config.WATCHLIST:
