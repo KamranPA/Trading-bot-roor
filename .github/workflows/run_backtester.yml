@@ -1,4 +1,4 @@
-name: Run Backtester and Optimizer
+Name: Run Backtester and Optimizer
 
 on:
   workflow_dispatch:
@@ -32,7 +32,7 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pandas requests ccxt numpy joblib yfinance lightgbm psycopg2-binary
 
-      # ۱. دریافت داده‌ها (افزودن DATABASE_URL)
+      # ۱. دریافت داده‌ها
       - name: Fetch Market Historical Data
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -64,20 +64,26 @@ jobs:
         run: |
           python src/train_model.py
 
-      # ۵. کامیت و پوش هوشمند (اصلاح برای جلوگیری از اضافه کردن دیتابیس محلی)
+      # ۵. کامیت و پوش هوشمند (شامل تمام خروجی‌های بکتست)
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # 🛠️ اصلاح: به جای git add . (که دیتابیس محلی را هم برمی‌دارد)،
-          # فقط فایل‌های مدل و خروجی‌های غیر از دیتابیس را استیج می‌کنیم.
+          # اضافه کردن فایل‌های مدل و تنظیمات اصلی
           git add best_params.json models/ 2>/dev/null || echo "No tracked files to add."
           
+          # اضافه کردن فایل‌های دیتابیس بکتست و گزارش خلاصه
+          git add trading_bot_backtest.db backtest_table_summary.csv 2>/dev/null || echo "No backtest files to add."
+          
+          # اضافه کردن تمام فایل‌های CSV موجود در پوشه داده‌های 4 ساعته
+          git add data/4h/*.csv 2>/dev/null || echo "No CSV files found in data/4h."
+          
+          # بررسی و اعمال تغییرات
           if git diff --cached --quiet; then
             echo "No changes detected, skipping commit."
           else
-            git commit -m "Auto-update: Saving AI models and params"
+            git commit -m "Auto-update: Saving AI models, backtest logs, and params"
             echo "🔄 Pulling latest changes from remote..."
             git pull origin main --rebase
             git push origin main
