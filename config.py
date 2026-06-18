@@ -1,13 +1,12 @@
 # ---------------------------------------------------------
-# FILE PATH: config.py (v9.2 - Cloud & ML Aligned)
+# FILE PATH: config.py (v9.3 - Dual Architecture: Cloud + GitHub Backtest)
 # ---------------------------------------------------------
 import os
 
 # تعیین مسیر پایه پروژه (Root Directory)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# 🛠️ توجه: مسیرهای دیتابیس محلی (SQLite) غیرفعال شدند چون ربات اکنون از DATABASE_URL (PostgreSQL) استفاده می‌کند.
-# DB_NAME, DB_PATH_LIVE و DB_PATH_BACKTEST صرفاً جهت حفظ ساختار باقی مانده‌اند.
+# 📂 مسیرهای دیتابیس محلی (SQLite) برای بک‌تست روی گیت‌هاب
 DB_NAME = "trading_bot.db"
 DB_PATH_LIVE = os.path.join(BASE_DIR, "data", DB_NAME)
 DB_NAME_BACKTEST = "trading_bot_backtest.db"
