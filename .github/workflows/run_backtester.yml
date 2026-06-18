@@ -1,4 +1,4 @@
-Name: Run Backtester and Optimizer
+name: Run Backtester and Optimizer
 
 on:
   workflow_dispatch:
@@ -64,7 +64,7 @@ jobs:
         run: |
           python src/train_model.py
 
-      # ۵. کامیت و پوش هوشمند (شامل تمام خروجی‌های بکتست)
+      # ۵. کامیت و پوش هوشمند (ذخیره‌سازی تمام خروجی‌ها)
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
