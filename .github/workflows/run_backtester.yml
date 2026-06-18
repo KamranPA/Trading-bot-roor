@@ -29,6 +29,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pandas requests ccxt numpy joblib yfinance lightgbm psycopg2-binary
 
       # ۱. دریافت داده‌ها
@@ -59,28 +60,24 @@ jobs:
         run: |
           python src/train_model.py
 
-      # ۵. کامیت و پوش هوشمند (اصلاح‌شده برای رفع خطای تداخلات گیت)
+      # ۵. کامیت و پوش هوشمند (اصلاح‌شده برای جایگزینی مستقیم فایل‌ها)
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # پاکسازی محیط کاری از فایل‌های مزاحم
-          git reset --hard
+          # Force add: جایگزینی فایل‌های قدیمی با فایل‌های تولید شده جدید در این اجرا
+          git add -f best_params.json backtest_table_summary.csv trading_bot_backtest.db models/ data/4h/*.csv 2>/dev/null || echo "No files to add."
           
-          # اضافه کردن فایل‌های خروجی به استیج
-          git add best_params.json backtest_table_summary.csv trading_bot_backtest.db models/ 2>/dev/null || echo "Some files not found."
-          git add data/4h/*.csv 2>/dev/null || echo "No CSV files in data/4h."
-          
-          # ثبت تغییرات و پوش به ریپازیتوری
+          # بررسی وضعیت تغییرات برای جلوگیری از commit empty
           if git diff --cached --quiet; then
             echo "No changes detected."
           else
-            git commit -m "Auto-update: Saving backtest results and AI models"
+            git commit -m "Auto-update: Syncing backtest results and models"
             git push origin main --force
           fi
 
-      # ۶. آپلود خروجی به صورت Artifact برای دانلود مستقیم
+      # ۶. آپلود خروجی برای دانلود مستقیم
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
