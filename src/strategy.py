@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/strategy.py (UPDATED WITH RISK GUARDRAILS)
+# FILE PATH: src/strategy.py (UPDATED WITH RISK GUARDRAILS & PROBABILITY AI)
 # ---------------------------------------------------------
 import os
 import json
@@ -64,6 +64,9 @@ def generate_signal(df, pair, model=None):
     # لایه محافظتی: تعیین سقف ریسک (پیش‌فرض ۳ درصد از قیمت ورود)
     MAX_SL_PERCENT = getattr(config, 'MAX_SL_PERCENT', 0.03)
     
+    # آستانه پیش‌فرض تایید هوش مصنوعی (مثلاً اگر احتمال بالای ۶۵٪ یا ۰.۶۵ بود)
+    ai_threshold = 65.0
+    
     try:
         params_file = os.path.join(config.BASE_DIR, "best_params.json")
         if os.path.exists(params_file):
@@ -75,6 +78,7 @@ def generate_signal(df, pair, model=None):
                 tp_ratio = pair_params.get('tp_ratio', tp_ratio)
                 sl_ratio = pair_params.get('sl_ratio', sl_ratio)
                 risk_multiplier = pair_params.get('risk_multiplier', risk_multiplier)
+                ai_threshold = pair_params.get('ai_threshold', ai_threshold)
     except Exception as e:
         pass
 
@@ -110,11 +114,20 @@ def generate_signal(df, pair, model=None):
     ai_approved = False
     if model is not None:
         try:
-            if model.predict_signal(pair, features_dict):
-                ai_score = 100.0
-                ai_approved = True
+            # بررسی اینکه آیا مدل متد پیش‌بینی احتمالاتی دارد یا خیر
+            if hasattr(model, 'predict_probability'):
+                prob = model.predict_probability(pair, features_dict) # خروجی بین 0 تا 100 یا 0 تا 1
+                if prob <= 1.0:
+                    prob = prob * 100.0
+                ai_score = prob
             else:
-                ai_score = 0.0
+                # Fallback برای مدل‌های قدیمی گیت‌هاب که هنوز خروجی باینری دارند
+                raw_pred = model.predict_signal(pair, features_dict)
+                ai_score = 100.0 if raw_pred else 0.0
+            
+            # تاییدیه پویای هوش مصنوعی بر اساس آستانه تنظیم شده برای هر ارز
+            if ai_score >= ai_threshold:
+                ai_approved = True
         except Exception as e:
             print(f"❌ خطای بحرانی در مدل هوش مصنوعی {pair}: {e}")
             # ایمنی Fail-safe: اگر مدل خطا داد، معامله نکن
