@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/strategy.py
+# FILE PATH: src/strategy.py (UPDATED WITH RISK GUARDRAILS)
 # ---------------------------------------------------------
 import os
 import json
@@ -61,6 +61,8 @@ def generate_signal(df, pair, model=None):
     tp_ratio = 1.5
     sl_ratio = 1.0
     risk_multiplier = 1.0
+    # لایه محافظتی: تعیین سقف ریسک (پیش‌فرض ۳ درصد از قیمت ورود)
+    MAX_SL_PERCENT = getattr(config, 'MAX_SL_PERCENT', 0.03)
     
     try:
         params_file = os.path.join(config.BASE_DIR, "best_params.json")
@@ -78,28 +80,22 @@ def generate_signal(df, pair, model=None):
 
     # --- پیاده‌سازی سیستم امتیازدهی هوشمند (بین ۰ تا ۱۰۰) ---
     
-    # ۱. امتیاز ADX (هرچه بالاتر از حد آستانه باشد امتیاز بیشتر تا سقف ۱۰۰)
     current_adx = float(candle.get('feat_adx', 0))
     if current_adx >= adx_thresh:
         adx_score = min(100.0, 50.0 + ((current_adx - adx_thresh) * 2.5))
     else:
         adx_score = max(0.0, (current_adx / (adx_thresh + 1e-10)) * 50.0)
 
-    # ۲. امتیاز RSI (بررسی قدرت مومنتوم بازگشتی یا رونددار)
     current_rsi = float(candle.get('feat_rsi', 50))
     rsi_momentum = float(candle.get('feat_rsi_momentum', 0))
-    # اگر RSI در مناطق اشباع همراه با شتاب موافق باشد امتیاز بالاتر می‌گیرد
     if current_rsi > 50:
         rsi_score = min(100.0, 50.0 + (rsi_momentum * 5) if rsi_momentum > 0 else 50.0)
     else:
         rsi_score = min(100.0, 50.0 + (-rsi_momentum * 5) if rsi_momentum < 0 else 50.0)
 
-    # ۳. امتیاز انحراف میانگین (EMA Deviation)
-    # انحراف‌های منطقی ترنددار امتیاز بالاتری می‌گیرند (بر اساس رفتار سوددهی لایه‌های عمیق)
     dev_val = abs(float(candle.get('feat_ema_deviation', 0)))
     ema_score = min(100.0, (dev_val / 5.0) * 100.0) if dev_val > 0 else 0.0
 
-    # ۴. امتیاز هوش مصنوعی
     ai_score = 0.0
     features_dict = {
         'feat_adx': current_adx,
@@ -114,36 +110,28 @@ def generate_signal(df, pair, model=None):
     ai_approved = False
     if model is not None:
         try:
-            # 🛠️ اصلاح متد قدیمی از predict به predict_signal
             if model.predict_signal(pair, features_dict):
                 ai_score = 100.0
                 ai_approved = True
             else:
                 ai_score = 0.0
         except Exception as e:
-            print(f"خطا در مدل هوش مصنوعی {pair}: {e}")
-            ai_score = 0.0
+            print(f"❌ خطای بحرانی در مدل هوش مصنوعی {pair}: {e}")
+            # ایمنی Fail-safe: اگر مدل خطا داد، معامله نکن
+            return default_scores
 
-    # ۵. محاسبه امتیاز کل (وزنی)
-    # هوش مصنوعی ۴۰٪ و اندیکاتورها هر کدام ۲۰٪ وزن دارند
     total_score = (ai_score * 0.40) + (adx_score * 0.20) + (rsi_score * 0.20) + (ema_score * 0.20)
 
-    # ایجاد پکیج اطلاعات امتیازات جهت پاس دادن به دیتابیس برای پر شدن ستون‌های جدول لاگ
     score_data = {
         'total_score': round(total_score, 2),
         'ai_score': round(ai_score, 2),
         'rsi_score': round(rsi_score, 2),
         'adx_score': round(adx_score, 2),
         'ema_score': round(ema_score, 2),
-        'direction': None # پیش‌فرض بدون پوزیشن است مگر اینکه شروط زیر تایید شوند
+        'direction': None 
     }
 
-    # --- بررسی شروط ورود به پوزیشن ---
-    # شرط حد نصاب امتیاز برای ورود (مثلاً حداقل امتیاز ۶۰ از ۱۰۰)
-    if total_score < 60.0:
-        return score_data
-
-    if database.get_open_positions_count() >= config.MAX_OPEN_POSITIONS:
+    if total_score < 60.0 or database.get_open_positions_count() >= config.MAX_OPEN_POSITIONS:
         return score_data
 
     last_swing_high = strategy_utils.find_last_swing(df, 'high', config.SWING_WINDOW)
@@ -154,70 +142,44 @@ def generate_signal(df, pair, model=None):
 
     high_price = float(candle['High'])
     low_price = float(candle['Low'])
-    
-    is_bullish_momentum = current_rsi > 50
-    is_bearish_momentum = current_rsi < 50
+    atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
 
     # منطق ورود صعودی
-    if high_price > last_swing_high and is_bullish_momentum and ai_approved:
+    if high_price > last_swing_high and current_rsi > 50 and ai_approved:
         entry_price = last_swing_high
-        
-        if is_blocked_by_8h_filter(pair, "LONG"):
-            return score_data
+        if is_blocked_by_8h_filter(pair, "LONG"): return score_data
             
         risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0) * risk_multiplier
-        atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
-        sl_dist = 1.5 * atr_val * sl_ratio
+        # اعمال سقف ریسک (مینیمم فاصله ATR و سقف مجاز)
+        sl_dist = min(1.5 * atr_val * sl_ratio, entry_price * MAX_SL_PERCENT)
         tp_dist = sl_dist * tp_ratio
         
         stop_loss = entry_price - sl_dist
         sl_percent = (sl_dist / entry_price) * 100
         
-        # 🟢 اصلاح باگ حجم: اعمال فیلتر سقف سرمایه (حداکثر ۱۰ درصد سرمایه برای هر معامله)
         max_allowed_size = config.TOTAL_CAPITAL * getattr(config, 'MAX_POSITION_SIZE_PCT', 0.10)
         position_size = min(risk_usd / (sl_percent / 100.0), max_allowed_size) if sl_percent > 0 else 0
 
-        score_data.update({
-            'pair': pair, 
-            'direction': 'LONG', 
-            'entry_price': round(entry_price, 4),
-            'stop_loss': round(stop_loss, 4), 
-            'tp1': round(entry_price + (tp_dist / 2), 4),
-            'tp2': round(entry_price + tp_dist, 4),
-            'position_size': round(position_size, 2), 
-            **features_dict
-        })
+        score_data.update({'pair': pair, 'direction': 'LONG', 'entry_price': round(entry_price, 4), 'stop_loss': round(stop_loss, 4), 'tp1': round(entry_price + (tp_dist / 2), 4), 'tp2': round(entry_price + tp_dist, 4), 'position_size': round(position_size, 2), **features_dict})
         return score_data
     
     # منطق ورود نزولی
-    elif low_price < last_swing_low and is_bearish_momentum and ai_approved:
+    elif low_price < last_swing_low and current_rsi < 50 and ai_approved:
         entry_price = last_swing_low
-        
-        if is_blocked_by_8h_filter(pair, "SHORT"):
-            return score_data
+        if is_blocked_by_8h_filter(pair, "SHORT"): return score_data
             
         risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0) * risk_multiplier
-        atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
-        sl_dist = 1.5 * atr_val * sl_ratio
+        # اعمال سقف ریسک (مینیمم فاصله ATR و سقف مجاز)
+        sl_dist = min(1.5 * atr_val * sl_ratio, entry_price * MAX_SL_PERCENT)
         tp_dist = sl_dist * tp_ratio
         
         stop_loss = entry_price + sl_dist
         sl_percent = (sl_dist / entry_price) * 100
         
-        # 🟢 اصلاح باگ حجم: اعمال فیلتر سقف سرمایه (حداکثر ۱۰ درصد سرمایه برای هر معامله)
         max_allowed_size = config.TOTAL_CAPITAL * getattr(config, 'MAX_POSITION_SIZE_PCT', 0.10)
         position_size = min(risk_usd / (sl_percent / 100.0), max_allowed_size) if sl_percent > 0 else 0
 
-        score_data.update({
-            'pair': pair, 
-            'direction': 'SHORT', 
-            'entry_price': round(entry_price, 4),
-            'stop_loss': round(stop_loss, 4), 
-            'tp1': round(entry_price - (tp_dist / 2), 4),
-            'tp2': round(entry_price - tp_dist, 4),
-            'position_size': round(position_size, 2), 
-            **features_dict
-        })
+        score_data.update({'pair': pair, 'direction': 'SHORT', 'entry_price': round(entry_price, 4), 'stop_loss': round(stop_loss, 4), 'tp1': round(entry_price - (tp_dist / 2), 4), 'tp2': round(entry_price - tp_dist, 4), 'position_size': round(position_size, 2), **features_dict})
         return score_data
 
     return score_data
