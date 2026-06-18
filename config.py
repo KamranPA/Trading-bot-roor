@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: config.py (v9.1 - Cloud Aligned)
+# FILE PATH: config.py (v9.2 - Cloud & ML Aligned)
 # ---------------------------------------------------------
 import os
 
@@ -29,11 +29,18 @@ TP_RATIO = 1.5
 SL_RATIO = 1.0
 RISK_MULTIPLIER = 1.0
 
-# وزن‌های سیستم امتیازدهی استراتژی
-WEIGHT_RSI = 30
-WEIGHT_ADX = 25
-WEIGHT_EMA = 25
-WEIGHT_AI = 20
+# 🛡️ لایه‌های محافظتی ریسک (گاردریل برای نوسانات شدید)
+MAX_SL_PERCENT = 0.03            # حداکثر فاصله مجاز حد ضرر (۳ درصد از قیمت ورود)
+MAX_POSITION_SIZE_PCT = 0.10     # حداکثر سرمایه درگیر در هر معامله (۱۰ درصد کل سرمایه)
+
+# 🧠 آستانه پیش‌فرض تایید هوش مصنوعی (درصد اطمینان)
+AI_PROBABILITY_THRESHOLD = 65.0  
+
+# وزن‌های سیستم امتیازدهی استراتژی (سینک شده با لاجیک جدید در strategy.py)
+WEIGHT_AI = 40
+WEIGHT_RSI = 20
+WEIGHT_ADX = 20
+WEIGHT_EMA = 20
 
 # حداقل امتیاز کل (Total Score) مجاز برای صادر شدن سیگنال ورود لایو
 MIN_REQUIRED_SCORE = 60
