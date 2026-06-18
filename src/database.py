@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/database.py (نسخه بهینه‌شده با آدرس جدید Pooler - بدون ارسال تکراری تلگرام)
+# FILE PATH: src/database.py (نسخه بهینه‌شده با آدرس جدید Pooler - هماهنگ با ML و مدیریت ریسک)
 # ---------------------------------------------------------
 import os
 import psycopg2
@@ -26,7 +26,7 @@ def init_db(mode="live"):
     """ایجاد جداول در دیتابیس ابری (PostgreSQL)"""
     with get_connection() as conn:
         with conn.cursor() as cursor:
-            # ایجاد جدول سیگنال‌ها
+            # ایجاد جدول سیگنال‌ها (پشتیبانی از position_size اضافه شد)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS signals (
                     id SERIAL PRIMARY KEY, 
@@ -36,6 +36,7 @@ def init_db(mode="live"):
                     entry_price REAL, 
                     stop_loss REAL, 
                     tp1 REAL, tp2 REAL,
+                    position_size REAL DEFAULT 0.0,
                     status TEXT DEFAULT 'OPEN',
                     closed_at TEXT,
                     pnl_percent REAL,
@@ -89,13 +90,30 @@ def get_open_positions_count():
         return 0
 
 def save_signal_advanced(pair, direction, entry_price, stop_loss, tp1=0, tp2=0, **kwargs):
-    """ذخیره سیگنال جدید در دیتابیس (بدون ارسال تکراری به تلگرام)"""
+    """ذخیره سیگنال جدید در دیتابیس همراه با سنسورهای ماشین لرنینگ (بدون ارسال تکراری به تلگرام)"""
+    # استخراج امن مقادیر سنسورها از kwargs (اگر موجود نبودند مقدار پیش‌فرض جایگزین می‌شود)
+    position_size = kwargs.get('position_size', 0.0)
+    feat_adx = kwargs.get('feat_adx', 0.0)
+    feat_vol_ratio = kwargs.get('feat_vol_ratio', 1.0)
+    feat_atr_percent = kwargs.get('feat_atr_percent', 0.0)
+    feat_rsi = kwargs.get('feat_rsi', 50.0)
+    feat_trend_line = kwargs.get('feat_trend_line', 0.0)
+    feat_ema_deviation = kwargs.get('feat_ema_deviation', 0.0)
+    feat_rsi_momentum = kwargs.get('feat_rsi_momentum', 0.0)
+    feat_body_ratio = kwargs.get('feat_body_ratio', 0.0)
+    feat_high_volume_session = kwargs.get('feat_high_volume_session', 0.0)
+
     with get_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                """INSERT INTO signals (timestamp, symbol, direction, entry_price, stop_loss, tp1, tp2) 
-                   VALUES (CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s)""", 
-                (pair, direction, entry_price, stop_loss, tp1, tp2)
+                """INSERT INTO signals 
+                   (timestamp, symbol, direction, entry_price, stop_loss, tp1, tp2, position_size,
+                    feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, 
+                    feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session) 
+                   VALUES (CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""", 
+                (pair, direction, entry_price, stop_loss, tp1, tp2, position_size,
+                 feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line,
+                 feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session)
             )
         conn.commit()
 
