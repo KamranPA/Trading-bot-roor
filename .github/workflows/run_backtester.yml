@@ -32,7 +32,6 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pandas requests ccxt numpy joblib yfinance lightgbm psycopg2-binary
 
-      # تمام مراحل در یک بلاک واحد اجرا می‌شوند تا فایل‌ها در کانتینر باقی بمانند
       - name: Execute Pipeline and Force Commit Results
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -53,17 +52,17 @@ jobs:
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # ۶. اطمینان از وجود فایل‌ها (لیست کردن برای مشاهده در لاگ)
-          ls -l backtest_table_summary.csv
-          ls -l best_params.json
+          # ۶. اطمینان از وجود فایل‌ها
+          ls -l backtest_table_summary.csv || echo "Warning: CSV not found"
+          ls -l best_params.json || echo "Warning: JSON not found"
           
-          # ۷. کامیت اجباری (Force Commit) برای عبور از مشکل "No changes detected"
-          git add -f backtest_table_summary.csv best_params.json trading_bot_backtest.db models/ data/4h/*.csv 2>/dev/null || echo "Some files not found."
+          # ۷. کامیت اجباری (استفاده از نقطه برای پوشش کامل فایل‌های جدید و تغییر یافته)
+          git add .
           
-          # ثبت تغییرات با زمان فعلی (برای ایجاد محتوای متفاوت در هر اجرا)
+          # ثبت تغییرات با زمان فعلی
           git commit -m "Auto-update: Syncing backtest results $(date +'%Y-%m-%d %H:%M:%S')"
           
-          # ۸. ارسال به ریپازیتوری با زور (Force Push)
+          # ۸. ارسال به ریپازیتوری با زور
           git push origin HEAD:${{ github.ref_name }} --force
 
       - name: Upload Artifacts
