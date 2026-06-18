@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/strategy.py (UPDATED WITH RISK GUARDRAILS & PROBABILITY AI)
+# FILE PATH: src/strategy.py (UPDATED WITH ADVANCED RISK GUARDRAILS & PROBABILITY AI)
 # ---------------------------------------------------------
 import os
 import json
@@ -157,42 +157,64 @@ def generate_signal(df, pair, model=None):
     low_price = float(candle['Low'])
     atr_val = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
 
-    # منطق ورود صعودی
+    # منطق ورود صعودی (LONG)
     if high_price > last_swing_high and current_rsi > 50 and ai_approved:
         entry_price = last_swing_high
         if is_blocked_by_8h_filter(pair, "LONG"): return score_data
             
         risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0) * risk_multiplier
-        # اعمال سقف ریسک (مینیمم فاصله ATR و سقف مجاز)
-        sl_dist = min(1.5 * atr_val * sl_ratio, entry_price * MAX_SL_PERCENT)
+        
+        # گام دوم: اصلاح قطعی باگ محافظت ریسک ناگهانی و جلوگیری از فواصل غیرواقعی
+        raw_sl_dist = 1.5 * atr_val * sl_ratio
+        max_allowed_sl_dist = entry_price * MAX_SL_PERCENT
+        sl_dist = min(raw_sl_dist, max_allowed_sl_dist)
+        
+        # محاسبه حد سود متناسب با حد ضررِ واقعیِ محدود شده
         tp_dist = sl_dist * tp_ratio
         
         stop_loss = entry_price - sl_dist
         sl_percent = (sl_dist / entry_price) * 100
         
+        # کنترل دقیق حجم برای جلوگیری از لیکویید شدن در پامپ/دامپ شدید
         max_allowed_size = config.TOTAL_CAPITAL * getattr(config, 'MAX_POSITION_SIZE_PCT', 0.10)
         position_size = min(risk_usd / (sl_percent / 100.0), max_allowed_size) if sl_percent > 0 else 0
 
-        score_data.update({'pair': pair, 'direction': 'LONG', 'entry_price': round(entry_price, 4), 'stop_loss': round(stop_loss, 4), 'tp1': round(entry_price + (tp_dist / 2), 4), 'tp2': round(entry_price + tp_dist, 4), 'position_size': round(position_size, 2), **features_dict})
+        score_data.update({
+            'pair': pair, 'direction': 'LONG', 'entry_price': round(entry_price, 4), 
+            'stop_loss': round(stop_loss, 4), 'tp1': round(entry_price + (tp_dist / 2), 4), 
+            'tp2': round(entry_price + tp_dist, 4), 'position_size': round(position_size, 2), 
+            **features_dict
+        })
         return score_data
     
-    # منطق ورود نزولی
+    # منطق ورود نزولی (SHORT)
     elif low_price < last_swing_low and current_rsi < 50 and ai_approved:
         entry_price = last_swing_low
         if is_blocked_by_8h_filter(pair, "SHORT"): return score_data
             
         risk_usd = config.TOTAL_CAPITAL * (config.RISK_PERCENT / 100.0) * risk_multiplier
-        # اعمال سقف ریسک (مینیمم فاصله ATR و سقف مجاز)
-        sl_dist = min(1.5 * atr_val * sl_ratio, entry_price * MAX_SL_PERCENT)
+        
+        # گام دوم: اصلاح قطعی باگ محافظت ریسک ناگهانی و جلوگیری از فواصل غیرواقعی
+        raw_sl_dist = 1.5 * atr_val * sl_ratio
+        max_allowed_sl_dist = entry_price * MAX_SL_PERCENT
+        sl_dist = min(raw_sl_dist, max_allowed_sl_dist)
+        
+        # محاسبه حد سود متناسب با حد ضررِ واقعیِ محدود شده
         tp_dist = sl_dist * tp_ratio
         
         stop_loss = entry_price + sl_dist
         sl_percent = (sl_dist / entry_price) * 100
         
+        # کنترل دقیق حجم برای جلوگیری از لیکویید شدن در پامپ/دامپ شدید
         max_allowed_size = config.TOTAL_CAPITAL * getattr(config, 'MAX_POSITION_SIZE_PCT', 0.10)
         position_size = min(risk_usd / (sl_percent / 100.0), max_allowed_size) if sl_percent > 0 else 0
 
-        score_data.update({'pair': pair, 'direction': 'SHORT', 'entry_price': round(entry_price, 4), 'stop_loss': round(stop_loss, 4), 'tp1': round(entry_price - (tp_dist / 2), 4), 'tp2': round(entry_price - tp_dist, 4), 'position_size': round(position_size, 2), **features_dict})
+        score_data.update({
+            'pair': pair, 'direction': 'SHORT', 'entry_price': round(entry_price, 4), 
+            'stop_loss': round(stop_loss, 4), 'tp1': round(entry_price - (tp_dist / 2), 4), 
+            'tp2': round(entry_price - tp_dist, 4), 'position_size': round(position_size, 2), 
+            **features_dict
+        })
         return score_data
 
     return score_data
