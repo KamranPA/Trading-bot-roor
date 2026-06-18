@@ -1,4 +1,5 @@
 name: Trading Bot - Live DB Update
+
 on:
   schedule:
     - cron: '*/30 * * * *'
@@ -10,9 +11,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: {python-version: '3.10'}
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
       
       - name: Install dependencies
         run: pip install -r requirements.txt
@@ -27,7 +32,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }} # 👈 این متغیر جا افتاده بود که اضافه شد
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python main.py
           
@@ -35,6 +40,9 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          
+          # کپی فایل از src به مسیر اصلی جهت اطمینان از دیده شدن در کامیت
+          cp src/best_params.json ./best_params.json 2>/dev/null || echo "No tracked files to add."
           
           git add best_params.json 2>/dev/null || echo "No tracked files to add."
           
