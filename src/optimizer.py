@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/optimizer.py (v9.1 - Fully Aligned & Wrapper Added)
+# FILE PATH: src/optimizer.py (v9.1 - FULL RECOVERY - 210 LINES VERSION)
 # ---------------------------------------------------------
 import os
 import sys
@@ -19,6 +19,7 @@ from src.brain import TradingBrain
 def evaluate_parameters(symbol, df, adx_th, swing_w):
     """
     ارزیابی سریع ترکیب پارامترها بر روی دیتای بکتست با ساختار دیکشنری برای LightGBM
+    این تابع هسته اصلی تست استراتژی است و تمامی پارامترها را بررسی می‌کند.
     """
     df_copy = df.copy()
     
@@ -90,7 +91,6 @@ def evaluate_parameters(symbol, df, adx_th, swing_w):
         is_bullish_momentum = float(current_candle.get('feat_rsi', 50)) > 50
         is_bearish_momentum = float(current_candle.get('feat_rsi', 50)) < 50
 
-        # استفاده از دیکشنری برای متد پیش‌بینی هوش مصنوعی
         ai_approved = False
         features_dict = {
             'feat_adx': float(current_candle.get('feat_adx', 0)),
@@ -117,8 +117,6 @@ def evaluate_parameters(symbol, df, adx_th, swing_w):
             direction = "LONG"
             entry_price = last_swing_high
             
-            # 🟢 اصلاح منطق: قرار دادن حد ضرر زیر آخرین کف نوسانی (Swing Low) 
-            # و اعمال حد سود بر اساس ساختار بازار 
             dynamic_sl_dist = entry_price - last_swing_low
             if dynamic_sl_dist > 0:
                 sl_dist = dynamic_sl_dist
@@ -131,8 +129,6 @@ def evaluate_parameters(symbol, df, adx_th, swing_w):
             direction = "SHORT"
             entry_price = last_swing_low
             
-            # 🟢 اصلاح منطق: محاسبه فاصله از قیمت ورود تا سقف نوسانی (Swing High)
-            # این موضوع باعث می‌شود پوزیشن‌های Short کاملاً مطابق با منطق بازار نزولی بهینه شوند
             dynamic_sl_dist = last_swing_high - entry_price
             if dynamic_sl_dist > 0:
                 sl_dist = dynamic_sl_dist
@@ -143,10 +139,12 @@ def evaluate_parameters(symbol, df, adx_th, swing_w):
     return ai_total_pnl, ai_total_trades
 
 def optimize_all_symbols():
+    """تابع اصلی بهینه‌سازی که تمام ارزها را پیمایش می‌کند."""
     print("⚙️ شروع بهینه‌سازی هوشمند پارامترهای استراتژی برای LightGBM...")
     
-    adx_options = [20, 22, 25]
-    swing_options = [5, 7, 10]
+    # دامنه‌های جستجو برای پارامترها
+    adx_options = [10, 15, 20, 22, 25, 30]
+    swing_options = [3, 5, 7, 10, 15]
     
     best_params_dict = {}
     
@@ -180,6 +178,7 @@ def optimize_all_symbols():
             for swing_w in swing_options:
                 pnl, trades = evaluate_parameters(symbol, df, adx_th, swing_w)
                 
+                # شرط ترید حداقلی
                 if trades >= 2 and pnl > best_pnl:
                     best_pnl = pnl
                     best_adx = adx_th
@@ -203,7 +202,6 @@ def optimize_all_symbols():
     print("✅ فایل تنظیمات داینامیک ربات (best_params.json) با موفقیت به‌روزرسانی شد.")
 
 def optimize_all(mode="live"):
-    """تابع واسط برای سازگاری کامل با main.py"""
     optimize_all_symbols()
 
 if __name__ == "__main__":
