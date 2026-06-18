@@ -143,8 +143,8 @@ def optimize_all_symbols():
     print("⚙️ شروع بهینه‌سازی هوشمند پارامترهای استراتژی برای LightGBM...")
     
     # دامنه‌های جستجو برای پارامترها
-    adx_options = [10, 15, 20, 22, 25, 30]
-    swing_options = [3, 5, 7, 10, 15]
+    adx_options = [10, 15, 20]
+    swing_options = [3, 5, 7]
     
     best_params_dict = {}
     
