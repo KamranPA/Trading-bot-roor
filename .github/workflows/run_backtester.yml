@@ -32,52 +32,48 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pandas requests ccxt numpy joblib yfinance lightgbm psycopg2-binary
 
-      # ۱. دریافت داده‌ها
       - name: Fetch Market Historical Data
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           python fetcher.py
 
-      # ۲. اجرای بک‌تستر
       - name: Run Backtest
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           python src/backtester.py
 
-      # ۳. بهینه‌سازی پارامترها
       - name: Run Optimizer
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           python src/optimizer.py
 
-      # ۴. آموزش مدل
       - name: Train AI Model
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           python src/train_model.py
 
-      # ۵. کامیت و پوش هوشمند (اصلاح‌شده برای جایگزینی مستقیم فایل‌ها)
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # Force add: جایگزینی فایل‌های قدیمی با فایل‌های تولید شده جدید در این اجرا
+          # کپی فایل‌ها به ریشه برای اطمینان از شناسایی توسط git
+          cp backtest_table_summary.csv ./backtest_table_summary.csv 2>/dev/null || echo "CSV not found"
+          cp best_params.json ./best_params.json 2>/dev/null || echo "JSON not found"
+          
           git add -f best_params.json backtest_table_summary.csv trading_bot_backtest.db models/ data/4h/*.csv 2>/dev/null || echo "No files to add."
           
-          # بررسی وضعیت تغییرات برای جلوگیری از commit empty
-          if git diff --cached --quiet; then
-            echo "No changes detected."
-          else
+          if ! git diff --cached --quiet; then
             git commit -m "Auto-update: Syncing backtest results and models"
-            git push origin main --force
+            git push origin HEAD:${{ github.ref_name }} --force
+          else
+            echo "No changes detected."
           fi
 
-      # ۶. آپلود خروجی برای دانلود مستقیم
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
