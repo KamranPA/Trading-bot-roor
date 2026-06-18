@@ -5,6 +5,7 @@ import os
 import sys
 import sqlite3
 import pandas as pd
+from datetime import datetime # اضافه شده برای ایجاد تغییر محتوا
 
 # اصلاح مسیر اجرای پایتون برای شناسایی ماژول‌ها از ریشه پروژه
 sys.path.append(os.getcwd())
@@ -234,7 +235,6 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
         ai_approved = False
         if brain_instance and symbol in brain_instance.models:
             try:
-                # ارسال دیکشنری مرتب برای جلوگیری از کرش فید دیتای هوش مصنوعی
                 ai_approved = brain_instance.predict_signal(symbol, features_dict)
             except:
                 ai_approved = False
@@ -260,7 +260,6 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
 def run_all_backtests():
     db_path = config.DB_PATH_BACKTEST
     
-    # حذف ایمن دیتابیس بکتست محلی قدیمی برای جلوگیری از تداخل ساختاری لوکال
     if os.path.exists(db_path):
         try:
             os.remove(db_path)
@@ -283,7 +282,10 @@ def run_all_backtests():
             
     if summary_results:
         report_path = os.path.join(os.getcwd(), "backtest_table_summary.csv")
-        pd.DataFrame(summary_results).to_csv(report_path, index=False, encoding='utf-8')
+        df_final = pd.DataFrame(summary_results)
+        # اضافه کردنِ مهرِ زمانی برای ایجاد تغییر در فایل و رفع مشکلِ No changes detected
+        df_final['run_timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        df_final.to_csv(report_path, index=False, encoding='utf-8')
         print(f"✅ فایل خلاصه نتایج نهایی در ریشه پروژه ذخیره شد: {report_path}")
     else:
         print("❌ اخطار: لیستی از نتایج بکتست برای ذخیره وجود ندارد.")
