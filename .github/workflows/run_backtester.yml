@@ -64,27 +64,23 @@ jobs:
         run: |
           python src/train_model.py
 
-      # ۵. کامیت و پوش هوشمند (ذخیره‌سازی تمام خروجی‌ها)
+      # ۵. کامیت و پوش هوشمند (اصلاح‌شده برای رفع خطای ریبیس و ذخیره تمامی خروجی‌ها)
       - name: Commit and Push Results
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # اضافه کردن فایل‌های مدل و تنظیمات اصلی
-          git add best_params.json models/ 2>/dev/null || echo "No tracked files to add."
+          # پاکسازی تغییرات ناخواسته برای جلوگیری از خطای unstaged changes
+          git reset --hard
           
-          # اضافه کردن فایل‌های دیتابیس بکتست و گزارش خلاصه
-          git add trading_bot_backtest.db backtest_table_summary.csv 2>/dev/null || echo "No backtest files to add."
+          # اضافه کردن فایل‌های مدل، تنظیمات و خروجی‌های بکتست
+          git add best_params.json models/ trading_bot_backtest.db backtest_table_summary.csv data/4h/*.csv 2>/dev/null || echo "No files to add."
           
-          # اضافه کردن تمام فایل‌های CSV موجود در پوشه داده‌های 4 ساعته
-          git add data/4h/*.csv 2>/dev/null || echo "No CSV files found in data/4h."
-          
-          # بررسی و اعمال تغییرات
+          # بررسی وضعیت تغییرات
           if git diff --cached --quiet; then
             echo "No changes detected, skipping commit."
           else
             git commit -m "Auto-update: Saving AI models, backtest logs, and params"
-            echo "🔄 Pulling latest changes from remote..."
-            git pull origin main --rebase
-            git push origin main
+            # استفاده از push --force برای جلوگیری از تداخل در محیط CI/CD
+            git push origin main --force
           fi
