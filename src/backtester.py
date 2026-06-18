@@ -4,8 +4,9 @@
 import os
 import sys
 import sqlite3
+import json
 import pandas as pd
-from datetime import datetime # اضافه شده برای ایجاد تغییر محتوا
+from datetime import datetime
 
 # اصلاح مسیر اجرای پایتون برای شناسایی ماژول‌ها از ریشه پروژه
 sys.path.append(os.getcwd())
@@ -50,7 +51,7 @@ def init_backtest_db(db_path):
         """)
         conn.commit()
 
-def run_backtest_for_symbol(symbol, db_path, brain_instance):
+def run_backtest_for_symbol(symbol, db_path, brain_instance, adx_th, swing_w):
     """
     اجرای تست گذشته در دو فاز کاملاً هماهنگ با سیستم امتیازدهی و هوش مصنوعی جدید
     """
@@ -132,12 +133,12 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
                 conn.commit()
             continue
 
-        if float(current_candle.get('feat_adx', 0)) < config.ADX_THRESHOLD:
+        if float(current_candle.get('feat_adx', 0)) < adx_th:
             continue
 
         df_slice = df.iloc[:i]
-        last_swing_high = strategy_utils.find_last_swing(df_slice, 'high', config.SWING_WINDOW)
-        last_swing_low = strategy_utils.find_last_swing(df_slice, 'low', config.SWING_WINDOW)
+        last_swing_high = strategy_utils.find_last_swing(df_slice, 'high', swing_w)
+        last_swing_low = strategy_utils.find_last_swing(df_slice, 'low', swing_w)
 
         if last_swing_high is None or last_swing_low is None:
             continue
@@ -205,12 +206,12 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
                 is_in_position_ai = False
             continue
 
-        if float(current_candle.get('feat_adx', 0)) < config.ADX_THRESHOLD:
+        if float(current_candle.get('feat_adx', 0)) < adx_th:
             continue
 
         df_slice = df.iloc[:i]
-        last_swing_high = strategy_utils.find_last_swing(df_slice, 'high', config.SWING_WINDOW)
-        last_swing_low = strategy_utils.find_last_swing(df_slice, 'low', config.SWING_WINDOW)
+        last_swing_high = strategy_utils.find_last_swing(df_slice, 'high', swing_w)
+        last_swing_low = strategy_utils.find_last_swing(df_slice, 'low', swing_w)
 
         if last_swing_high is None or last_swing_low is None:
             continue
@@ -259,6 +260,13 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
 
 def run_all_backtests():
     db_path = config.DB_PATH_BACKTEST
+    # --- تغییر ۱: لود تنظیمات ---
+    params_file = os.path.join(os.getcwd(), "best_params.json")
+    best_params = {}
+    if os.path.exists(params_file):
+        with open(params_file, "r") as f:
+            best_params = json.load(f)
+    # ---------------------------
     
     if os.path.exists(db_path):
         try:
@@ -273,8 +281,14 @@ def run_all_backtests():
     summary_results = []
     
     for s in config.WATCHLIST:
+        # --- تغییر ۲: انتخاب پارامترهای هر نماد ---
+        p = best_params.get(s, {})
+        adx_th = p.get("adx_threshold", config.ADX_THRESHOLD)
+        swing_w = p.get("swing_window", config.SWING_WINDOW)
+        # --------------------------------------
         try:
-            res = run_backtest_for_symbol(s, db_path, brain)
+            # --- تغییر ۳: ارسال پارامترها به تابع ---
+            res = run_backtest_for_symbol(s, db_path, brain, adx_th, swing_w)
             if res:
                 summary_results.append(res)
         except Exception as e:
