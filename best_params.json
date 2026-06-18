@@ -5,13 +5,11 @@
         "sl_ratio": 1.0
     },
     "BTC/USDT": {
-        "ADX_THRESHOLD": 20,
-        "SWING_WINDOW": 10,
         "adx_threshold": 15,
         "swing_window": 5,
         "tp_ratio": 1.5,
         "sl_ratio": 1.0,
-        "risk_multiplier": 1.0
+        "risk_multiplier": 2.0
     },
     "ETH/USDT": {
         "ADX_THRESHOLD": 20,
