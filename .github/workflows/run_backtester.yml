@@ -32,8 +32,8 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pandas requests ccxt numpy joblib yfinance lightgbm psycopg2-binary
 
-      # تمام مراحل در یک بلاکِ واحد (ادغام شده برای جلوگیری از حذف فایل‌ها در کانتینرهای مختلف)
-      - name: Run Pipeline and Commit Results
+      # تمام مراحل در یک بلاک واحد اجرا می‌شوند تا فایل‌ها در کانتینر باقی بمانند
+      - name: Execute Pipeline and Force Commit Results
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
@@ -49,23 +49,22 @@ jobs:
           # ۴. آموزش مدل
           python src/train_model.py
           
-          # ۵. بررسی وجود فایل‌ها قبل از کامیت (اگر نبودند، لاگِ خطا می‌دهد ولی متوقف نمی‌شود)
-          ls -l backtest_table_summary.csv || echo "Warning: backtest_table_summary.csv not found"
-          ls -l best_params.json || echo "Warning: best_params.json not found"
-          
-          # ۶. کامیت و پوش
+          # ۵. تنظیمات گیت
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # اضافه کردنِ اجباری فایل‌ها
-          git add -f backtest_table_summary.csv best_params.json trading_bot_backtest.db models/ data/4h/*.csv 2>/dev/null || echo "No files to add."
+          # ۶. اطمینان از وجود فایل‌ها (لیست کردن برای مشاهده در لاگ)
+          ls -l backtest_table_summary.csv
+          ls -l best_params.json
           
-          if ! git diff --cached --quiet; then
-            git commit -m "Auto-update: Syncing backtest results and models"
-            git push origin HEAD:${{ github.ref_name }} --force
-          else
-            echo "No changes detected, nothing to commit."
-          fi
+          # ۷. کامیت اجباری (Force Commit) برای عبور از مشکل "No changes detected"
+          git add -f backtest_table_summary.csv best_params.json trading_bot_backtest.db models/ data/4h/*.csv 2>/dev/null || echo "Some files not found."
+          
+          # ثبت تغییرات با زمان فعلی (برای ایجاد محتوای متفاوت در هر اجرا)
+          git commit -m "Auto-update: Syncing backtest results $(date +'%Y-%m-%d %H:%M:%S')"
+          
+          # ۸. ارسال به ریپازیتوری با زور (Force Push)
+          git push origin HEAD:${{ github.ref_name }} --force
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
