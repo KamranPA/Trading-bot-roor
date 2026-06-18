@@ -36,6 +36,10 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
+          # 0. پاکسازی دیتابیس‌های قدیمی برای اطمینان از شروع محاسبات از صفر
+          rm -f trading_bot_backtest.db
+          rm -f backtest_table_summary.csv
+          
           # ۱. دریافت داده‌ها
           python fetcher.py
           
@@ -56,7 +60,7 @@ jobs:
           ls -l backtest_table_summary.csv || echo "Warning: CSV not found"
           ls -l best_params.json || echo "Warning: JSON not found"
           
-          # ۷. کامیت اجباری (استفاده از نقطه برای پوشش کامل فایل‌های جدید و تغییر یافته)
+          # ۷. کامیت اجباری
           git add .
           
           # ثبت تغییرات با زمان فعلی
