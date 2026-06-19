@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/optimizer.py (v9.1 - FULL RECOVERY - 210 LINES VERSION)
+# FILE PATH: src/optimizer.py (v9.2 - FIXED INDENTATION & LOGGING)
 # ---------------------------------------------------------
 import os
 import sys
@@ -16,7 +16,6 @@ import config
 from src import indicators, strategy_utils
 from src.brain import TradingBrain
 
-# --- تغییر ۱: اضافه شدن tp_r به ورودی تابع ---
 def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r):
     """
     ارزیابی سریع ترکیب پارامترها بر روی دیتای بکتست با ساختار دیکشنری برای LightGBM
@@ -88,7 +87,8 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r):
         elif 'atr' in current_candle:
             atr_val = float(current_candle['atr'])
 
-        sl_dist = 1.5 * atr_val
+        # --- تغییر مهم: کوچک کردن استاپ‌لاس ثابت از 1.5 به 1.0 ---
+        sl_dist = 1.0 * atr_val
         is_bullish_momentum = float(current_candle.get('feat_rsi', 50)) > 50
         is_bearish_momentum = float(current_candle.get('feat_rsi', 50)) < 50
 
@@ -105,13 +105,16 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r):
             'feat_high_volume_session': float(current_candle.get('feat_high_volume_session', 0))
         }
 
-        if symbol in brain.models:
-            try:
-                ai_approved = brain.predict_signal(symbol, features_dict)
-            except:
-                ai_approved = False
-        else:
-            ai_approved = True
+        # --- کامنت کردن شرط هوش مصنوعی به صورت یکپارچه و ساختاریافته ---
+        # if symbol in brain.models:
+        #     try:
+        #         ai_approved = brain.predict_signal(symbol, features_dict)
+        #     except:
+        #         ai_approved = False
+        # else:
+        
+        # دور زدن هوش مصنوعی (هم‌تراز با شرط‌های اصلی)
+        ai_approved = True
 
         if high_price > last_swing_high and is_bullish_momentum and ai_approved:
             is_in_position = True
@@ -123,7 +126,6 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r):
                 sl_dist = dynamic_sl_dist
                 
             stop_loss = entry_price - sl_dist
-            # --- تغییر ۲: استفاده از tp_r به جای عدد ثابت ۲ ---
             tp2 = entry_price + (sl_dist * tp_r)
             
         elif low_price < last_swing_low and is_bearish_momentum and ai_approved:
@@ -136,7 +138,6 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r):
                 sl_dist = dynamic_sl_dist
                 
             stop_loss = entry_price + sl_dist
-            # --- تغییر ۳: استفاده از tp_r به جای عدد ثابت ۲ ---
             tp2 = entry_price - (sl_dist * tp_r)
 
     return ai_total_pnl, ai_total_trades
@@ -148,7 +149,6 @@ def optimize_all_symbols():
     # دامنه‌های جستجو برای پارامترها
     adx_options = [10, 15, 20]
     swing_options = [3, 5, 7]
-    # --- تغییر ۴: اضافه کردن دامنه جستجو برای ضریب سود ---
     tp_options = [1.5, 2.0, 2.5]
     
     best_params_dict = {}
@@ -182,9 +182,12 @@ def optimize_all_symbols():
         
         for adx_th in adx_options:
             for swing_w in swing_options:
-                # --- تغییر ۵: حلقه تست برای یافتن بهترین ضریب سود ---
                 for tp_r in tp_options:
                     pnl, trades = evaluate_parameters(symbol, df, adx_th, swing_w, tp_r)
+                    
+                    # --- پرینت اختصاصی برای بیت‌کوین جهت ردیابی منطق ریاضی اپتیمایزر ---
+                    if symbol == "BTC/USDT":
+                         print(f"Testing BTC -> ADX: {adx_th} | Swing: {swing_w} | TP: {tp_r} ==> PNL: {pnl:.2f}% (Trades: {trades})")
                     
                     # شرط ترید حداقلی
                     if trades >= 2 and pnl > best_pnl:
@@ -198,7 +201,6 @@ def optimize_all_symbols():
         if symbol not in best_params_dict:
             best_params_dict[symbol] = {}
             
-        # --- تغییر ۶: ذخیره ضریب واقعی پیدا شده به جای 1.5 ثابت ---
         best_params_dict[symbol].update({
             "adx_threshold": int(best_adx),
             "swing_window": int(best_swing),
