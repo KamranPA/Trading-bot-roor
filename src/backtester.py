@@ -51,7 +51,7 @@ def init_backtest_db(db_path):
         """)
         conn.commit()
 
-def run_backtest_for_symbol(symbol, db_path, brain_instance, adx_th, swing_w):
+def run_backtest_for_symbol(symbol, db_path, brain_instance, adx_th, swing_w, tp_ratio):
     """
     اجرای تست گذشته در دو فاز کاملاً هماهنگ با سیستم امتیازدهی و هوش مصنوعی جدید
     """
@@ -161,10 +161,12 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance, adx_th, swing_w):
             'total_score': 0.0, 'ai_score': 0.0, 'rsi_score': 0.0, 'adx_score': 0.0, 'ema_score': 0.0
         }
 
+        # --- تغییر مهم: جایگذاری ضریب داینامیک سود (tp_ratio) ---
         if high_price > last_swing_high and is_bullish:
-            is_in_position_raw, direction_raw, entry_price_raw, stop_loss_raw, tp1_raw, tp2_raw, entry_time_raw, entry_features_raw = True, "LONG", last_swing_high, last_swing_high - sl_dist, last_swing_high + sl_dist, last_swing_high + (sl_dist * 2), current_time, features_snapshot
+            is_in_position_raw, direction_raw, entry_price_raw, stop_loss_raw, tp1_raw, tp2_raw, entry_time_raw, entry_features_raw = True, "LONG", last_swing_high, last_swing_high - sl_dist, last_swing_high + sl_dist, last_swing_high + (sl_dist * tp_ratio), current_time, features_snapshot
         elif low_price < last_swing_low and is_bearish:
-            is_in_position_raw, direction_raw, entry_price_raw, stop_loss_raw, tp1_raw, tp2_raw, entry_time_raw, entry_features_raw = True, "SHORT", last_swing_low, last_swing_low + sl_dist, last_swing_low - sl_dist, last_swing_low - (sl_dist * 2), current_time, features_snapshot
+            is_in_position_raw, direction_raw, entry_price_raw, stop_loss_raw, tp1_raw, tp2_raw, entry_time_raw, entry_features_raw = True, "SHORT", last_swing_low, last_swing_low + sl_dist, last_swing_low - sl_dist, last_swing_low - (sl_dist * tp_ratio), current_time, features_snapshot
+        # --------------------------------------------------------
 
     # ==========================================
     # فاز ۲: ارزیابی هوش مصنوعی در محیط لایو (Out-of-Sample)
@@ -242,10 +244,12 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance, adx_th, swing_w):
         else:
             ai_approved = True
 
+        # --- تغییر مهم: جایگذاری ضریب داینامیک سود (tp_ratio) در فاز ۲ ---
         if high_price > last_swing_high and is_bullish and ai_approved:
-            is_in_position_ai, direction_ai, entry_price_ai, stop_loss_ai, tp2_ai = True, "LONG", last_swing_high, last_swing_high - sl_dist, last_swing_high + (sl_dist * 2)
+            is_in_position_ai, direction_ai, entry_price_ai, stop_loss_ai, tp2_ai = True, "LONG", last_swing_high, last_swing_high - sl_dist, last_swing_high + (sl_dist * tp_ratio)
         elif low_price < last_swing_low and is_bearish and ai_approved:
-            is_in_position_ai, direction_ai, entry_price_ai, stop_loss_ai, tp2_ai = True, "SHORT", last_swing_low, last_swing_low + sl_dist, last_swing_low - (sl_dist * 2)
+            is_in_position_ai, direction_ai, entry_price_ai, stop_loss_ai, tp2_ai = True, "SHORT", last_swing_low, last_swing_low + sl_dist, last_swing_low - (sl_dist * tp_ratio)
+        # ------------------------------------------------------------------
 
     conn.close()
     win_rate_ai = (ai_winning_trades / ai_total_trades * 100) if ai_total_trades > 0 else 0
@@ -265,7 +269,10 @@ def run_all_backtests():
     best_params = {}
     if os.path.exists(params_file):
         with open(params_file, "r") as f:
-            best_params = json.load(f)
+            try:
+                best_params = json.load(f)
+            except Exception as e:
+                print(f"⚠️ خطا در خواندن best_params.json: {e}")
     # ---------------------------
     
     if os.path.exists(db_path):
@@ -281,14 +288,16 @@ def run_all_backtests():
     summary_results = []
     
     for s in config.WATCHLIST:
-        # --- تغییر ۲: انتخاب پارامترهای هر نماد ---
+        # --- تغییر ۲: استخراج پارامترها به همراه tp_ratio ---
         p = best_params.get(s, {})
         adx_th = p.get("adx_threshold", config.ADX_THRESHOLD)
         swing_w = p.get("swing_window", config.SWING_WINDOW)
-        # --------------------------------------
+        # اگر در فایل جیسون پیدا نشد، به صورت پیش‌فرض روی 1.5 تنظیم می‌شود
+        tp_ratio = p.get("tp_ratio", 1.5)
+        # ----------------------------------------------------
         try:
             # --- تغییر ۳: ارسال پارامترها به تابع ---
-            res = run_backtest_for_symbol(s, db_path, brain, adx_th, swing_w)
+            res = run_backtest_for_symbol(s, db_path, brain, adx_th, swing_w, tp_ratio)
             if res:
                 summary_results.append(res)
         except Exception as e:
