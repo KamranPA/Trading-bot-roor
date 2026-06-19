@@ -96,6 +96,7 @@ def fetch_data_intel(symbol, timeframe="4h"):
         print(f"❌ خطای غیرمنتظره در پردازش {symbol}: {e}")
 
 def run():
+    # 💡 اصلاح نهایی: اطمینان از خواندن لیست از کانفیگ بدون وابستگی به دیتابیس
     symbols = getattr(config, 'WATCHLIST', [])
     for s in symbols:
         fetch_data_intel(s)
