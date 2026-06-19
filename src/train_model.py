@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/train_model.py (v9.2 - Full Logic Restored & Cloud Aligned)
+# FILE PATH: src/train_model.py (v9.2 - Fixed for Local SQLite)
 # ---------------------------------------------------------
 import pandas as pd
 import numpy as np
@@ -7,6 +7,7 @@ import os
 import sys
 import joblib
 import logging
+import sqlite3
 
 try:
     from lightgbm import LGBMClassifier
@@ -20,19 +21,18 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 import config
-from src import database # 🟢 استفاده از ماژول دیتابیس جدید
 
 def get_data_from_db(symbol):
-    """استخراج امن دیتا از دیتابیس ابری (PostgreSQL)"""
+    """استخراج امن دیتا از دیتابیس بکتست محلی (SQLite)"""
     try:
-        query = "SELECT * FROM signals WHERE symbol = %s AND status = 'CLOSED'"
-        with database.get_connection() as conn:
+        query = "SELECT * FROM signals WHERE symbol = ? AND status = 'CLOSED'"
+        with sqlite3.connect(config.DB_PATH_BACKTEST) as conn:
             # تبدیل به دیتافریم
             df_res = pd.read_sql_query(query, conn, params=(symbol,))
             df_res.columns = [col.lower() for col in df_res.columns]
             return df_res
     except Exception as e:
-        logging.error(f"❌ خطای دیتابیس ابری در استخراج {symbol}: {e}")
+        logging.error(f"❌ خطای دیتابیس محلی در استخراج {symbol}: {e}")
         return pd.DataFrame()
 
 def train_model_for_symbol(symbol, mode="backtest"):
