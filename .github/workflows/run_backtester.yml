@@ -52,19 +52,16 @@ jobs:
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           
-          # ۶. اطمینان از وجود فایل‌ها
-          ls -l backtest_table_summary.csv || echo "Warning: CSV not found"
-          ls -l best_params.json || echo "Warning: JSON not found"
-          
-          # ۷. اضافه کردن اجباری فایل‌ها و کامیت (حتی اگر در gitignore باشند)
+          # ۶. اضافه کردن اجباری فایل‌های خروجی و دیتابیس
           git add -f backtest_table_summary.csv
           git add -f best_params.json
+          git add -f data/trading_bot_backtest.db
           git add .
           
-          # ثبت تغییرات با زمان فعلی (استفاده از || برای جلوگیری از خطا در صورت نبود تغییر جدید)
-          git commit -m "Auto-update: Syncing backtest results $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
+          # ثبت تغییرات با زمان فعلی
+          git commit -m "Auto-update: Syncing backtest results and DB $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
           
-          # ۸. ارسال به ریپازیتوری با زور
+          # ۷. ارسال به ریپازیتوری با زور
           git push origin HEAD:${{ github.ref_name }} --force
 
       - name: Upload Artifacts
@@ -74,3 +71,4 @@ jobs:
           path: |
             backtest_table_summary.csv
             best_params.json
+            data/trading_bot_backtest.db
