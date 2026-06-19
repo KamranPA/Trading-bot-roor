@@ -105,13 +105,14 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r):
             'feat_high_volume_session': float(current_candle.get('feat_high_volume_session', 0))
         }
 
-        if symbol in brain.models:
-            try:
-                ai_approved = brain.predict_signal(symbol, features_dict)
-            except:
-                ai_approved = False
-        else:
-            ai_approved = True
+       # if symbol in brain.models:
+           # try:
+               # ai_approved = brain.predict_signal(symbol, features_dict)
+           # except:
+               # ai_approved = False
+       # else:
+         #   ai_approved = True
+        ai_approved = True
 
         if high_price > last_swing_high and is_bullish_momentum and ai_approved:
             is_in_position = True
