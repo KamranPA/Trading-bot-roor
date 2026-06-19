@@ -1,4 +1,4 @@
-name: Run Backtester and Optimizer
+Name: Run Backtester and Optimizer
 
 on:
   workflow_dispatch:
@@ -31,6 +31,22 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pandas requests ccxt numpy joblib yfinance lightgbm psycopg2-binary
+
+      # === گام حیاتی: نصب و راه‌اندازی تونل کلودفلر قبل از اجرای خط لوله ===
+      - name: Setup and Start Cloudflared Tunnel
+        env:
+          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+        run: |
+          echo "📥 دانلود و نصب کلودفلرد..."
+          curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared.deb
+          
+          echo "🚀 اجرای تونل کلودفلر در پس‌زمینه..."
+          sudo cloudflared service install "$CLOUDFLARE_TUNNEL_TOKEN" || true
+          sudo systemctl start cloudflared || cloudflared tunnel run --token "$CLOUDFLARE_TUNNEL_TOKEN" &
+          
+          # استراحت کوتاه برای اطمینان از برقراری کامل اتصال تونل
+          sleep 5
 
       - name: Execute Pipeline and Force Commit Results
         env:
