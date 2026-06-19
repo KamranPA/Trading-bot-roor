@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/optimizer.py (v9.1 - FULL RECOVERY - 210 LINES VERSION)
+# FILE PATH: src/optimizer.py (v9.1 - Fully Aligned & Wrapper Added)
 # ---------------------------------------------------------
 import os
 import sys
@@ -16,11 +16,9 @@ import config
 from src import indicators, strategy_utils
 from src.brain import TradingBrain
 
-# --- تغییر ۱: اضافه شدن tp_r به ورودی تابع ---
-def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r):
+def evaluate_parameters(symbol, df, adx_th, swing_w):
     """
     ارزیابی سریع ترکیب پارامترها بر روی دیتای بکتست با ساختار دیکشنری برای LightGBM
-    این تابع هسته اصلی تست استراتژی است و تمامی پارامترها را بررسی می‌کند.
     """
     df_copy = df.copy()
     
@@ -92,6 +90,7 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r):
         is_bullish_momentum = float(current_candle.get('feat_rsi', 50)) > 50
         is_bearish_momentum = float(current_candle.get('feat_rsi', 50)) < 50
 
+        # استفاده از دیکشنری برای متد پیش‌بینی هوش مصنوعی
         ai_approved = False
         features_dict = {
             'feat_adx': float(current_candle.get('feat_adx', 0)),
@@ -117,39 +116,22 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r):
             is_in_position = True
             direction = "LONG"
             entry_price = last_swing_high
-            
-            dynamic_sl_dist = entry_price - last_swing_low
-            if dynamic_sl_dist > 0:
-                sl_dist = dynamic_sl_dist
-                
             stop_loss = entry_price - sl_dist
-            # --- تغییر ۲: استفاده از tp_r به جای عدد ثابت ۲ ---
-            tp2 = entry_price + (sl_dist * tp_r)
-            
+            tp2 = entry_price + (sl_dist * 2)
         elif low_price < last_swing_low and is_bearish_momentum and ai_approved:
             is_in_position = True
             direction = "SHORT"
             entry_price = last_swing_low
-            
-            dynamic_sl_dist = last_swing_high - entry_price
-            if dynamic_sl_dist > 0:
-                sl_dist = dynamic_sl_dist
-                
             stop_loss = entry_price + sl_dist
-            # --- تغییر ۳: استفاده از tp_r به جای عدد ثابت ۲ ---
-            tp2 = entry_price - (sl_dist * tp_r)
+            tp2 = entry_price - (sl_dist * 2)
 
     return ai_total_pnl, ai_total_trades
 
 def optimize_all_symbols():
-    """تابع اصلی بهینه‌سازی که تمام ارزها را پیمایش می‌کند."""
     print("⚙️ شروع بهینه‌سازی هوشمند پارامترهای استراتژی برای LightGBM...")
     
-    # دامنه‌های جستجو برای پارامترها
-    adx_options = [10, 15, 20]
-    swing_options = [3, 5, 7]
-    # --- تغییر ۴: اضافه کردن دامنه جستجو برای ضریب سود ---
-    tp_options = [1.5, 2.0, 2.5]
+    adx_options = [20, 22, 25]
+    swing_options = [5, 7, 10]
     
     best_params_dict = {}
     
@@ -178,31 +160,25 @@ def optimize_all_symbols():
         best_pnl = -99999.0
         best_adx = config.ADX_THRESHOLD
         best_swing = config.SWING_WINDOW
-        best_tp_ratio = 1.5 # مقدار پیش‌فرض
         
         for adx_th in adx_options:
             for swing_w in swing_options:
-                # --- تغییر ۵: حلقه تست برای یافتن بهترین ضریب سود ---
-                for tp_r in tp_options:
-                    pnl, trades = evaluate_parameters(symbol, df, adx_th, swing_w, tp_r)
+                pnl, trades = evaluate_parameters(symbol, df, adx_th, swing_w)
+                
+                if trades >= 2 and pnl > best_pnl:
+                    best_pnl = pnl
+                    best_adx = adx_th
+                    best_swing = swing_w
                     
-                    # شرط ترید حداقلی
-                    if trades >= 2 and pnl > best_pnl:
-                        best_pnl = pnl
-                        best_adx = adx_th
-                        best_swing = swing_w
-                        best_tp_ratio = tp_r
-                        
-        print(f"🎯 بهترین تنظیمات برای {symbol} -> ADX: {best_adx} | Swing: {best_swing} | TP Ratio: {best_tp_ratio} | سود: {best_pnl:.2f}%")
+        print(f"🎯 بهترین تنظیمات برای {symbol} -> ADX: {best_adx} | Swing Window: {best_swing} | سود فاز تست: {best_pnl:.2f}%")
         
         if symbol not in best_params_dict:
             best_params_dict[symbol] = {}
             
-        # --- تغییر ۶: ذخیره ضریب واقعی پیدا شده به جای 1.5 ثابت ---
         best_params_dict[symbol].update({
             "adx_threshold": int(best_adx),
             "swing_window": int(best_swing),
-            "tp_ratio": float(best_tp_ratio),
+            "tp_ratio": 1.5,
             "sl_ratio": 1.0,
             "risk_multiplier": 1.0
         })
@@ -212,6 +188,7 @@ def optimize_all_symbols():
     print("✅ فایل تنظیمات داینامیک ربات (best_params.json) با موفقیت به‌روزرسانی شد.")
 
 def optimize_all(mode="live"):
+    """تابع واسط برای سازگاری کامل با main.py"""
     optimize_all_symbols()
 
 if __name__ == "__main__":

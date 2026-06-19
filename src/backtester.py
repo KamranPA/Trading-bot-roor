@@ -4,9 +4,7 @@
 import os
 import sys
 import sqlite3
-import json
 import pandas as pd
-from datetime import datetime
 
 # اصلاح مسیر اجرای پایتون برای شناسایی ماژول‌ها از ریشه پروژه
 sys.path.append(os.getcwd())
@@ -17,10 +15,7 @@ from src.brain import TradingBrain
 
 def init_backtest_db(db_path):
     """اطمینان از وجود ساختار جدول سیگنال‌ها در دیتابیس بکتست با ستون‌های جدید امتیازدهی"""
-    # در گیت‌هاب اکشن، اگر مسیر دیتابیس روی حافظه موقت (RAM) باشد، خطاها رفع می‌شوند
-    if db_path != ":memory:":
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -54,7 +49,7 @@ def init_backtest_db(db_path):
         """)
         conn.commit()
 
-def run_backtest_for_symbol(symbol, db_path, brain_instance, adx_th, swing_w, tp_ratio):
+def run_backtest_for_symbol(symbol, db_path, brain_instance):
     """
     اجرای تست گذشته در دو فاز کاملاً هماهنگ با سیستم امتیازدهی و هوش مصنوعی جدید
     """
@@ -136,12 +131,12 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance, adx_th, swing_w, tp
                 conn.commit()
             continue
 
-        if float(current_candle.get('feat_adx', 0)) < adx_th:
+        if float(current_candle.get('feat_adx', 0)) < config.ADX_THRESHOLD:
             continue
 
         df_slice = df.iloc[:i]
-        last_swing_high = strategy_utils.find_last_swing(df_slice, 'high', swing_w)
-        last_swing_low = strategy_utils.find_last_swing(df_slice, 'low', swing_w)
+        last_swing_high = strategy_utils.find_last_swing(df_slice, 'high', config.SWING_WINDOW)
+        last_swing_low = strategy_utils.find_last_swing(df_slice, 'low', config.SWING_WINDOW)
 
         if last_swing_high is None or last_swing_low is None:
             continue
@@ -164,12 +159,10 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance, adx_th, swing_w, tp
             'total_score': 0.0, 'ai_score': 0.0, 'rsi_score': 0.0, 'adx_score': 0.0, 'ema_score': 0.0
         }
 
-        # --- تغییر مهم: جایگذاری ضریب داینامیک سود (tp_ratio) ---
         if high_price > last_swing_high and is_bullish:
-            is_in_position_raw, direction_raw, entry_price_raw, stop_loss_raw, tp1_raw, tp2_raw, entry_time_raw, entry_features_raw = True, "LONG", last_swing_high, last_swing_high - sl_dist, last_swing_high + sl_dist, last_swing_high + (sl_dist * tp_ratio), current_time, features_snapshot
+            is_in_position_raw, direction_raw, entry_price_raw, stop_loss_raw, tp1_raw, tp2_raw, entry_time_raw, entry_features_raw = True, "LONG", last_swing_high, last_swing_high - sl_dist, last_swing_high + sl_dist, last_swing_high + (sl_dist * 2), current_time, features_snapshot
         elif low_price < last_swing_low and is_bearish:
-            is_in_position_raw, direction_raw, entry_price_raw, stop_loss_raw, tp1_raw, tp2_raw, entry_time_raw, entry_features_raw = True, "SHORT", last_swing_low, last_swing_low + sl_dist, last_swing_low - sl_dist, last_swing_low - (sl_dist * tp_ratio), current_time, features_snapshot
-        # --------------------------------------------------------
+            is_in_position_raw, direction_raw, entry_price_raw, stop_loss_raw, tp1_raw, tp2_raw, entry_time_raw, entry_features_raw = True, "SHORT", last_swing_low, last_swing_low + sl_dist, last_swing_low - sl_dist, last_swing_low - (sl_dist * 2), current_time, features_snapshot
 
     # ==========================================
     # فاز ۲: ارزیابی هوش مصنوعی در محیط لایو (Out-of-Sample)
@@ -211,12 +204,12 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance, adx_th, swing_w, tp
                 is_in_position_ai = False
             continue
 
-        if float(current_candle.get('feat_adx', 0)) < adx_th:
+        if float(current_candle.get('feat_adx', 0)) < config.ADX_THRESHOLD:
             continue
 
         df_slice = df.iloc[:i]
-        last_swing_high = strategy_utils.find_last_swing(df_slice, 'high', swing_w)
-        last_swing_low = strategy_utils.find_last_swing(df_slice, 'low', swing_w)
+        last_swing_high = strategy_utils.find_last_swing(df_slice, 'high', config.SWING_WINDOW)
+        last_swing_low = strategy_utils.find_last_swing(df_slice, 'low', config.SWING_WINDOW)
 
         if last_swing_high is None or last_swing_low is None:
             continue
@@ -241,18 +234,17 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance, adx_th, swing_w, tp
         ai_approved = False
         if brain_instance and symbol in brain_instance.models:
             try:
+                # ارسال دیکشنری مرتب برای جلوگیری از کرش فید دیتای هوش مصنوعی
                 ai_approved = brain_instance.predict_signal(symbol, features_dict)
             except:
                 ai_approved = False
         else:
             ai_approved = True
 
-        # --- تغییر مهم: جایگذاری ضریب داینامیک سود (tp_ratio) در فاز ۲ ---
         if high_price > last_swing_high and is_bullish and ai_approved:
-            is_in_position_ai, direction_ai, entry_price_ai, stop_loss_ai, tp2_ai = True, "LONG", last_swing_high, last_swing_high - sl_dist, last_swing_high + (sl_dist * tp_ratio)
+            is_in_position_ai, direction_ai, entry_price_ai, stop_loss_ai, tp2_ai = True, "LONG", last_swing_high, last_swing_high - sl_dist, last_swing_high + (sl_dist * 2)
         elif low_price < last_swing_low and is_bearish and ai_approved:
-            is_in_position_ai, direction_ai, entry_price_ai, stop_loss_ai, tp2_ai = True, "SHORT", last_swing_low, last_swing_low + sl_dist, last_swing_low - (sl_dist * tp_ratio)
-        # ------------------------------------------------------------------
+            is_in_position_ai, direction_ai, entry_price_ai, stop_loss_ai, tp2_ai = True, "SHORT", last_swing_low, last_swing_low + sl_dist, last_swing_low - (sl_dist * 2)
 
     conn.close()
     win_rate_ai = (ai_winning_trades / ai_total_trades * 100) if ai_total_trades > 0 else 0
@@ -266,33 +258,24 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance, adx_th, swing_w, tp
     }
 
 def run_all_backtests():
-    # تغییر اصلی: استفاده از :memory: برای جلوگیری از قفل شدن دیتابیس در گیت‌هاب
-    db_path = ":memory:" 
+    db_path = config.DB_PATH_BACKTEST
     
+    # حذف ایمن دیتابیس بکتست محلی قدیمی برای جلوگیری از تداخل ساختاری لوکال
+    if os.path.exists(db_path):
+        try:
+            os.remove(db_path)
+        except:
+            pass
+
     init_backtest_db(db_path)
     print("📊 شروع پروسه دوفازی بکتست: محاسبات تمیز RSI + هماهنگی با هوش مصنوعی...")
-    
-    # لود تنظیمات...
-    params_file = os.path.join(os.getcwd(), "best_params.json")
-    best_params = {}
-    if os.path.exists(params_file):
-        with open(params_file, "r") as f:
-            try:
-                best_params = json.load(f)
-            except Exception as e:
-                print(f"⚠️ خطا در خواندن best_params.json: {e}")
     
     brain = TradingBrain()
     summary_results = []
     
     for s in config.WATCHLIST:
-        p = best_params.get(s, {})
-        adx_th = p.get("adx_threshold", config.ADX_THRESHOLD)
-        swing_w = p.get("swing_window", config.SWING_WINDOW)
-        tp_ratio = p.get("tp_ratio", 1.5)
-        
         try:
-            res = run_backtest_for_symbol(s, db_path, brain, adx_th, swing_w, tp_ratio)
+            res = run_backtest_for_symbol(s, db_path, brain)
             if res:
                 summary_results.append(res)
         except Exception as e:
@@ -300,9 +283,7 @@ def run_all_backtests():
             
     if summary_results:
         report_path = os.path.join(os.getcwd(), "backtest_table_summary.csv")
-        df_final = pd.DataFrame(summary_results)
-        df_final['run_timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        df_final.to_csv(report_path, index=False, encoding='utf-8')
+        pd.DataFrame(summary_results).to_csv(report_path, index=False, encoding='utf-8')
         print(f"✅ فایل خلاصه نتایج نهایی در ریشه پروژه ذخیره شد: {report_path}")
     else:
         print("❌ اخطار: لیستی از نتایج بکتست برای ذخیره وجود ندارد.")

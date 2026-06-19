@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/brain.py (v9.0 - Probability Predictor Engine)
+# FILE PATH: src/brain.py (v8.9 - Robust Predictor)
 # ---------------------------------------------------------
 import os
 import sys
@@ -34,76 +34,60 @@ class TradingBrain:
                 except Exception as e:
                     print(f"⚠️ خطا در لود مدل {symbol}: {e}")
 
-    def _prepare_features(self, current_features, model):
-        """متد کمکی برای پاکسازی و آماده‌سازی امن ورودی‌ها"""
-        if isinstance(current_features, dict):
-            df_features = pd.DataFrame([current_features])
-        elif isinstance(current_features, pd.Series):
-            df_features = pd.DataFrame([current_features.to_dict()])
-        else:
-            df_features = current_features.copy()
-
-        if hasattr(model, 'feature_name_'):
-            model_features = model.feature_name_
-        else:
-            model_features = [
-                'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 
-                'feat_trend_line', 'feat_ema_deviation', 'feat_rsi_momentum', 
-                'feat_body_ratio', 'feat_high_volume_session'
-            ]
-
-        for feat in model_features:
-            if feat not in df_features.columns:
-                if feat == 'feat_atr_percent' and 'atr' in df_features.columns:
-                    df_features['feat_atr_percent'] = df_features['atr']
-                else:
-                    df_features[feat] = 0.0
-
-        df_features = df_features[model_features].fillna(0.0)
-        df_features = df_features.astype(np.float32)
-        return df_features
-
     def predict_signal(self, symbol, current_features):
-        """متد قدیمی باینری (برای سازگاری با کدهای احتمالی قدیمی)"""
+        """
+        دریافت ویژگی‌ها و پیش‌بینی امن با مدیریت خطاهای حافظه LightGBM
+        """
+        # اگر مدلی برای این ارز ساخته نشده است، سیگنال پیش‌فرض تایید می‌شود
         if symbol not in self.models:
             return True
 
+        model = self.models[symbol]
+        
         try:
-            model = self.models[symbol]
-            df_features = self._prepare_features(current_features, model)
-            
+            # ۱. یکپارچه‌سازی نوع ورودی به دیتافریم
+            if isinstance(current_features, dict):
+                df_features = pd.DataFrame([current_features])
+            elif isinstance(current_features, pd.Series):
+                df_features = pd.DataFrame([current_features.to_dict()])
+            else:
+                df_features = current_features.copy()
+
+            # ۲. استخراج لیست ویژگی‌های آموزش دیده
+            if hasattr(model, 'feature_name_'):
+                model_features = model.feature_name_
+            else:
+                model_features = [
+                    'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 
+                    'feat_trend_line', 'feat_ema_deviation', 'feat_rsi_momentum', 
+                    'feat_body_ratio', 'feat_high_volume_session'
+                ]
+
+            # ۳. بررسی امن ستون‌ها و پر کردن جای خالی
+            for feat in model_features:
+                if feat not in df_features.columns:
+                    if feat == 'feat_atr_percent' and 'atr' in df_features.columns:
+                        df_features['feat_atr_percent'] = df_features['atr']
+                    else:
+                        df_features[feat] = 0.0
+
+            # ۴. مرتب‌سازی دقیق ستون‌ها و تبدیل به float32 (بسیار مهم برای رفع خطای pointer)
+            df_features = df_features[model_features].fillna(0.0)
+            df_features = df_features.astype(np.float32)
+
+            # ۵. اطمینان از اینکه دیتافریم خالی نیست
             if df_features.empty or df_features.shape[1] == 0:
                 print(f"⚠️ هشدار: داده ورودی برای {symbol} خالی است.")
                 return False
 
+            # ۶. پیش‌بینی
             prediction = model.predict(df_features)
+            
+            # خروجی 1 به معنای تایید پوزیشن است
             return bool(prediction[0] == 1)
+
         except Exception as e:
+            # چاپ ارور دقیق برای دیباگ
             print(f"❌ خطای بحرانی در پیش‌بینی {symbol}: {e}")
+            # بازگشت ایمن در صورت شکست
             return False
-
-    def predict_probability(self, symbol, current_features):
-        """
-        دریافت ویژگی‌ها و پیش‌بینی درصد اطمینان مدل (Probability) 
-        برای اتصال به سیستم استراتژی امتیازدهی
-        """
-        # اگر مدلی نیست، درصد خنثی ۵۰٪ برگردان تا استراتژی با اندیکاتورها تصمیم بگیرد
-        if symbol not in self.models:
-            return 50.0
-
-        try:
-            model = self.models[symbol]
-            df_features = self._prepare_features(current_features, model)
-            
-            if df_features.empty or df_features.shape[1] == 0:
-                return 0.0
-
-            # استخراج احتمال کلاس ۱ (تایید سیگنال)
-            probas = model.predict_proba(df_features)
-            probability_score = float(probas[0][1]) * 100.0
-            
-            return probability_score
-            
-        except Exception as e:
-            print(f"❌ خطای بحرانی در پیش‌بینی احتمال {symbol}: {e}")
-            return 0.0

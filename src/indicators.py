@@ -1,13 +1,13 @@
 # ---------------------------------------------------------
 # FILE NAME: indicators.py
-# FILE PATH: src/indicators.py
+# FILE PATH: /src/indicators.py
 # ---------------------------------------------------------
 import pandas as pd
 import numpy as np
 import config
 
 def calculate_indicators(df):
-    """📊 محاسبه سنسورهای هوشمند (با اصلاح قطعی باگ RSI، بدون فیلتر حجم و بهینه‌شده برای یادگیری ماشین)"""
+    """📊 محاسبه سنسورهای هوشمند (با اصلاح قطعی باگ RSI و بدون فیلتر حجم)"""
     if df is None or df.empty or len(df) < 50:
         return df
 
@@ -17,7 +17,7 @@ def calculate_indicators(df):
     # ۲. 🛠️ اصلاح قطعی و ریاضی باگ RSI
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    # برای محاسبه میانگین ضررها فقط قیمت‌های منفی بررسی می‌شوند
+    # اصلاح شد: برای محاسبه میانگین ضررها فقط قیمت‌های منفی بررسی می‌شوند
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / (loss + 1e-10)
     df['feat_rsi'] = 100 - (100 / (1 + rs))
@@ -52,14 +52,4 @@ def calculate_indicators(df):
     df['feat_rsi_momentum'] = df['feat_rsi'].diff().fillna(0.0)
     df['feat_body_ratio'] = (abs(df['Close'] - df['Open']) / (df['High'] - df['Low'] + 1e-10))
 
-    # ۷. 🛡️ لایه محافظتی اختصاصی برای مدل‌های ماشین لرنینگ
-    # تبدیل بی‌نهایت‌های ناشی از تقسیم بر صفر یا نوسانات شدید به NaN و سپس صفر
-    df.replace([np.inf, -np.inf], np.nan, inplace=True)
-    df.fillna(0.0, inplace=True)
-    
-    # برش (Clipping) مقادیر افراطی برای جلوگیری از خطای وزن‌ها در شبکه‌های عصبی
-    df['feat_ema_deviation'] = df['feat_ema_deviation'].clip(lower=-100.0, upper=100.0)
-    df['feat_rsi_momentum'] = df['feat_rsi_momentum'].clip(lower=-100.0, upper=100.0)
-    df['feat_atr_percent'] = df['feat_atr_percent'].clip(lower=0.0, upper=50.0)
-
-    return df
+    return df.fillna(0.0)
