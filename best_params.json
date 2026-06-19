@@ -15,7 +15,7 @@
     },
     "SOL/USDT": {
         "adx_threshold": 20,
-        "swing_window": 10,
+        "swing_window": 7,
         "tp_ratio": 1.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
