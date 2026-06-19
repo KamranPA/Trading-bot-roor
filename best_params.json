@@ -1,27 +1,27 @@
 {
     "BTC/USDT": {
-        "adx_threshold": 10,
-        "swing_window": 3,
+        "adx_threshold": 20,
+        "swing_window": 10,
         "tp_ratio": 1.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
     },
     "ETH/USDT": {
-        "adx_threshold": 10,
-        "swing_window": 7,
+        "adx_threshold": 20,
+        "swing_window": 10,
         "tp_ratio": 1.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
     },
     "SOL/USDT": {
-        "adx_threshold": 20,
-        "swing_window": 3,
-        "tp_ratio": 2.5,
+        "adx_threshold": 22,
+        "swing_window": 10,
+        "tp_ratio": 1.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
     },
     "BCH/USDT": {
-        "adx_threshold": 10,
+        "adx_threshold": 20,
         "swing_window": 7,
         "tp_ratio": 1.5,
         "sl_ratio": 1.0,
@@ -40,16 +40,16 @@
         "sl_ratio": 1.0
     },
     "DOT/USDT": {
-        "adx_threshold": 10,
-        "swing_window": 5,
-        "tp_ratio": 2.0,
+        "adx_threshold": 15,
+        "swing_window": 3,
+        "tp_ratio": 1.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
     },
     "LINK/USDT": {
-        "adx_threshold": 10,
-        "swing_window": 7,
-        "tp_ratio": 2.0,
+        "adx_threshold": 15,
+        "swing_window": 3,
+        "tp_ratio": 1.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
     },
@@ -60,29 +60,29 @@
         "sl_ratio": 1.0
     },
     "AVAX/USDT": {
-        "adx_threshold": 10,
-        "swing_window": 7,
-        "tp_ratio": 2.0,
+        "adx_threshold": 15,
+        "swing_window": 3,
+        "tp_ratio": 1.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
     },
     "XRP/USDT": {
-        "adx_threshold": 10,
+        "adx_threshold": 15,
         "swing_window": 3,
         "tp_ratio": 1.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
     },
     "LTC/USDT": {
-        "adx_threshold": 15,
-        "swing_window": 7,
-        "tp_ratio": 2.5,
+        "adx_threshold": 25,
+        "swing_window": 5,
+        "tp_ratio": 1.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
     },
     "ATOM/USDT": {
-        "adx_threshold": 10,
-        "swing_window": 5,
+        "adx_threshold": 15,
+        "swing_window": 3,
         "tp_ratio": 1.5,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
