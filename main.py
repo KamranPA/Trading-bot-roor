@@ -129,7 +129,8 @@ def run_auto_optimization():
         count = database.get_open_positions_count()
         if count > 0 and count % 50 == 0:
             logging.info("⚙️ سیستم به حد نصاب رسید: اجرای پروسه ارتقای خودکار...")
-            optimizer.optimize_all(mode="live")
+            # --- تغییر اصلی برای رفع قفل دیتابیس: استفاده از backtest به جای live ---
+            optimizer.optimize_all(mode="backtest")
     except Exception as e:
         logging.error(f"⚠️ خطا در پروسه خودارتقایی: {e}")
 
