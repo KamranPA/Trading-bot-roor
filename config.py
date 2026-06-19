@@ -1,12 +1,13 @@
 # ---------------------------------------------------------
-# FILE PATH: config.py (v9.3 - Dual Architecture: Cloud + GitHub Backtest)
+# FILE PATH: config.py (v9.1 - Cloud Aligned)
 # ---------------------------------------------------------
 import os
 
 # تعیین مسیر پایه پروژه (Root Directory)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# 📂 مسیرهای دیتابیس محلی (SQLite) برای بک‌تست روی گیت‌هاب
+# 🛠️ توجه: مسیرهای دیتابیس محلی (SQLite) غیرفعال شدند چون ربات اکنون از DATABASE_URL (PostgreSQL) استفاده می‌کند.
+# DB_NAME, DB_PATH_LIVE و DB_PATH_BACKTEST صرفاً جهت حفظ ساختار باقی مانده‌اند.
 DB_NAME = "trading_bot.db"
 DB_PATH_LIVE = os.path.join(BASE_DIR, "data", DB_NAME)
 DB_NAME_BACKTEST = "trading_bot_backtest.db"
@@ -17,10 +18,10 @@ TIMEFRAME = "4h"
 CANDLES_LIMIT = 500    
 
 # تنظیمات معاملاتی پایه و مدیریت ریسک
-MAX_OPEN_POSITIONS = 10
+MAX_OPEN_POSITIONS = 3
 ADX_THRESHOLD = 15.0   
 SWING_WINDOW = 3       
-TOTAL_CAPITAL = 10000.0
+TOTAL_CAPITAL = 1000.0
 RISK_PERCENT = 1.0
 
 # نسبت‌های پیش‌فرض مدیریت پوزیشن
@@ -28,18 +29,11 @@ TP_RATIO = 1.5
 SL_RATIO = 1.0
 RISK_MULTIPLIER = 1.0
 
-# 🛡️ لایه‌های محافظتی ریسک (گاردریل برای نوسانات شدید)
-MAX_SL_PERCENT = 0.03            # حداکثر فاصله مجاز حد ضرر (۳ درصد از قیمت ورود)
-MAX_POSITION_SIZE_PCT = 0.10     # حداکثر سرمایه درگیر در هر معامله (۱۰ درصد کل سرمایه)
-
-# 🧠 آستانه پیش‌فرض تایید هوش مصنوعی (درصد اطمینان)
-AI_PROBABILITY_THRESHOLD = 65.0  
-
-# وزن‌های سیستم امتیازدهی استراتژی (سینک شده با لاجیک جدید در strategy.py)
-WEIGHT_AI = 40
-WEIGHT_RSI = 20
-WEIGHT_ADX = 20
-WEIGHT_EMA = 20
+# وزن‌های سیستم امتیازدهی استراتژی
+WEIGHT_RSI = 30
+WEIGHT_ADX = 25
+WEIGHT_EMA = 25
+WEIGHT_AI = 20
 
 # حداقل امتیاز کل (Total Score) مجاز برای صادر شدن سیگنال ورود لایو
 MIN_REQUIRED_SCORE = 60
