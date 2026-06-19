@@ -1,4 +1,4 @@
-name: Run Backtester and Optimizer
+Name: Run Backtester and Optimizer
 
 on:
   workflow_dispatch:
@@ -56,11 +56,13 @@ jobs:
           ls -l backtest_table_summary.csv || echo "Warning: CSV not found"
           ls -l best_params.json || echo "Warning: JSON not found"
           
-          # ۷. کامیت اجباری (استفاده از نقطه برای پوشش کامل فایل‌های جدید و تغییر یافته)
+          # ۷. اضافه کردن اجباری فایل‌ها و کامیت (حتی اگر در gitignore باشند)
+          git add -f backtest_table_summary.csv
+          git add -f best_params.json
           git add .
           
-          # ثبت تغییرات با زمان فعلی
-          git commit -m "Auto-update: Syncing backtest results $(date +'%Y-%m-%d %H:%M:%S')"
+          # ثبت تغییرات با زمان فعلی (استفاده از || برای جلوگیری از خطا در صورت نبود تغییر جدید)
+          git commit -m "Auto-update: Syncing backtest results $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
           
           # ۸. ارسال به ریپازیتوری با زور
           git push origin HEAD:${{ github.ref_name }} --force
