@@ -16,7 +16,8 @@ import config
 from src import indicators, strategy_utils
 from src.brain import TradingBrain
 
-def evaluate_parameters(symbol, df, adx_th, swing_w):
+# --- تغییر ۱: اضافه شدن tp_r به ورودی تابع ---
+def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r):
     """
     ارزیابی سریع ترکیب پارامترها بر روی دیتای بکتست با ساختار دیکشنری برای LightGBM
     این تابع هسته اصلی تست استراتژی است و تمامی پارامترها را بررسی می‌کند.
@@ -122,7 +123,8 @@ def evaluate_parameters(symbol, df, adx_th, swing_w):
                 sl_dist = dynamic_sl_dist
                 
             stop_loss = entry_price - sl_dist
-            tp2 = entry_price + (sl_dist * 2)
+            # --- تغییر ۲: استفاده از tp_r به جای عدد ثابت ۲ ---
+            tp2 = entry_price + (sl_dist * tp_r)
             
         elif low_price < last_swing_low and is_bearish_momentum and ai_approved:
             is_in_position = True
@@ -134,7 +136,8 @@ def evaluate_parameters(symbol, df, adx_th, swing_w):
                 sl_dist = dynamic_sl_dist
                 
             stop_loss = entry_price + sl_dist
-            tp2 = entry_price - (sl_dist * 2)
+            # --- تغییر ۳: استفاده از tp_r به جای عدد ثابت ۲ ---
+            tp2 = entry_price - (sl_dist * tp_r)
 
     return ai_total_pnl, ai_total_trades
 
@@ -145,6 +148,8 @@ def optimize_all_symbols():
     # دامنه‌های جستجو برای پارامترها
     adx_options = [10, 15, 20]
     swing_options = [3, 5, 7]
+    # --- تغییر ۴: اضافه کردن دامنه جستجو برای ضریب سود ---
+    tp_options = [1.5, 2.0, 2.5]
     
     best_params_dict = {}
     
@@ -173,26 +178,31 @@ def optimize_all_symbols():
         best_pnl = -99999.0
         best_adx = config.ADX_THRESHOLD
         best_swing = config.SWING_WINDOW
+        best_tp_ratio = 1.5 # مقدار پیش‌فرض
         
         for adx_th in adx_options:
             for swing_w in swing_options:
-                pnl, trades = evaluate_parameters(symbol, df, adx_th, swing_w)
-                
-                # شرط ترید حداقلی
-                if trades >= 2 and pnl > best_pnl:
-                    best_pnl = pnl
-                    best_adx = adx_th
-                    best_swing = swing_w
+                # --- تغییر ۵: حلقه تست برای یافتن بهترین ضریب سود ---
+                for tp_r in tp_options:
+                    pnl, trades = evaluate_parameters(symbol, df, adx_th, swing_w, tp_r)
                     
-        print(f"🎯 بهترین تنظیمات برای {symbol} -> ADX: {best_adx} | Swing Window: {best_swing} | سود فاز تست: {best_pnl:.2f}%")
+                    # شرط ترید حداقلی
+                    if trades >= 2 and pnl > best_pnl:
+                        best_pnl = pnl
+                        best_adx = adx_th
+                        best_swing = swing_w
+                        best_tp_ratio = tp_r
+                        
+        print(f"🎯 بهترین تنظیمات برای {symbol} -> ADX: {best_adx} | Swing: {best_swing} | TP Ratio: {best_tp_ratio} | سود: {best_pnl:.2f}%")
         
         if symbol not in best_params_dict:
             best_params_dict[symbol] = {}
             
+        # --- تغییر ۶: ذخیره ضریب واقعی پیدا شده به جای 1.5 ثابت ---
         best_params_dict[symbol].update({
             "adx_threshold": int(best_adx),
             "swing_window": int(best_swing),
-            "tp_ratio": 1.5,
+            "tp_ratio": float(best_tp_ratio),
             "sl_ratio": 1.0,
             "risk_multiplier": 1.0
         })
