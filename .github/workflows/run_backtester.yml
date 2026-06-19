@@ -1,4 +1,4 @@
-Name: Run Backtester and Optimizer
+name: Run Backtester and Optimizer
 
 on:
   workflow_dispatch:
