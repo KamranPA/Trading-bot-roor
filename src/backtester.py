@@ -17,7 +17,10 @@ from src.brain import TradingBrain
 
 def init_backtest_db(db_path):
     """اطمینان از وجود ساختار جدول سیگنال‌ها در دیتابیس بکتست با ستون‌های جدید امتیازدهی"""
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    # در گیت‌هاب اکشن، اگر مسیر دیتابیس روی حافظه موقت (RAM) باشد، خطاها رفع می‌شوند
+    if db_path != ":memory:":
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -263,8 +266,13 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance, adx_th, swing_w, tp
     }
 
 def run_all_backtests():
-    db_path = config.DB_PATH_BACKTEST
-    # --- تغییر ۱: لود تنظیمات ---
+    # تغییر اصلی: استفاده از :memory: برای جلوگیری از قفل شدن دیتابیس در گیت‌هاب
+    db_path = ":memory:" 
+    
+    init_backtest_db(db_path)
+    print("📊 شروع پروسه دوفازی بکتست: محاسبات تمیز RSI + هماهنگی با هوش مصنوعی...")
+    
+    # لود تنظیمات...
     params_file = os.path.join(os.getcwd(), "best_params.json")
     best_params = {}
     if os.path.exists(params_file):
@@ -273,30 +281,17 @@ def run_all_backtests():
                 best_params = json.load(f)
             except Exception as e:
                 print(f"⚠️ خطا در خواندن best_params.json: {e}")
-    # ---------------------------
-    
-    if os.path.exists(db_path):
-        try:
-            os.remove(db_path)
-        except:
-            pass
-
-    init_backtest_db(db_path)
-    print("📊 شروع پروسه دوفازی بکتست: محاسبات تمیز RSI + هماهنگی با هوش مصنوعی...")
     
     brain = TradingBrain()
     summary_results = []
     
     for s in config.WATCHLIST:
-        # --- تغییر ۲: استخراج پارامترها به همراه tp_ratio ---
         p = best_params.get(s, {})
         adx_th = p.get("adx_threshold", config.ADX_THRESHOLD)
         swing_w = p.get("swing_window", config.SWING_WINDOW)
-        # اگر در فایل جیسون پیدا نشد، به صورت پیش‌فرض روی 1.5 تنظیم می‌شود
         tp_ratio = p.get("tp_ratio", 1.5)
-        # ----------------------------------------------------
+        
         try:
-            # --- تغییر ۳: ارسال پارامترها به تابع ---
             res = run_backtest_for_symbol(s, db_path, brain, adx_th, swing_w, tp_ratio)
             if res:
                 summary_results.append(res)
@@ -306,7 +301,6 @@ def run_all_backtests():
     if summary_results:
         report_path = os.path.join(os.getcwd(), "backtest_table_summary.csv")
         df_final = pd.DataFrame(summary_results)
-        # اضافه کردنِ مهرِ زمانی برای ایجاد تغییر در فایل و رفع مشکلِ No changes detected
         df_final['run_timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         df_final.to_csv(report_path, index=False, encoding='utf-8')
         print(f"✅ فایل خلاصه نتایج نهایی در ریشه پروژه ذخیره شد: {report_path}")
