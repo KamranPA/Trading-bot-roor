@@ -60,9 +60,9 @@
         "sl_ratio": 1.0
     },
     "AVAX/USDT": {
-        "adx_threshold": 15,
+        "adx_threshold": 10,
         "swing_window": 7,
-        "tp_ratio": 2.5,
+        "tp_ratio": 2.0,
         "sl_ratio": 1.0,
         "risk_multiplier": 1.0
     },
