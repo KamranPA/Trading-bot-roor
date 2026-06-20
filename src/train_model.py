@@ -1,5 +1,10 @@
 # ---------------------------------------------------------
-# FILE PATH: src/train_model.py (v9.3 - PostgreSQL aligned)
+# FILE PATH: src/train_model.py (v10.0 - Backtest-First Training)
+# تغییرات نسبت به نسخه قبلی:
+#   1. اولویت آموزش: بکتست → لایو (جبران کم‌بود داده لایو)
+#   2. ادغام داده‌های بکتست CSV با داده‌های لایو PostgreSQL
+#   3. فیلتر صحیح وضعیت: SL_HIT، TP_HIT و CLOSED همه دیده می‌شن
+#   4. حداقل نمونه‌ها از ۱۰ به ۳۰ افزایش یافت برای مدل قوی‌تر
 # ---------------------------------------------------------
 import pandas as pd
 import numpy as np
@@ -14,100 +19,205 @@ except ImportError:
     print("CRITICAL: LightGBM is not installed.")
     sys.exit(1)
 
-# تنظیم مسیر پایه
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 import config
-from src import database
 
-def get_data_from_db(symbol):
-    """استخراج امن داده‌های معاملات بسته‌شده از دیتابیس ابری (PostgreSQL)."""
+logger = logging.getLogger(__name__)
+
+FEATURES      = list(config.AI_FEATURES)
+MIN_SAMPLES   = 30   # حداقل نمونه برای آموزش معنادار
+BACKTEST_CSV  = os.path.join(BASE_DIR, 'data', 'backtest_trades.csv')
+
+
+# ---------------------------------------------------------------------------
+# منابع داده
+# ---------------------------------------------------------------------------
+
+def _load_backtest_data(symbol: str) -> pd.DataFrame:
+    """خواندن معاملات بسته‌شده از فایل CSV بکتست."""
+    if not os.path.exists(BACKTEST_CSV):
+        return pd.DataFrame()
     try:
-        query = "SELECT * FROM signals WHERE pair = %s AND status = 'CLOSED'"
-        with database.get_connection() as conn:
-            df_res = pd.read_sql_query(query, conn, params=(symbol,))
-        df_res.columns = [col.lower() for col in df_res.columns]
-        return df_res
+        df = pd.read_csv(BACKTEST_CSV, encoding='utf-8')
+        df = df[df['pair'] == symbol].copy()
+        df = df[df['status'].isin(['SL_HIT', 'TP_HIT', 'EXPIRED', 'CLOSED'])].copy()
+        df = df.dropna(subset=['pnl_percent'])
+        logger.info("بکتست %s: %d معامله بارگذاری شد", symbol, len(df))
+        return df
     except Exception as e:
-        logging.error(f"❌ خطای دیتابیس در استخراج {symbol}: {e}")
+        logger.error("خطا در خواندن CSV بکتست برای %s: %s", symbol, e)
         return pd.DataFrame()
 
-def train_model_for_symbol(symbol, mode="backtest"):
-    # --- ۱. تجمیع داده‌ها (حفظ منطق اصلی) ---
-    # در دیتابیس ابری، تمام داده‌ها در یک جدول هستند، اما برای حفظ منطقِ ماهانه شما:
-    df = get_data_from_db(symbol)
-    
+
+def _load_live_data(symbol: str) -> pd.DataFrame:
+    """خواندن معاملات بسته‌شده از PostgreSQL (داده لایو)."""
+    try:
+        from src import database
+        query = """
+            SELECT * FROM signals
+            WHERE pair = %s
+              AND status IN ('CLOSED', 'SL_HIT', 'TP_HIT')
+              AND pnl_percent IS NOT NULL
+        """
+        with database.get_connection() as conn:
+            df = pd.read_sql_query(query, conn, params=(symbol,))
+        df.columns = [c.lower() for c in df.columns]
+        logger.info("لایو %s: %d معامله بارگذاری شد", symbol, len(df))
+        return df
+    except Exception as e:
+        logger.warning("خواندن داده لایو برای %s ناموفق: %s", symbol, e)
+        return pd.DataFrame()
+
+
+def _merge_sources(bt_df: pd.DataFrame, live_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    ادغام داده‌های بکتست و لایو.
+    - بکتست: منبع اصلی (حجم بالا)
+    - لایو: تکمیل‌کننده (رفتار واقعی بازار)
+    تکراری‌ها بر اساس entry_time + pair حذف می‌شن.
+    """
+    frames = []
+    if not bt_df.empty:
+        bt_df = bt_df.copy()
+        bt_df['source'] = 'backtest'
+        frames.append(bt_df)
+    if not live_df.empty:
+        live_df = live_df.copy()
+        live_df['source'] = 'live'
+        frames.append(live_df)
+
+    if not frames:
+        return pd.DataFrame()
+
+    combined = pd.concat(frames, ignore_index=True)
+
+    # اولویت لایو در صورت تکرار زمانی
+    if 'entry_time' in combined.columns:
+        combined = combined.sort_values('source', ascending=False)
+        combined = combined.drop_duplicates(subset=['pair', 'entry_time'], keep='first')
+
+    return combined.reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# آموزش مدل
+# ---------------------------------------------------------------------------
+
+def train_model_for_symbol(symbol: str) -> bool:
+    """
+    آموزش مدل AI برای یک ارز.
+    منبع اصلی: بکتست CSV — منبع ثانویه: لایو PostgreSQL.
+
+    Returns:
+        True در صورت موفقیت
+    """
+    # ۱. جمع‌آوری داده از هر دو منبع
+    bt_df   = _load_backtest_data(symbol)
+    live_df = _load_live_data(symbol)
+    df      = _merge_sources(bt_df, live_df)
+
     if df.empty:
-        print(f"⚠️ دیتایی برای {symbol} یافت نشد.")
-        return
+        logger.warning("⚠️ هیچ داده‌ای برای %s یافت نشد (نه بکتست، نه لایو).", symbol)
+        return False
 
-    if 'pnl_percent' not in df.columns:
-        print(f"⚠️ ستون pnl_percent در داده‌های {symbol} یافت نشد.")
-        return
+    # ۲. بررسی وجود همه فیچرها
+    missing = [f for f in FEATURES if f not in df.columns]
+    if missing:
+        logger.warning("⚠️ فیچرهای ناموجود برای %s: %s", symbol, missing)
+        return False
 
-    # --- ۲. پیش‌پردازش کامل ---
-    features = list(config.AI_FEATURES)
-
-    missing_feats = [f for f in features if f not in df.columns]
-    if missing_feats:
-        print(f"⚠️ برخی ویژگی‌ها در دیتابیس یافت نشدند: {missing_feats}")
-        return
-
+    # ۳. ساخت برچسب هدف (۱=سود، ۰=ضرر)
     df['target_label'] = np.where(df['pnl_percent'] > 0, 1, 0)
-    
-    if df['target_label'].nunique() < 2:
-        print(f"⚠️ مدل {symbol} قابل آموزش نیست (تنوع داده کم است).")
-        return
-    
-    df = df.dropna(subset=features + ['target_label'])
-    # استفاده از timestamp برای مرتب‌سازی (مطمئن شوید در دیتابیس ابری این ستون موجود است)
-    df = df.sort_values(by='timestamp', ascending=True)
-    df = df.drop_duplicates(subset=['timestamp'])
-    
-    if len(df) < 10: 
-        print(f"⚠️ معاملات کافی برای ارتقای {symbol} موجود نیست ({len(df)}).")
-        return
+    df = df.dropna(subset=FEATURES + ['target_label'])
 
-    X = df[features]
+    if df['target_label'].nunique() < 2:
+        logger.warning(
+            "⚠️ %s: همه %d معامله یک‌طرفه هستند (همه سود یا همه ضرر). "
+            "مدل آموزش نمی‌بیند.",
+            symbol, len(df)
+        )
+        return False
+
+    if len(df) < MIN_SAMPLES:
+        logger.warning(
+            "⚠️ %s: فقط %d نمونه موجود است (حداقل %d لازم است).",
+            symbol, len(df), MIN_SAMPLES
+        )
+        return False
+
+    # ۴. مرتب‌سازی زمانی
+    time_col = next((c for c in ['entry_time', 'timestamp'] if c in df.columns), None)
+    if time_col:
+        df = df.sort_values(by=time_col, ascending=True)
+    df = df.reset_index(drop=True)
+
+    X = df[FEATURES]
     y = df['target_label'].to_numpy()
 
-    # --- ۳. تقسیم داده‌ها ---
-    split_idx = int(len(X) * 0.8)
-    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-    y_train, y_test = y[:split_idx], y[split_idx:]
+    # ۵. تقسیم train/test (80/20)
+    split_idx        = max(int(len(X) * 0.8), 1)
+    X_train, X_test  = X.iloc[:split_idx], X.iloc[split_idx:]
+    y_train, y_test  = y[:split_idx], y[split_idx:]
 
-    if len(X_test) != len(y_test) or len(X_train) != len(y_train):
-        print(f"⚠️ خطای داخلی عدم تطابق اندکس‌ها؛ انصراف از آموزش برای {symbol}")
-        return
-
-    # --- ۴. آموزش مدل ---
+    # ۶. آموزش LightGBM
     model = LGBMClassifier(
-        n_estimators=100, learning_rate=0.03, max_depth=5,
-        num_leaves=15, min_child_samples=15, subsample=0.7,
-        colsample_bytree=0.8, class_weight='balanced', 
-        random_state=42, n_jobs=1, verbose=-1
+        n_estimators=200,
+        learning_rate=0.02,
+        max_depth=5,
+        num_leaves=20,
+        min_child_samples=10,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        class_weight='balanced',
+        random_state=42,
+        n_jobs=1,
+        verbose=-1,
     )
-    
+
     if len(np.unique(y_test)) < 2:
         model.fit(X_train, y_train)
     else:
         model.fit(X_train, y_train, eval_set=[(X_test, y_test)])
 
-    # --- ۵. ذخیره‌سازی ---
-    safe_symbol_name = symbol.replace('/', '_')
-    models_dir = os.path.join(BASE_DIR, "src", "models")
+    # ۷. ذخیره مدل
+    safe_name  = symbol.replace('/', '_')
+    models_dir = os.path.join(BASE_DIR, 'src', 'models')
     os.makedirs(models_dir, exist_ok=True)
-    model_path = os.path.join(models_dir, f"{safe_symbol_name}_model.pkl")
-    
+    model_path = os.path.join(models_dir, f"{safe_name}_model.pkl")
     joblib.dump(model, model_path)
-    print(f"🎯 مدل {symbol} با موفقیت ارتقا یافت.")
 
-def train_all(mode="backtest"):
+    wins  = int(y.sum())
+    total = len(y)
+    logger.info(
+        "✅ مدل %s آموزش دید | نمونه: %d (بکتست: %d + لایو: %d) | Win Rate داده: %.1f%%",
+        symbol, total, len(bt_df), len(live_df), wins / total * 100
+    )
+    print(
+        f"🎯 مدل {symbol} آموزش دید | "
+        f"نمونه: {total} (بکتست: {len(bt_df)} + لایو: {len(live_df)}) | "
+        f"Win Rate داده: {wins/total*100:.1f}%"
+    )
+    return True
+
+
+def train_all() -> None:
+    """آموزش مدل برای تمام ارزهای WATCHLIST."""
+    success, failed = [], []
     for symbol in config.WATCHLIST:
-        train_model_for_symbol(symbol, mode=mode)
+        ok = train_model_for_symbol(symbol)
+        (success if ok else failed).append(symbol)
+
+    print(f"\n📊 نتیجه آموزش:")
+    print(f"   ✅ موفق  ({len(success)}): {', '.join(success) or '-'}")
+    print(f"   ❌ ناموفق ({len(failed)}): {', '.join(failed) or '-'}")
+
 
 if __name__ == "__main__":
-    mode = "monthly" if "--monthly" in sys.argv else "backtest"
-    train_all(mode=mode)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+    )
+    train_all()
