@@ -2,14 +2,19 @@ name: Run Optimizer
 
 on:
   schedule:
-    - cron: '0 0 * * 0' # هر هفته یکشنبه ساعت 00:00 اجرا شود
-  workflow_dispatch: # امکان اجرای دستی از تب Actions گیت‌هاب
+    - cron: '0 0 * * 0' # اجرای خودکار در اولین ساعت یکشنبه‌ها
+  workflow_dispatch: # اجازه اجرای دستی از پنل گیت‌هاب
 
 jobs:
-  build:
+  optimize:
     runs-on: ubuntu-latest
+    
+    # تنظیمات دسترسی برای نوشتن روی مخزن جهت آپدیت best_params.json
+    permissions:
+      contents: write
+      
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v3
 
       - name: Set up Python
@@ -19,17 +24,27 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pandas numpy scikit-learn # سایر کتابخانه‌های مورد نیاز
-
-      - name: Run Optimizer
+          python -m pip install --upgrade pip
+          # نصب کتابخانه‌های ضروری به صورت باینری برای جلوگیری از خطاهای کامپایل
+          pip install pandas numpy scikit-learn psycopg2-binary
+          
+      - name: Run Optimizer Script
         run: python src/optimizer.py
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }} # برای اتصال به دیتابیس ابری
+          # اینجا دیتابیسِ کلود (Supabase) را معرفی می‌کنیم
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # این متغیر به کد شما می‌گوید که در محیط گیت‌هاب است
+          IS_GITHUB_ACTION: "true"
 
-      - name: Commit changes
+      - name: Commit and Push changes
         run: |
-          git config --global user.name 'github-actions'
-          git config --global user.email 'github-actions@github.com'
-          git add best_params.json
-          git commit -m "Auto-update optimal parameters"
-          git push
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          # بررسی اینکه آیا فایلی تغییر کرده یا خیر
+          if [[ -n $(git status -s) ]]; then
+            git add best_params.json
+            git commit -m "Auto-update: Optimized trading parameters [skip ci]"
+            git push
+          else
+            echo "No changes to commit."
+          fi
