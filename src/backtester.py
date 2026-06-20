@@ -318,6 +318,7 @@ def run_all_backtests() -> dict:
     """
     اجرای بکتست برای کل WATCHLIST با استفاده از دیتای CSV (data/4h) و مدل AI.
     نتایج در data/backtest_trades.csv و خلاصه در backtest_table_summary.csv ذخیره می‌شود.
+    در پایان، داده‌ها در data/trading_bot_backtest.db (SQLite) نیز ذخیره می‌شوند.
     """
     from src.brain import TradingBrain
     from src import csv_store
@@ -347,6 +348,10 @@ def run_all_backtests() -> dict:
 
         params = all_params.get(symbol, {})
         results[symbol] = run_backtest(df_raw, symbol, params, model=brain)
+
+    # ۶. صادر کردن نتایج به SQLite (مورد نیاز workflow برای git add و upload artifact)
+    from src.csv_store import export_to_sqlite
+    export_to_sqlite()
 
     return results
 
