@@ -7,10 +7,17 @@
 #   4. جلوگیری از Look-Ahead Bias: فقط داده قبل از کندل فعلی استفاده می‌شود
 #   5. لاگ پیشرفت
 # ---------------------------------------------------------
+import os
+import sys
+import json
 import logging
 from datetime import datetime
 
 import pandas as pd
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
 import config
 from src import indicators, strategy_utils
@@ -26,7 +33,7 @@ def run_backtest(
     pair: str,
     params: dict,
     model=None,
-    min_score: float = 60.0,
+    min_score: float = None,
 ) -> dict:
     """
     بکتست استراتژی Swing Breakout روی داده تاریخی.
@@ -45,12 +52,22 @@ def run_backtest(
         logger.warning("داده ناکافی برای بکتست %s (طول: %s)", pair, len(df_raw) if df_raw is not None else 0)
         return _empty_result(pair)
 
+    if min_score is None:
+        min_score = float(getattr(config, 'MIN_REQUIRED_SCORE', 60))
+
     adx_thresh   = float(params.get('ADX_THRESHOLD', config.ADX_THRESHOLD))
-    tp_ratio     = float(params.get('TP_RATIO',      1.5))
-    sl_ratio     = float(params.get('SL_RATIO',      1.0))
-    ai_threshold = float(params.get('AI_THRESHOLD',  65.0))
+    tp_ratio     = float(params.get('TP_RATIO',      config.TP_RATIO))
+    sl_ratio     = float(params.get('SL_RATIO',      config.SL_RATIO))
+    ai_threshold = float(params.get('AI_THRESHOLD',  getattr(config, 'AI_THRESHOLD', 65.0)))
     swing_window = int(params.get('SWING_WINDOW',    config.SWING_WINDOW))
     MAX_SL_PCT   = float(getattr(config, 'MAX_SL_PERCENT', 0.03))
+
+    # وزن‌های امتیازدهی از config (هماهنگ با استراتژی لایو)
+    w_ai  = float(getattr(config, 'WEIGHT_AI',  40))
+    w_adx = float(getattr(config, 'WEIGHT_ADX', 20))
+    w_rsi = float(getattr(config, 'WEIGHT_RSI', 20))
+    w_ema = float(getattr(config, 'WEIGHT_EMA', 20))
+    w_sum = (w_ai + w_adx + w_rsi + w_ema) or 100.0
 
     # اندیکاتورها روی کل دیتا محاسبه می‌شوند
     df_full = indicators.calculate_indicators(df_raw.copy())
@@ -149,7 +166,9 @@ def run_backtest(
                 logger.debug("AI error در بکتست %s کندل %d: %s", pair, i, e)
                 ai_approved = False
 
-        total_score = ai_score * 0.40 + adx_score * 0.20 + rsi_score * 0.20 + ema_score * 0.20
+        total_score = (
+            ai_score * w_ai + adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema
+        ) / w_sum
 
         if total_score < min_score or not ai_approved:
             continue
@@ -280,3 +299,61 @@ def _empty_result(pair: str) -> dict:
         'max_drawdown': 0.0, 'best_trade': 0.0, 'worst_trade': 0.0,
         'trades': [],
     }
+
+
+def _load_best_params() -> dict:
+    """خواندن best_params.json از ریشه پروژه (در صورت وجود)."""
+    params_file = os.path.join(BASE_DIR, 'best_params.json')
+    if not os.path.exists(params_file):
+        return {}
+    try:
+        with open(params_file, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error("خطا در خواندن best_params.json: %s", e)
+        return {}
+
+
+def run_all_backtests() -> dict:
+    """
+    اجرای بکتست برای کل WATCHLIST با استفاده از دیتای CSV (data/4h) و مدل AI.
+    نتایج در data/backtest_trades.csv و خلاصه در backtest_table_summary.csv ذخیره می‌شود.
+    """
+    from src.brain import TradingBrain
+    from src import csv_store
+
+    # شروع از یک فایل تمیز تا معاملات اجراهای قبلی تکرار نشوند
+    if os.path.exists(csv_store.BACKTEST_TRADES_CSV):
+        try:
+            os.remove(csv_store.BACKTEST_TRADES_CSV)
+        except OSError as e:
+            logger.warning("حذف فایل بکتست قبلی ممکن نشد: %s", e)
+
+    brain = TradingBrain()
+    all_params = _load_best_params()
+    results = {}
+
+    for symbol in getattr(config, 'WATCHLIST', []):
+        safe_name = symbol.replace('/', '_')
+        csv_path = os.path.join(BASE_DIR, 'data', '4h', f"{safe_name}_history.csv")
+        if not os.path.exists(csv_path):
+            logger.warning("فایل دیتای %s یافت نشد: %s", symbol, csv_path)
+            continue
+        try:
+            df_raw = pd.read_csv(csv_path)
+        except Exception as e:
+            logger.error("خطا در خواندن دیتای %s: %s", symbol, e)
+            continue
+
+        params = all_params.get(symbol, {})
+        results[symbol] = run_backtest(df_raw, symbol, params, model=brain)
+
+    return results
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+    )
+    run_all_backtests()

@@ -42,7 +42,7 @@ def format_and_send_signal(signal_data):
     # محاسبه نسبت ریسک به پاداش (R:R Ratio)
     try:
         rr_ratio = round((d['tp2'] - d['entry_price']) / abs(d['entry_price'] - d['stop_loss']), 1)
-    except:
+    except Exception:
         rr_ratio = 0
     
     message = (

@@ -46,14 +46,16 @@ jobs:
         git config --global user.name 'github-actions'
         git config --global user.email 'github-actions@github.com'
         
-        # 🛠️ اصلاح: فقط فایل‌های مدل و پارامترها را اضافه می‌کنیم، نه فایل‌های دیتابیس
-        git add best_params.json models/ 2>/dev/null || echo "No tracked files to add."
+        # فقط فایل‌های مدل و پارامترها را اضافه می‌کنیم؛ مدل‌ها در src/models قرار دارند
+        # و در .gitignore هستند، پس با -f اجباری اضافه می‌شوند.
+        git add best_params.json
+        git add -f src/models/*.pkl 2>/dev/null || echo "No model files to add."
         
         if git diff --cached --quiet; then
           echo "No changes detected."
         else
           git commit -m "🧠 Monthly Brain Upgrade: AI models learned from live trades."
-          git push origin HEAD:${{ github.ref_name }} --force
+          git push origin HEAD:${{ github.ref_name }}
         fi
 
     - name: Send Notification to Telegram

@@ -41,12 +41,7 @@ def calculate_indicators(df):
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)) * 100
     df['feat_adx'] = dx.rolling(window=14).mean().fillna(25.0)
 
-    # ۵. سنسورهای حجمی (کاملا خنثی و بی‌اثر شدند تا نقش فیلتر نداشته باشند)
-    # مقادیر ثابت داده شد تا دیتابیس ارور کمبود ستون ندهد
-    df['feat_vol_ratio'] = 1.0 
-    df['feat_high_volume_session'] = 0.0 
-    
-    # ۶. سنسورهای روند و کندل
+    # ۵. سنسورهای روند و کندل
     df['feat_trend_line'] = np.where(df['Close'] > df['ema_200'], 1.0, 0.0)
     df['feat_ema_deviation'] = ((df['Close'] - df['ema_200']) / df['ema_200']) * 100
     df['feat_rsi_momentum'] = df['feat_rsi'].diff().fillna(0.0)

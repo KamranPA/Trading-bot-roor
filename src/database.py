@@ -7,7 +7,7 @@
 #   2. اصلاح get_last_signal_for_pair: مقایسه timestamp با timezone-aware
 #   3. init_db: ساخت تمام جدول‌های لازم در یک تراکنش
 #   4. save_signal_advanced: اعتبارسنجی direction قبل از درج
-#   5. مدیریت connection pooling با psycopg2
+#   5. بررسی DATABASE_URL در زمان اتصال (نه import) تا importهای جانبی کرش نکنند
 #   6. تمام توابع دارای logging و try/except مستقل
 # ---------------------------------------------------------
 import os
@@ -30,24 +30,31 @@ logger = logging.getLogger(__name__)
 # اتصال به دیتابیس
 # ---------------------------------------------------------------------------
 
-_DATABASE_URL = os.environ.get("DATABASE_URL")
-
-if not _DATABASE_URL:
-    raise EnvironmentError(
-        "متغیر محیطی DATABASE_URL تنظیم نشده است.\n"
-        "مثال: postgresql://user:pass@host:5432/dbname"
-    )
+def _get_database_url() -> str:
+    """خواندن DATABASE_URL در زمان نیاز — تا import این ماژول کرش نکند."""
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        raise EnvironmentError(
+            "متغیر محیطی DATABASE_URL تنظیم نشده است.\n"
+            "مثال: postgresql://user:pass@host:5432/dbname"
+        )
+    return url
 
 
 def _get_connection():
     """اتصال جدید به PostgreSQL — برای هر عملیات مستقل"""
     try:
-        conn = psycopg2.connect(_DATABASE_URL, connect_timeout=10)
+        conn = psycopg2.connect(_get_database_url(), connect_timeout=10)
         conn.autocommit = False
         return conn
     except OperationalError as e:
         logger.critical("اتصال به دیتابیس ناموفق: %s", e)
         raise
+
+
+def get_connection():
+    """اتصال عمومی به دیتابیس (برای اسکریپت‌های جانبی مثل تست اتصال و آنالیز)."""
+    return _get_connection()
 
 
 @contextmanager

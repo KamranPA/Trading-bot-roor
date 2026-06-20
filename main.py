@@ -250,6 +250,6 @@ def run_bot():
 
 
 if __name__ == "__main__":
-    if datetime.datetime.utcnow().hour == 22:
+    if datetime.datetime.now(datetime.timezone.utc).hour == 22:
         heartbeat_job()
     run_bot()

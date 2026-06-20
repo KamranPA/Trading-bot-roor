@@ -29,14 +29,32 @@ TP_RATIO = 1.5
 SL_RATIO = 1.0
 RISK_MULTIPLIER = 1.0
 
-# وزن‌های سیستم امتیازدهی استراتژی
-WEIGHT_RSI = 30
-WEIGHT_ADX = 25
-WEIGHT_EMA = 25
-WEIGHT_AI = 20
+# حداکثر فاصله مجاز حد ضرر نسبت به قیمت ورود (سقف SL)
+MAX_SL_PERCENT = 0.03
+
+# آستانه پیش‌فرض تایید مدل هوش مصنوعی (درصد)
+AI_THRESHOLD = 65.0
+
+# وزن‌های سیستم امتیازدهی استراتژی (مجموع = 100)
+WEIGHT_AI = 40
+WEIGHT_ADX = 20
+WEIGHT_RSI = 20
+WEIGHT_EMA = 20
 
 # حداقل امتیاز کل (Total Score) مجاز برای صادر شدن سیگنال ورود لایو
 MIN_REQUIRED_SCORE = 60
+
+# فهرست استاندارد فیچرهای مدل هوش مصنوعی — تنها منبع حقیقت برای آموزش و استنتاج.
+# این فیچرها هم در جدول signals ذخیره می‌شوند، هم در strategy تولید می‌شوند.
+AI_FEATURES = [
+    'feat_adx',
+    'feat_atr_percent',
+    'feat_rsi',
+    'feat_trend_line',
+    'feat_ema_deviation',
+    'feat_rsi_momentum',
+    'feat_body_ratio',
+]
 
 # لیست کامل ارزهای تحت نظر
 WATCHLIST = [

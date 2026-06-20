@@ -43,9 +43,8 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           
-          # بررسی وجود فایل قبل از کپی و کامیت
-          if [ -f "src/best_params.json" ]; then
-            cp src/best_params.json ./best_params.json
+          # optimizer فایل best_params.json را در ریشه پروژه می‌نویسد
+          if [ -f "best_params.json" ]; then
             git add best_params.json
           fi
           
