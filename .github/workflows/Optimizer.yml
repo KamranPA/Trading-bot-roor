@@ -1,0 +1,35 @@
+name: Run Optimizer
+
+on:
+  schedule:
+    - cron: '0 0 * * 0' # هر هفته یکشنبه ساعت 00:00 اجرا شود
+  workflow_dispatch: # امکان اجرای دستی از تب Actions گیت‌هاب
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install pandas numpy scikit-learn # سایر کتابخانه‌های مورد نیاز
+
+      - name: Run Optimizer
+        run: python src/optimizer.py
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }} # برای اتصال به دیتابیس ابری
+
+      - name: Commit changes
+        run: |
+          git config --global user.name 'github-actions'
+          git config --global user.email 'github-actions@github.com'
+          git add best_params.json
+          git commit -m "Auto-update optimal parameters"
+          git push
