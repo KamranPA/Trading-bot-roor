@@ -5,6 +5,7 @@ import os
 import sys
 import sqlite3
 import pandas as pd
+import json
 
 # اصلاح مسیر اجرای پایتون برای شناسایی ماژول‌ها از ریشه پروژه
 sys.path.append(os.getcwd())
@@ -12,6 +13,34 @@ sys.path.append(os.getcwd())
 import config
 from src import indicators, strategy_utils
 from src.brain import TradingBrain
+
+def get_symbol_params(symbol):
+    """
+    خواندن پارامترهای اختصاصی هر ارز از فایل best_params.json.
+    در صورتی که پارامتری یافت نشود، از مقادیر پیش‌فرض config استفاده می‌شود.
+    """
+    params_file = os.path.join(os.getcwd(), 'best_params.json')
+    
+    # مقادیر پیش‌فرض (در صورت نبودن تنظیمات اختصاصی)
+    default_params = {
+        'ADX_THRESHOLD': config.ADX_THRESHOLD,
+        'SWING_WINDOW': config.SWING_WINDOW,
+        'SL_RATIO': config.SL_RATIO if hasattr(config, 'SL_RATIO') else 1.5,
+        'TP_RATIO': config.TP_RATIO if hasattr(config, 'TP_RATIO') else 2.0,
+        'RSI_MIDLINE': 50.0
+    }
+    
+    if os.path.exists(params_file):
+        try:
+            with open(params_file, 'r') as f:
+                all_params = json.load(f)
+                if symbol in all_params:
+                    # ترکیب تنظیمات اختصاصی با پیش‌فرض‌ها
+                    return {**default_params, **all_params[symbol]}
+        except Exception as e:
+            print(f"⚠️ خطا در خواندن فایل best_params.json برای ارز {symbol}: {e}")
+            
+    return default_params
 
 def init_backtest_db(db_path):
     """اطمینان از وجود ساختار جدول سیگنال‌ها در دیتابیس بکتست با ستون‌های جدید امتیازدهی"""
@@ -52,6 +81,7 @@ def init_backtest_db(db_path):
 def run_backtest_for_symbol(symbol, db_path, brain_instance):
     """
     اجرای تست گذشته در دو فاز کاملاً هماهنگ با سیستم امتیازدهی و هوش مصنوعی جدید
+    با قابلیت استفاده از پارامترهای بهینه و اختصاصی برای هر ارز
     """
     safe_name = symbol.replace('/', '_')
     # استفاده از مسیر مطلق بر اساس ریشه پروژه برای تطابق با GitHub Actions
@@ -65,6 +95,14 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
     if len(df) < 250:
         print(f"⚠️ دیتای {symbol} برای بکتست کافی نیست (کمتر از ۲۵۰ کندل)")
         return None
+
+    # دریافت پارامترهای اختصاصی این ارز
+    sym_params = get_symbol_params(symbol)
+    adx_thresh = float(sym_params.get('ADX_THRESHOLD', config.ADX_THRESHOLD))
+    swing_win = int(sym_params.get('SWING_WINDOW', config.SWING_WINDOW))
+    sl_ratio = float(sym_params.get('SL_RATIO', 1.5))
+    tp_ratio = float(sym_params.get('TP_RATIO', 2.0))
+    rsi_midline = float(sym_params.get('RSI_MIDLINE', 50.0))
 
     # محاسبه مجدد اندیکاتورها با فرمول جدید و اصلاح‌شده RSI
     df = indicators.calculate_indicators(df)
@@ -131,20 +169,22 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
                 conn.commit()
             continue
 
-        if float(current_candle.get('feat_adx', 0)) < config.ADX_THRESHOLD:
+        if float(current_candle.get('feat_adx', 0)) < adx_thresh:
             continue
 
         df_slice = df.iloc[:i]
-        last_swing_high = strategy_utils.find_last_swing(df_slice, 'high', config.SWING_WINDOW)
-        last_swing_low = strategy_utils.find_last_swing(df_slice, 'low', config.SWING_WINDOW)
+        last_swing_high = strategy_utils.find_last_swing(df_slice, 'high', swing_win)
+        last_swing_low = strategy_utils.find_last_swing(df_slice, 'low', swing_win)
 
         if last_swing_high is None or last_swing_low is None:
             continue
 
         atr_val = float(current_candle.get('feat_atr_percent', current_candle.get('atr', 1.0)))
-        sl_dist = 1.5 * atr_val
-        is_bullish = float(current_candle.get('feat_rsi', 50)) > 50
-        is_bearish = float(current_candle.get('feat_rsi', 50)) < 50
+        # محاسبه حد ضرر و سود با ضرایب داینامیک
+        sl_dist = sl_ratio * atr_val 
+        
+        is_bullish = float(current_candle.get('feat_rsi', rsi_midline)) > rsi_midline
+        is_bearish = float(current_candle.get('feat_rsi', rsi_midline)) < rsi_midline
 
         features_snapshot = {
             'feat_adx': float(current_candle.get('feat_adx', 0)),
@@ -160,9 +200,24 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
         }
 
         if high_price > last_swing_high and is_bullish:
-            is_in_position_raw, direction_raw, entry_price_raw, stop_loss_raw, tp1_raw, tp2_raw, entry_time_raw, entry_features_raw = True, "LONG", last_swing_high, last_swing_high - sl_dist, last_swing_high + sl_dist, last_swing_high + (sl_dist * 2), current_time, features_snapshot
+            is_in_position_raw = True
+            direction_raw = "LONG"
+            entry_price_raw = last_swing_high
+            stop_loss_raw = last_swing_high - sl_dist
+            tp1_raw = last_swing_high + sl_dist
+            tp2_raw = last_swing_high + (sl_dist * tp_ratio)
+            entry_time_raw = current_time
+            entry_features_raw = features_snapshot
+            
         elif low_price < last_swing_low and is_bearish:
-            is_in_position_raw, direction_raw, entry_price_raw, stop_loss_raw, tp1_raw, tp2_raw, entry_time_raw, entry_features_raw = True, "SHORT", last_swing_low, last_swing_low + sl_dist, last_swing_low - sl_dist, last_swing_low - (sl_dist * 2), current_time, features_snapshot
+            is_in_position_raw = True
+            direction_raw = "SHORT"
+            entry_price_raw = last_swing_low
+            stop_loss_raw = last_swing_low + sl_dist
+            tp1_raw = last_swing_low - sl_dist
+            tp2_raw = last_swing_low - (sl_dist * tp_ratio)
+            entry_time_raw = current_time
+            entry_features_raw = features_snapshot
 
     # ==========================================
     # فاز ۲: ارزیابی هوش مصنوعی در محیط لایو (Out-of-Sample)
@@ -204,20 +259,21 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
                 is_in_position_ai = False
             continue
 
-        if float(current_candle.get('feat_adx', 0)) < config.ADX_THRESHOLD:
+        if float(current_candle.get('feat_adx', 0)) < adx_thresh:
             continue
 
         df_slice = df.iloc[:i]
-        last_swing_high = strategy_utils.find_last_swing(df_slice, 'high', config.SWING_WINDOW)
-        last_swing_low = strategy_utils.find_last_swing(df_slice, 'low', config.SWING_WINDOW)
+        last_swing_high = strategy_utils.find_last_swing(df_slice, 'high', swing_win)
+        last_swing_low = strategy_utils.find_last_swing(df_slice, 'low', swing_win)
 
         if last_swing_high is None or last_swing_low is None:
             continue
 
         atr_val = float(current_candle.get('feat_atr_percent', current_candle.get('atr', 1.0)))
-        sl_dist = 1.5 * atr_val
-        is_bullish = float(current_candle.get('feat_rsi', 50)) > 50
-        is_bearish = float(current_candle.get('feat_rsi', 50)) < 50
+        sl_dist = sl_ratio * atr_val
+        
+        is_bullish = float(current_candle.get('feat_rsi', rsi_midline)) > rsi_midline
+        is_bearish = float(current_candle.get('feat_rsi', rsi_midline)) < rsi_midline
 
         features_dict = {
             'feat_adx': float(current_candle.get('feat_adx', 0)),
@@ -234,7 +290,6 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
         ai_approved = False
         if brain_instance and symbol in brain_instance.models:
             try:
-                # ارسال دیکشنری مرتب برای جلوگیری از کرش فید دیتای هوش مصنوعی
                 ai_approved = brain_instance.predict_signal(symbol, features_dict)
             except:
                 ai_approved = False
@@ -242,9 +297,18 @@ def run_backtest_for_symbol(symbol, db_path, brain_instance):
             ai_approved = True
 
         if high_price > last_swing_high and is_bullish and ai_approved:
-            is_in_position_ai, direction_ai, entry_price_ai, stop_loss_ai, tp2_ai = True, "LONG", last_swing_high, last_swing_high - sl_dist, last_swing_high + (sl_dist * 2)
+            is_in_position_ai = True
+            direction_ai = "LONG"
+            entry_price_ai = last_swing_high
+            stop_loss_ai = last_swing_high - sl_dist
+            tp2_ai = last_swing_high + (sl_dist * tp_ratio)
+            
         elif low_price < last_swing_low and is_bearish and ai_approved:
-            is_in_position_ai, direction_ai, entry_price_ai, stop_loss_ai, tp2_ai = True, "SHORT", last_swing_low, last_swing_low + sl_dist, last_swing_low - (sl_dist * 2)
+            is_in_position_ai = True
+            direction_ai = "SHORT"
+            entry_price_ai = last_swing_low
+            stop_loss_ai = last_swing_low + sl_dist
+            tp2_ai = last_swing_low - (sl_dist * tp_ratio)
 
     conn.close()
     win_rate_ai = (ai_winning_trades / ai_total_trades * 100) if ai_total_trades > 0 else 0
@@ -268,7 +332,7 @@ def run_all_backtests():
             pass
 
     init_backtest_db(db_path)
-    print("📊 شروع پروسه دوفازی بکتست: محاسبات تمیز RSI + هماهنگی با هوش مصنوعی...")
+    print("📊 شروع پروسه دوفازی بکتست: محاسبات تمیز RSI + هماهنگی با هوش مصنوعی و پارامترهای اختصاصی...")
     
     brain = TradingBrain()
     summary_results = []
