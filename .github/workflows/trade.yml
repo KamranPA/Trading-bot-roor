@@ -17,13 +17,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Set up job
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run actions/checkout@v4
-        uses: actions/checkout@v4
-
-      - name: Run actions/setup-python@v5
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
@@ -34,20 +31,25 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Set Permissions
-        run: chmod +x main.py
-
-      # ⚡ اجرای اسکریپت اصلی ربات برای اسکن واقعی ۱۱ جفت‌ارز بازار به صورت ایمن
+      # ⚡ اجرای اسکریپت اصلی ربات برای اسکن واقعی جفت‌ارزهای بازار
       - name: Run Bot
         env:
+          PYTHONPATH: ${{ github.workspace }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
 
-      - name: Commit and Push Database & AI Parameters
+      - name: Commit and Push AI Parameters
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add trading_bot.db src/models/ || true
-          git commit -m "chore: auto-update live database and weights [skip ci]" || true
-          git push origin main || true
+          if [ -f "best_params.json" ]; then
+            git add best_params.json
+          fi
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: auto-update AI parameters [skip ci]"
+            git push origin HEAD:${{ github.ref_name }}
+          else
+            echo "No changes to commit."
+          fi

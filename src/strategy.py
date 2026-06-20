@@ -39,10 +39,10 @@ def is_blocked_by_8h_filter(pair: str, current_direction: str) -> bool:
         if last_time is None:
             return False
 
-        now = datetime.datetime.utcnow()
-        # اگر last_time aware است، به naive تبدیل می‌کنیم
-        if hasattr(last_time, 'tzinfo') and last_time.tzinfo is not None:
-            last_time = last_time.replace(tzinfo=None)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        # اطمینان از timezone-aware بودن last_time برای مقایسه درست
+        if last_time.tzinfo is None:
+            last_time = last_time.replace(tzinfo=datetime.timezone.utc)
 
         elapsed_hours = (now - last_time).total_seconds() / 3600
         return elapsed_hours < 8
@@ -92,9 +92,9 @@ def generate_signal(df, pair: str, model=None, params: dict = None,
 
     # --- استخراج پارامترهای اختصاصی ---
     adx_thresh       = float(params.get('ADX_THRESHOLD',  config.ADX_THRESHOLD))
-    tp_ratio         = float(params.get('TP_RATIO',        1.5))
-    sl_ratio         = float(params.get('SL_RATIO',        1.0))
-    ai_threshold     = float(params.get('AI_THRESHOLD',    65.0))
+    tp_ratio         = float(params.get('TP_RATIO',        config.TP_RATIO))
+    sl_ratio         = float(params.get('SL_RATIO',        config.SL_RATIO))
+    ai_threshold     = float(params.get('AI_THRESHOLD',    getattr(config, 'AI_THRESHOLD', 65.0)))
     swing_window     = int(params.get('SWING_WINDOW',      config.SWING_WINDOW))
     MAX_SL_PERCENT   = float(getattr(config, 'MAX_SL_PERCENT', 0.03))
 
@@ -151,14 +151,19 @@ def generate_signal(df, pair: str, model=None, params: dict = None,
             return default_scores
 
     # -----------------------------------------------------------------------
-    # امتیاز کل
+    # امتیاز کل — وزن‌ها از config خوانده می‌شوند (مجموع وزن‌ها = 100)
     # -----------------------------------------------------------------------
+    w_ai  = float(getattr(config, 'WEIGHT_AI',  40))
+    w_adx = float(getattr(config, 'WEIGHT_ADX', 20))
+    w_rsi = float(getattr(config, 'WEIGHT_RSI', 20))
+    w_ema = float(getattr(config, 'WEIGHT_EMA', 20))
+    w_sum = (w_ai + w_adx + w_rsi + w_ema) or 100.0
     total_score = (
-        ai_score  * 0.40 +
-        adx_score * 0.20 +
-        rsi_score * 0.20 +
-        ema_score * 0.20
-    )
+        ai_score  * w_ai  +
+        adx_score * w_adx +
+        rsi_score * w_rsi +
+        ema_score * w_ema
+    ) / w_sum
 
     score_data = {
         'total_score': round(total_score, 2),
@@ -171,8 +176,9 @@ def generate_signal(df, pair: str, model=None, params: dict = None,
 
     # --- فیلتر امتیاز و ظرفیت پوزیشن ---
     max_positions = getattr(config, 'MAX_OPEN_POSITIONS', 3)
-    if total_score < 60.0:
-        logger.debug("%s: امتیاز %.1f زیر آستانه ۶۰", pair, total_score)
+    min_score = float(getattr(config, 'MIN_REQUIRED_SCORE', 60))
+    if total_score < min_score:
+        logger.debug("%s: امتیاز %.1f زیر آستانه %.0f", pair, total_score, min_score)
         return score_data
 
     if open_positions_count >= max_positions:
@@ -198,6 +204,16 @@ def generate_signal(df, pair: str, model=None, params: dict = None,
     close_price = float(candle['Close'])
     atr_val    = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
 
+    # مبلغ ریسک هر معامله = درصد ریسک از کل سرمایه (پیش‌فرض ۱٪)
+    risk_amount = float(getattr(config, 'TOTAL_CAPITAL', 1000.0)) * \
+        float(getattr(config, 'RISK_PERCENT', 1.0)) / 100.0
+
+    def _position_size(sl_distance: float) -> float:
+        """حجم اسمی پوزیشن (USDT) به‌گونه‌ای که ضرر در SL برابر risk_amount شود."""
+        if sl_distance <= 0:
+            return 0.0
+        return round(risk_amount * close_price / sl_distance, 2)
+
     # -----------------------------------------------------------------------
     # منطق ورود LONG
     # -----------------------------------------------------------------------
@@ -219,6 +235,7 @@ def generate_signal(df, pair: str, model=None, params: dict = None,
             'tp1':         round(close_price + sl_dist * tp_ratio / 2, 6),
             'tp2':         round(close_price + sl_dist * tp_ratio,     6),
             'swing_ref':   round(last_swing_high, 6),                      # مرجع swing برای لاگ
+            'position_size': _position_size(sl_dist),
             **features_dict,
         })
         logger.info("🟢 LONG سیگنال: %s | امتیاز: %.1f | Entry: %.4f | SL: %.4f | TP2: %.4f",
@@ -246,6 +263,7 @@ def generate_signal(df, pair: str, model=None, params: dict = None,
             'tp1':         round(close_price - sl_dist * tp_ratio / 2, 6),
             'tp2':         round(close_price - sl_dist * tp_ratio,     6),
             'swing_ref':   round(last_swing_low, 6),
+            'position_size': _position_size(sl_dist),
             **features_dict,
         })
         logger.info("🔴 SHORT سیگنال: %s | امتیاز: %.1f | Entry: %.4f | SL: %.4f | TP2: %.4f",

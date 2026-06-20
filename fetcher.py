@@ -67,7 +67,7 @@ def fetch_data_intel(symbol, timeframe="4h"):
         }
         
         # ریسامپل کردن به کندل‌های ۴ ساعته با مبدا زمانی استاندارد و حذف ردیف‌های خالی
-        df_4h = df.resample('4H', origin='start').agg(ohlc_dict).dropna().reset_index()
+        df_4h = df.resample('4h', origin='start').agg(ohlc_dict).dropna().reset_index()
         
         if df_4h.empty:
             print(f"⚠️ پس از تبدیل به دیتای ۴ ساعته، ردیف سالمی برای {symbol} باقی نماند.")

@@ -6,9 +6,13 @@
 import os
 import csv
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pandas as pd
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +65,7 @@ def save_backtest_trade(trade: dict) -> bool:
                 writer.writeheader()
             # مقادیر پیش‌فرض برای فیلدهای ضروری
             trade.setdefault('id',         _next_id())
-            trade.setdefault('entry_time', datetime.utcnow().isoformat())
+            trade.setdefault('entry_time', _utcnow_iso())
             trade.setdefault('status',     'OPEN')
             writer.writerow(trade)
         return True
@@ -103,7 +107,7 @@ def close_backtest_trade(trade_id, close_price: float, status: str = 'CLOSED') -
         df.loc[mask, 'close_price'] = round(close_price, 6)
         df.loc[mask, 'pnl_percent'] = round(pnl, 4)
         df.loc[mask, 'status']      = status
-        df.loc[mask, 'close_time']  = datetime.utcnow().isoformat()
+        df.loc[mask, 'close_time']  = _utcnow_iso()
 
         df.to_csv(BACKTEST_TRADES_CSV, index=False, encoding='utf-8')
         logger.debug("معامله %s بسته شد — PnL: %.2f%%", trade_id, pnl)
@@ -191,7 +195,7 @@ def generate_summary(df_trades: pd.DataFrame = None) -> pd.DataFrame:
             'max_drawdown': max_dd,
             'best_trade':   round(pnls.max(), 2) if len(pnls) else 0.0,
             'worst_trade':  round(pnls.min(), 2) if len(pnls) else 0.0,
-            'updated_at':   datetime.utcnow().isoformat(),
+            'updated_at':   _utcnow_iso(),
         })
 
     summary_df = pd.DataFrame(rows, columns=SUMMARY_COLUMNS)

@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# FILE PATH: src/train_model.py (v9.2 - Fixed for Local SQLite)
+# FILE PATH: src/train_model.py (v9.3 - PostgreSQL aligned)
 # ---------------------------------------------------------
 import pandas as pd
 import numpy as np
@@ -7,7 +7,6 @@ import os
 import sys
 import joblib
 import logging
-import sqlite3
 
 try:
     from lightgbm import LGBMClassifier
@@ -21,18 +20,18 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 import config
+from src import database
 
 def get_data_from_db(symbol):
-    """استخراج امن دیتا از دیتابیس بکتست محلی (SQLite)"""
+    """استخراج امن داده‌های معاملات بسته‌شده از دیتابیس ابری (PostgreSQL)."""
     try:
-        query = "SELECT * FROM signals WHERE symbol = ? AND status = 'CLOSED'"
-        with sqlite3.connect(config.DB_PATH_BACKTEST) as conn:
-            # تبدیل به دیتافریم
+        query = "SELECT * FROM signals WHERE pair = %s AND status = 'CLOSED'"
+        with database.get_connection() as conn:
             df_res = pd.read_sql_query(query, conn, params=(symbol,))
-            df_res.columns = [col.lower() for col in df_res.columns]
-            return df_res
+        df_res.columns = [col.lower() for col in df_res.columns]
+        return df_res
     except Exception as e:
-        logging.error(f"❌ خطای دیتابیس محلی در استخراج {symbol}: {e}")
+        logging.error(f"❌ خطای دیتابیس در استخراج {symbol}: {e}")
         return pd.DataFrame()
 
 def train_model_for_symbol(symbol, mode="backtest"):
@@ -49,12 +48,8 @@ def train_model_for_symbol(symbol, mode="backtest"):
         return
 
     # --- ۲. پیش‌پردازش کامل ---
-    features = [
-        'feat_adx', 'feat_vol_ratio', 'feat_atr_percent', 'feat_rsi', 
-        'feat_trend_line', 'feat_ema_deviation', 'feat_rsi_momentum', 
-        'feat_body_ratio', 'feat_high_volume_session'
-    ]
-    
+    features = list(config.AI_FEATURES)
+
     missing_feats = [f for f in features if f not in df.columns]
     if missing_feats:
         print(f"⚠️ برخی ویژگی‌ها در دیتابیس یافت نشدند: {missing_feats}")
