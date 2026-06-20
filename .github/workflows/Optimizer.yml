@@ -2,17 +2,14 @@ name: Run Optimizer
 
 on:
   schedule:
-    - cron: '0 0 * * 0' # اجرای خودکار در اولین ساعت یکشنبه‌ها
-  workflow_dispatch: # اجازه اجرای دستی از پنل گیت‌هاب
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
 
 jobs:
   optimize:
     runs-on: ubuntu-latest
-    
-    # تنظیمات دسترسی برای نوشتن روی مخزن جهت آپدیت best_params.json
     permissions:
       contents: write
-      
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -25,25 +22,22 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # نصب کتابخانه‌های ضروری به صورت باینری برای جلوگیری از خطاهای کامپایل
-          pip install pandas numpy scikit-learn psycopg2-binary
+          # نصب تمام کتابخانه‌های مورد نیاز پروژه
+          pip install pandas numpy scikit-learn psycopg2-binary ccxt joblib
           
       - name: Run Optimizer Script
         run: python src/optimizer.py
         env:
-          # اینجا دیتابیسِ کلود (Supabase) را معرفی می‌کنیم
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          # این متغیر به کد شما می‌گوید که در محیط گیت‌هاب است
           IS_GITHUB_ACTION: "true"
 
       - name: Commit and Push changes
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          # بررسی اینکه آیا فایلی تغییر کرده یا خیر
           if [[ -n $(git status -s) ]]; then
             git add best_params.json
-            git commit -m "Auto-update: Optimized trading parameters [skip ci]"
+            git commit -m "Auto-update: Optimized trading parameters"
             git push
           else
             echo "No changes to commit."
