@@ -2,7 +2,7 @@ name: Trading Bot - Live DB Update
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '*/30 * * * *' # اجرای ربات هر ۳۰ دقیقه
   workflow_dispatch:
 
 jobs:
@@ -20,11 +20,13 @@ jobs:
           python-version: '3.10'
       
       - name: Install dependencies
-        run: pip install -r requirements.txt
-      
-      - name: Set Permissions
         run: |
-          mkdir -p data
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Setup Data Directory
+        run: |
+          mkdir -p data/4h
           chmod -R 777 data/
           
       - name: Run Bot
@@ -41,14 +43,15 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           
-          # کپی فایل از src به مسیر اصلی جهت اطمینان از دیده شدن در کامیت
-          cp src/best_params.json ./best_params.json 2>/dev/null || echo "No tracked files to add."
-          
-          git add best_params.json 2>/dev/null || echo "No tracked files to add."
+          # بررسی وجود فایل قبل از کپی و کامیت
+          if [ -f "src/best_params.json" ]; then
+            cp src/best_params.json ./best_params.json
+            git add best_params.json
+          fi
           
           if ! git diff --cached --quiet; then
-            git commit -m "Update AI Parameters: $(date)"
-            git push origin HEAD:${{ github.ref_name }} --force
+            git commit -m "Auto-Update: AI Parameters $(date +'%Y-%m-%d %H:%M')"
+            git push origin HEAD:${{ github.ref_name }}
           else
-            echo "No changes detected in best_params.json."
+            echo "No changes detected in parameters."
           fi
