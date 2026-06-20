@@ -17,10 +17,12 @@ def _utcnow_iso() -> str:
 logger = logging.getLogger(__name__)
 
 # مسیر پیش‌فرض فایل‌های CSV
-_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
+_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_DATA_DIR = os.path.join(_ROOT_DIR, 'data')
 
 BACKTEST_TRADES_CSV   = os.path.join(_DATA_DIR, 'backtest_trades.csv')
-BACKTEST_SUMMARY_CSV  = os.path.join(_DATA_DIR, 'backtest_table_summary.csv')
+# summary در ریشه پروژه ذخیره می‌شود چون workflow از همان‌جا git add می‌کند
+BACKTEST_SUMMARY_CSV  = os.path.join(_ROOT_DIR, 'backtest_table_summary.csv')
 
 # ستون‌های استاندارد
 TRADE_COLUMNS = [
@@ -162,7 +164,9 @@ def generate_summary(df_trades: pd.DataFrame = None) -> pd.DataFrame:
         DataFrame خلاصه
     """
     if df_trades is None:
-        df_trades = load_backtest_trades(status='CLOSED')
+        # همه تریدهای بسته‌شده را شامل می‌شود (SL_HIT، TP_HIT، EXPIRED، CLOSED)
+        all_trades = load_backtest_trades()
+        df_trades = all_trades[all_trades['status'] != 'OPEN'].copy() if not all_trades.empty else all_trades
 
     if df_trades.empty:
         logger.info("هیچ معامله بسته‌ای برای خلاصه‌سازی وجود ندارد.")
