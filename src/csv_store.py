@@ -29,8 +29,10 @@ TRADE_COLUMNS = [
     'id', 'pair', 'direction', 'entry_price', 'stop_loss',
     'tp1', 'tp2', 'close_price', 'pnl_percent',
     'entry_time', 'close_time', 'status',
-    'ai_score', 'total_score', 'feat_adx', 'feat_rsi',
+    'ai_score', 'total_score',
+    'feat_adx', 'feat_rsi', 'feat_rsi_momentum',
     'feat_ema_deviation', 'feat_atr_percent',
+    'feat_trend_line', 'feat_body_ratio',
 ]
 
 SUMMARY_COLUMNS = [
