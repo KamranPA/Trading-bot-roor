@@ -234,3 +234,59 @@ def get_closed_trades_count(pair: str = None) -> int:
     """تعداد معاملات بسته"""
     df = load_backtest_trades(pair=pair, status='CLOSED')
     return len(df)
+    # ---------------------------------------------------------------------------
+# صادرکردن به SQLite  (برای workflow و آپلود artifact)
+# ---------------------------------------------------------------------------
+
+def export_to_sqlite(db_path: str = None) -> bool:
+    """
+    داده‌های بکتست (معاملات + خلاصه) را در یک فایل SQLite ذخیره می‌کند.
+    مسیر پیش‌فرض: data/trading_bot_backtest.db
+
+    این تابع در پایان run_all_backtests() فراخوانی می‌شود
+    تا workflow بتواند فایل .db را git add و upload کند.
+    """
+    import sqlite3
+
+    if db_path is None:
+        db_path = os.path.join(_DATA_DIR, 'trading_bot_backtest.db')
+
+    _ensure_dir()
+
+    try:
+        trades_df  = load_backtest_trades()
+        summary_df = generate_summary(trades_df[trades_df['status'] != 'OPEN'].copy()
+                                      if not trades_df.empty else None)
+
+        with sqlite3.connect(db_path) as conn:
+            # جدول معاملات
+            if not trades_df.empty:
+                trades_df.to_sql('backtest_trades', conn,
+                                 if_exists='replace', index=False)
+            else:
+                # ساخت جدول خالی با ستون‌های استاندارد
+                conn.execute(f"""
+                    CREATE TABLE IF NOT EXISTS backtest_trades (
+                        {', '.join(f'{c} TEXT' for c in TRADE_COLUMNS)}
+                    )
+                """)
+
+            # جدول خلاصه
+            if not summary_df.empty:
+                summary_df.to_sql('backtest_summary', conn,
+                                  if_exists='replace', index=False)
+            else:
+                conn.execute(f"""
+                    CREATE TABLE IF NOT EXISTS backtest_summary (
+                        {', '.join(f'{c} TEXT' for c in SUMMARY_COLUMNS)}
+                    )
+                """)
+
+            conn.commit()
+
+        logger.info("✅ SQLite ذخیره شد: %s", db_path)
+        return True
+
+    except Exception as e:
+        logger.error("export_to_sqlite خطا: %s", e)
+        return False
