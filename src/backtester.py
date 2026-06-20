@@ -1,356 +1,282 @@
 # ---------------------------------------------------------
-# FILE PATH: src/backtester.py (v9.0 - Fully Integrated & Fixed)
+# FILE PATH: src/backtester.py  (FIXED & IMPROVED v2.0)
+# تغییرات:
+#   1. ذخیره معاملات در CSV (از طریق csv_store) نه SQLite محلی
+#   2. اصلاح محاسبه PnL (همان فرمول check_exits اصلاح‌شده)
+#   3. تولید خودکار Summary در پایان
+#   4. جلوگیری از Look-Ahead Bias: فقط داده قبل از کندل فعلی استفاده می‌شود
+#   5. لاگ پیشرفت
 # ---------------------------------------------------------
-import os
-import sys
-import sqlite3
-import pandas as pd
-import json
+import logging
+from datetime import datetime
 
-# اصلاح مسیر اجرای پایتون برای شناسایی ماژول‌ها از ریشه پروژه
-sys.path.append(os.getcwd())
+import pandas as pd
 
 import config
 from src import indicators, strategy_utils
-from src.brain import TradingBrain
+from src.csv_store import save_backtest_trade, close_backtest_trade, generate_summary
 
-def get_symbol_params(symbol):
+logger = logging.getLogger(__name__)
+
+MAX_OPEN_POSITIONS = getattr(config, 'MAX_OPEN_POSITIONS', 3)
+
+
+def run_backtest(
+    df_raw: pd.DataFrame,
+    pair: str,
+    params: dict,
+    model=None,
+    min_score: float = 60.0,
+) -> dict:
     """
-    خواندن پارامترهای اختصاصی هر ارز از فایل best_params.json.
-    در صورتی که پارامتری یافت نشود، از مقادیر پیش‌فرض config استفاده می‌شود.
+    بکتست استراتژی Swing Breakout روی داده تاریخی.
+
+    Args:
+        df_raw:    دیتافریم خام کندل‌ها (ستون‌های Open/High/Low/Close/Volume)
+        pair:      نماد ارز
+        params:    پارامترهای استراتژی (ADX_THRESHOLD, TP_RATIO, SL_RATIO, ...)
+        model:     مدل AI (اختیاری — اگر None باشد امتیاز AI صفر در نظر گرفته می‌شود)
+        min_score: حداقل امتیاز برای ورود به معامله
+
+    Returns:
+        دیکشنری نتایج: {total, wins, losses, win_rate, total_pnl, max_drawdown, trades}
     """
-    params_file = os.path.join(os.getcwd(), 'best_params.json')
-    
-    # مقادیر پیش‌فرض (در صورت نبودن تنظیمات اختصاصی)
-    default_params = {
-        'ADX_THRESHOLD': config.ADX_THRESHOLD,
-        'SWING_WINDOW': config.SWING_WINDOW,
-        'SL_RATIO': config.SL_RATIO if hasattr(config, 'SL_RATIO') else 1.5,
-        'TP_RATIO': config.TP_RATIO if hasattr(config, 'TP_RATIO') else 2.0,
-        'RSI_MIDLINE': 50.0
-    }
-    
-    if os.path.exists(params_file):
-        try:
-            with open(params_file, 'r') as f:
-                all_params = json.load(f)
-                if symbol in all_params:
-                    # ترکیب تنظیمات اختصاصی با پیش‌فرض‌ها
-                    return {**default_params, **all_params[symbol]}
-        except Exception as e:
-            print(f"⚠️ خطا در خواندن فایل best_params.json برای ارز {symbol}: {e}")
-            
-    return default_params
+    if df_raw is None or len(df_raw) < 210:
+        logger.warning("داده ناکافی برای بکتست %s (طول: %s)", pair, len(df_raw) if df_raw is not None else 0)
+        return _empty_result(pair)
 
-def init_backtest_db(db_path):
-    """اطمینان از وجود ساختار جدول سیگنال‌ها در دیتابیس بکتست با ستون‌های جدید امتیازدهی"""
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    with sqlite3.connect(db_path) as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS signals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                timestamp TEXT, 
-                symbol TEXT, 
-                direction TEXT, 
-                entry_price REAL, 
-                stop_loss REAL, 
-                tp1 REAL,
-                tp2 REAL,
-                status TEXT DEFAULT 'OPEN',
-                closed_at TEXT,
-                pnl_percent REAL,
-                feat_adx REAL,
-                feat_vol_ratio REAL,
-                feat_atr_percent REAL,
-                feat_rsi REAL,
-                feat_trend_line REAL,
-                feat_ema_deviation REAL,
-                feat_rsi_momentum REAL,
-                feat_body_ratio REAL,
-                feat_high_volume_session REAL,
-                total_score REAL DEFAULT 0.0,
-                ai_score REAL DEFAULT 0.0,
-                rsi_score REAL DEFAULT 0.0,
-                adx_score REAL DEFAULT 0.0,
-                ema_score REAL DEFAULT 0.0
-            )
-        """)
-        conn.commit()
+    adx_thresh   = float(params.get('ADX_THRESHOLD', config.ADX_THRESHOLD))
+    tp_ratio     = float(params.get('TP_RATIO',      1.5))
+    sl_ratio     = float(params.get('SL_RATIO',      1.0))
+    ai_threshold = float(params.get('AI_THRESHOLD',  65.0))
+    swing_window = int(params.get('SWING_WINDOW',    config.SWING_WINDOW))
+    MAX_SL_PCT   = float(getattr(config, 'MAX_SL_PERCENT', 0.03))
 
-def run_backtest_for_symbol(symbol, db_path, brain_instance):
-    """
-    اجرای تست گذشته در دو فاز کاملاً هماهنگ با سیستم امتیازدهی و هوش مصنوعی جدید
-    با قابلیت استفاده از پارامترهای بهینه و اختصاصی برای هر ارز
-    """
-    safe_name = symbol.replace('/', '_')
-    # استفاده از مسیر مطلق بر اساس ریشه پروژه برای تطابق با GitHub Actions
-    file_path = os.path.join(os.getcwd(), "data", "4h", f"{safe_name}_history.csv")
-    
-    if not os.path.exists(file_path):
-        print(f"⚠️ دیتای بکتستر برای {symbol} یافت نشد! مسیر: {file_path}")
-        return None
+    # اندیکاتورها روی کل دیتا محاسبه می‌شوند
+    df_full = indicators.calculate_indicators(df_raw.copy())
 
-    df = pd.read_csv(file_path)
-    if len(df) < 250:
-        print(f"⚠️ دیتای {symbol} برای بکتست کافی نیست (کمتر از ۲۵۰ کندل)")
-        return None
+    open_trades   = []   # لیست معاملات باز در حین بکتست
+    closed_trades = []   # نتایج نهایی
 
-    # دریافت پارامترهای اختصاصی این ارز
-    sym_params = get_symbol_params(symbol)
-    adx_thresh = float(sym_params.get('ADX_THRESHOLD', config.ADX_THRESHOLD))
-    swing_win = int(sym_params.get('SWING_WINDOW', config.SWING_WINDOW))
-    sl_ratio = float(sym_params.get('SL_RATIO', 1.5))
-    tp_ratio = float(sym_params.get('TP_RATIO', 2.0))
-    rsi_midline = float(sym_params.get('RSI_MIDLINE', 50.0))
+    for i in range(200, len(df_full)):
+        # FIX: فقط داده‌های پیش از کندل فعلی (بدون Look-Ahead Bias)
+        df_slice = df_full.iloc[:i + 1]
+        candle   = df_full.iloc[i]
 
-    # محاسبه مجدد اندیکاتورها با فرمول جدید و اصلاح‌شده RSI
-    df = indicators.calculate_indicators(df)
-    
-    # تعیین نقطه برش برای ایزوله کردن گذشته (آموزش) و آینده (تست)
-    split_idx = int(len(df) * 0.8)
-    
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    
-    # ==========================================
-    # فاز ۱: تولید دیتای خام برای آموزش هوش مصنوعی
-    # ==========================================
-    is_in_position_raw = False
-    entry_price_raw, direction_raw, stop_loss_raw, tp1_raw, tp2_raw = 0.0, "", 0.0, 0.0, 0.0
-    entry_time_raw, entry_features_raw = "", {}
-    total_trades_raw = 0
+        current_price = float(candle['Close'])
+        high_price    = float(candle['High'])
+        low_price     = float(candle['Low'])
 
-    for i in range(200, split_idx):
-        current_candle = df.iloc[i]
-        high_price = float(current_candle['High'])
-        low_price = float(current_candle['Low'])
-        current_time = str(current_candle['Timestamp'])
+        # --- بستن معاملات باز ---
+        still_open = []
+        for trade in open_trades:
+            direction = trade['direction']
+            sl        = trade['stop_loss']
+            tp2       = trade['tp2']
+            entry     = trade['entry_price']
+            closed    = False
 
-        if is_in_position_raw:
-            pnl = 0.0
-            closed = False
-            
-            if direction_raw == "LONG":
-                if low_price <= stop_loss_raw:
-                    pnl = ((stop_loss_raw - entry_price_raw) / entry_price_raw) * 100
+            if direction == 'LONG':
+                if low_price <= sl:
+                    pnl    = ((sl - entry) / entry) * 100
+                    reason = 'SL_HIT'
                     closed = True
-                elif high_price >= tp2_raw:
-                    pnl = ((tp2_raw - entry_price_raw) / entry_price_raw) * 100
+                elif high_price >= tp2:
+                    pnl    = ((tp2 - entry) / entry) * 100
+                    reason = 'TP_HIT'
                     closed = True
-                    
-            elif direction_raw == "SHORT":
-                if high_price >= stop_loss_raw:
-                    pnl = ((entry_price_raw - stop_loss_raw) / entry_price_raw) * 100
+            else:  # SHORT
+                if high_price >= sl:
+                    pnl    = ((entry - sl) / entry) * 100
+                    reason = 'SL_HIT'
                     closed = True
-                elif low_price <= tp2_raw:
-                    pnl = ((entry_price_raw - tp2_raw) / entry_price_raw) * 100
+                elif low_price <= tp2:
+                    pnl    = ((entry - tp2) / entry) * 100
+                    reason = 'TP_HIT'
                     closed = True
 
             if closed:
-                total_trades_raw += 1
-                is_in_position_raw = False
-                
-                cursor.execute("""
-                    INSERT INTO signals (
-                        timestamp, symbol, direction, entry_price, stop_loss, tp1, tp2, status, closed_at, pnl_percent,
-                        feat_adx, feat_vol_ratio, feat_atr_percent, feat_rsi, feat_trend_line, 
-                        feat_ema_deviation, feat_rsi_momentum, feat_body_ratio, feat_high_volume_session,
-                        total_score, ai_score, rsi_score, adx_score, ema_score
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'CLOSED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    entry_time_raw, symbol, direction_raw, entry_price_raw, stop_loss_raw, tp1_raw, tp2_raw, current_time, pnl,
-                    entry_features_raw['feat_adx'], entry_features_raw['feat_vol_ratio'], entry_features_raw['feat_atr_percent'],
-                    entry_features_raw['feat_rsi'], entry_features_raw['feat_trend_line'], entry_features_raw['feat_ema_deviation'],
-                    entry_features_raw['feat_rsi_momentum'], entry_features_raw['feat_body_ratio'], entry_features_raw['feat_high_volume_session'],
-                    entry_features_raw.get('total_score', 0.0), entry_features_raw.get('ai_score', 0.0),
-                    entry_features_raw.get('rsi_score', 0.0), entry_features_raw.get('adx_score', 0.0), entry_features_raw.get('ema_score', 0.0)
-                ))
-                conn.commit()
-            continue
+                trade['pnl_percent'] = round(pnl, 4)
+                trade['close_price'] = round(sl if reason == 'SL_HIT' else tp2, 6)
+                trade['status']      = reason
+                trade['close_time']  = str(candle.name) if hasattr(candle, 'name') else ''
+                closed_trades.append(trade)
+                close_backtest_trade(trade['id'], trade['close_price'], reason)
+            else:
+                still_open.append(trade)
 
-        if float(current_candle.get('feat_adx', 0)) < adx_thresh:
-            continue
+        open_trades = still_open
 
-        df_slice = df.iloc[:i]
-        last_swing_high = strategy_utils.find_last_swing(df_slice, 'high', swing_win)
-        last_swing_low = strategy_utils.find_last_swing(df_slice, 'low', swing_win)
+        # --- امتیازدهی ---
+        current_adx  = float(candle.get('feat_adx', 0))
+        current_rsi  = float(candle.get('feat_rsi', 50))
+        rsi_momentum = float(candle.get('feat_rsi_momentum', 0))
+        dev_val      = abs(float(candle.get('feat_ema_deviation', 0)))
+        atr_val      = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
 
-        if last_swing_high is None or last_swing_low is None:
-            continue
+        # ADX score
+        adx_score = (
+            min(100.0, 50.0 + (current_adx - adx_thresh) * 2.5)
+            if current_adx >= adx_thresh
+            else max(0.0, (current_adx / (adx_thresh + 1e-10)) * 50.0)
+        )
 
-        atr_val = float(current_candle.get('feat_atr_percent', current_candle.get('atr', 1.0)))
-        # محاسبه حد ضرر و سود با ضرایب داینامیک
-        sl_dist = sl_ratio * atr_val 
-        
-        is_bullish = float(current_candle.get('feat_rsi', rsi_midline)) > rsi_midline
-        is_bearish = float(current_candle.get('feat_rsi', rsi_midline)) < rsi_midline
-
-        features_snapshot = {
-            'feat_adx': float(current_candle.get('feat_adx', 0)),
-            'feat_vol_ratio': float(current_candle.get('feat_vol_ratio', 0)),
-            'feat_atr_percent': atr_val,
-            'feat_rsi': float(current_candle.get('feat_rsi', 0)),
-            'feat_trend_line': float(current_candle.get('feat_trend_line', 0)),
-            'feat_ema_deviation': float(current_candle.get('feat_ema_deviation', 0)),
-            'feat_rsi_momentum': float(current_candle.get('feat_rsi_momentum', 0)),
-            'feat_body_ratio': float(current_candle.get('feat_body_ratio', 0)),
-            'feat_high_volume_session': float(current_candle.get('feat_high_volume_session', 0)),
-            'total_score': 0.0, 'ai_score': 0.0, 'rsi_score': 0.0, 'adx_score': 0.0, 'ema_score': 0.0
-        }
-
-        if high_price > last_swing_high and is_bullish:
-            is_in_position_raw = True
-            direction_raw = "LONG"
-            entry_price_raw = last_swing_high
-            stop_loss_raw = last_swing_high - sl_dist
-            tp1_raw = last_swing_high + sl_dist
-            tp2_raw = last_swing_high + (sl_dist * tp_ratio)
-            entry_time_raw = current_time
-            entry_features_raw = features_snapshot
-            
-        elif low_price < last_swing_low and is_bearish:
-            is_in_position_raw = True
-            direction_raw = "SHORT"
-            entry_price_raw = last_swing_low
-            stop_loss_raw = last_swing_low + sl_dist
-            tp1_raw = last_swing_low - sl_dist
-            tp2_raw = last_swing_low - (sl_dist * tp_ratio)
-            entry_time_raw = current_time
-            entry_features_raw = features_snapshot
-
-    # ==========================================
-    # فاز ۲: ارزیابی هوش مصنوعی در محیط لایو (Out-of-Sample)
-    # ==========================================
-    ai_total_trades, ai_winning_trades, ai_total_pnl = 0, 0, 0.0
-    is_in_position_ai = False
-    entry_price_ai, direction_ai, stop_loss_ai, tp2_ai = 0.0, "", 0.0, 0.0
-
-    for i in range(split_idx, len(df)):
-        current_candle = df.iloc[i]
-        high_price = float(current_candle['High'])
-        low_price = float(current_candle['Low'])
-
-        if is_in_position_ai:
-            pnl = 0.0
-            closed = False
-            
-            if direction_ai == "LONG":
-                if low_price <= stop_loss_ai:
-                    pnl = ((stop_loss_ai - entry_price_ai) / entry_price_ai) * 100
-                    closed = True
-                elif high_price >= tp2_ai:
-                    pnl = ((tp2_ai - entry_price_ai) / entry_price_ai) * 100
-                    ai_winning_trades += 1
-                    closed = True
-                    
-            elif direction_ai == "SHORT":
-                if high_price >= stop_loss_ai:
-                    pnl = ((entry_price_ai - stop_loss_ai) / entry_price_ai) * 100
-                    closed = True
-                elif low_price <= tp2_ai:
-                    pnl = ((entry_price_ai - tp2_ai) / entry_price_ai) * 100
-                    ai_winning_trades += 1
-                    closed = True
-
-            if closed:
-                ai_total_pnl += pnl
-                ai_total_trades += 1
-                is_in_position_ai = False
-            continue
-
-        if float(current_candle.get('feat_adx', 0)) < adx_thresh:
-            continue
-
-        df_slice = df.iloc[:i]
-        last_swing_high = strategy_utils.find_last_swing(df_slice, 'high', swing_win)
-        last_swing_low = strategy_utils.find_last_swing(df_slice, 'low', swing_win)
-
-        if last_swing_high is None or last_swing_low is None:
-            continue
-
-        atr_val = float(current_candle.get('feat_atr_percent', current_candle.get('atr', 1.0)))
-        sl_dist = sl_ratio * atr_val
-        
-        is_bullish = float(current_candle.get('feat_rsi', rsi_midline)) > rsi_midline
-        is_bearish = float(current_candle.get('feat_rsi', rsi_midline)) < rsi_midline
-
-        features_dict = {
-            'feat_adx': float(current_candle.get('feat_adx', 0)),
-            'feat_vol_ratio': float(current_candle.get('feat_vol_ratio', 0)),
-            'feat_atr_percent': atr_val,
-            'feat_rsi': float(current_candle.get('feat_rsi', 0)),
-            'feat_trend_line': float(current_candle.get('feat_trend_line', 0)),
-            'feat_ema_deviation': float(current_candle.get('feat_ema_deviation', 0)),
-            'feat_rsi_momentum': float(current_candle.get('feat_rsi_momentum', 0)),
-            'feat_body_ratio': float(current_candle.get('feat_body_ratio', 0)),
-            'feat_high_volume_session': float(current_candle.get('feat_high_volume_session', 0))
-        }
-
-        ai_approved = False
-        if brain_instance and symbol in brain_instance.models:
-            try:
-                ai_approved = brain_instance.predict_signal(symbol, features_dict)
-            except:
-                ai_approved = False
+        # RSI score
+        if current_rsi > 50:
+            rsi_score = min(100.0, max(0.0, 50.0 + rsi_momentum * 5))
         else:
-            ai_approved = True
+            rsi_score = min(100.0, max(0.0, 50.0 + (-rsi_momentum) * 5))
 
-        if high_price > last_swing_high and is_bullish and ai_approved:
-            is_in_position_ai = True
-            direction_ai = "LONG"
-            entry_price_ai = last_swing_high
-            stop_loss_ai = last_swing_high - sl_dist
-            tp2_ai = last_swing_high + (sl_dist * tp_ratio)
-            
-        elif low_price < last_swing_low and is_bearish and ai_approved:
-            is_in_position_ai = True
-            direction_ai = "SHORT"
-            entry_price_ai = last_swing_low
-            stop_loss_ai = last_swing_low + sl_dist
-            tp2_ai = last_swing_low - (sl_dist * tp_ratio)
+        # EMA score
+        ema_score = min(100.0, (dev_val / 5.0) * 100.0)
 
-    conn.close()
-    win_rate_ai = (ai_winning_trades / ai_total_trades * 100) if ai_total_trades > 0 else 0
-    print(f"📈 {symbol} | آموزش خام: {total_trades_raw} پوزیشن | تست AI (لایو): {ai_total_trades} معامله، وین‌ریت: {win_rate_ai:.1f}%، سود: {ai_total_pnl:.1f}%")
-    
+        # AI score
+        ai_score    = 0.0
+        ai_approved = True  # اگر مدلی نباشد، فیلتر AI غیرفعال است
+        if model is not None:
+            try:
+                features = {
+                    'feat_adx': current_adx, 'feat_rsi': current_rsi,
+                    'feat_rsi_momentum': rsi_momentum, 'feat_ema_deviation': dev_val,
+                    'feat_atr_percent': float(candle.get('feat_atr_percent', 0)),
+                    'feat_trend_line':  float(candle.get('feat_trend_line', 0)),
+                    'feat_body_ratio':  float(candle.get('feat_body_ratio', 0)),
+                }
+                raw = model.predict_probability(pair, features)
+                ai_score    = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
+                ai_approved = ai_score >= ai_threshold
+            except Exception as e:
+                logger.debug("AI error در بکتست %s کندل %d: %s", pair, i, e)
+                ai_approved = False
+
+        total_score = ai_score * 0.40 + adx_score * 0.20 + rsi_score * 0.20 + ema_score * 0.20
+
+        if total_score < min_score or not ai_approved:
+            continue
+
+        if len(open_trades) >= MAX_OPEN_POSITIONS:
+            continue
+
+        # Swing levels
+        swing_high = strategy_utils.find_last_swing(df_slice, 'high', swing_window)
+        swing_low  = strategy_utils.find_last_swing(df_slice, 'low',  swing_window)
+
+        if swing_high is None or swing_low is None:
+            continue
+
+        trade_id = f"{pair}_{i}"
+
+        # ورود LONG
+        if high_price > swing_high and current_rsi > 50:
+            sl_dist = min(1.5 * atr_val * sl_ratio, current_price * MAX_SL_PCT)
+            if sl_dist <= 0:
+                continue
+            trade = {
+                'id':          trade_id,
+                'pair':        pair,
+                'direction':   'LONG',
+                'entry_price': round(current_price, 6),
+                'stop_loss':   round(current_price - sl_dist, 6),
+                'tp1':         round(current_price + sl_dist * tp_ratio / 2, 6),
+                'tp2':         round(current_price + sl_dist * tp_ratio,     6),
+                'entry_time':  str(candle.name) if hasattr(candle, 'name') else str(i),
+                'status':      'OPEN',
+                'total_score': round(total_score, 2),
+                'ai_score':    round(ai_score, 2),
+            }
+            open_trades.append(trade)
+            save_backtest_trade(trade)
+
+        # ورود SHORT
+        elif low_price < swing_low and current_rsi < 50:
+            sl_dist = min(1.5 * atr_val * sl_ratio, current_price * MAX_SL_PCT)
+            if sl_dist <= 0:
+                continue
+            trade = {
+                'id':          trade_id,
+                'pair':        pair,
+                'direction':   'SHORT',
+                'entry_price': round(current_price, 6),
+                'stop_loss':   round(current_price + sl_dist, 6),
+                'tp1':         round(current_price - sl_dist * tp_ratio / 2, 6),
+                'tp2':         round(current_price - sl_dist * tp_ratio,     6),
+                'entry_time':  str(candle.name) if hasattr(candle, 'name') else str(i),
+                'status':      'OPEN',
+                'total_score': round(total_score, 2),
+                'ai_score':    round(ai_score, 2),
+            }
+            open_trades.append(trade)
+            save_backtest_trade(trade)
+
+    # بستن معاملات باقی‌مانده با قیمت آخر
+    last_price = float(df_full.iloc[-1]['Close'])
+    for trade in open_trades:
+        entry     = trade['entry_price']
+        direction = trade['direction']
+        pnl = ((last_price - entry) / entry * 100 if direction == 'LONG'
+               else (entry - last_price) / entry * 100)
+        trade['pnl_percent'] = round(pnl, 4)
+        trade['close_price'] = round(last_price, 6)
+        trade['status']      = 'EXPIRED'
+        closed_trades.append(trade)
+        close_backtest_trade(trade['id'], last_price, 'EXPIRED')
+
+    # --- محاسبه نتایج ---
+    result = _compute_stats(pair, closed_trades)
+
+    # به‌روزرسانی Summary CSV
+    generate_summary()
+
+    logger.info("📊 بکتست %s | معاملات: %d | Win Rate: %.1f%% | Total PnL: %.2f%%",
+                pair, result['total'], result['win_rate'], result['total_pnl'])
+    return result
+
+
+# ---------------------------------------------------------------------------
+# کمکی‌ها
+# ---------------------------------------------------------------------------
+
+def _compute_stats(pair: str, trades: list) -> dict:
+    if not trades:
+        return _empty_result(pair)
+
+    pnls       = [t['pnl_percent'] for t in trades if 'pnl_percent' in t]
+    wins       = sum(1 for p in pnls if p > 0)
+    losses     = sum(1 for p in pnls if p <= 0)
+    total      = len(pnls)
+    win_rate   = round(wins / total * 100, 1) if total else 0.0
+    total_pnl  = round(sum(pnls), 2)
+    avg_pnl    = round(sum(pnls) / total, 2) if total else 0.0
+
+    # Max Drawdown
+    equity  = 100.0
+    peak    = 100.0
+    max_dd  = 0.0
+    for p in pnls:
+        equity *= (1 + p / 100)
+        peak    = max(peak, equity)
+        dd      = (peak - equity) / peak * 100
+        max_dd  = max(max_dd, dd)
+
     return {
-        "symbol": symbol, 
-        "total_trades": ai_total_trades, 
-        "win_rate": round(win_rate_ai, 2), 
-        "total_pnl_percent": round(ai_total_pnl, 2)
+        'pair':         pair,
+        'total':        total,
+        'wins':         wins,
+        'losses':       losses,
+        'win_rate':     win_rate,
+        'avg_pnl':      avg_pnl,
+        'total_pnl':    total_pnl,
+        'max_drawdown': round(-max_dd, 2),
+        'best_trade':   round(max(pnls), 2) if pnls else 0.0,
+        'worst_trade':  round(min(pnls), 2) if pnls else 0.0,
+        'trades':       trades,
     }
 
-def run_all_backtests():
-    db_path = config.DB_PATH_BACKTEST
-    
-    # حذف ایمن دیتابیس بکتست محلی قدیمی برای جلوگیری از تداخل ساختاری لوکال
-    if os.path.exists(db_path):
-        try:
-            os.remove(db_path)
-        except:
-            pass
 
-    init_backtest_db(db_path)
-    print("📊 شروع پروسه دوفازی بکتست: محاسبات تمیز RSI + هماهنگی با هوش مصنوعی و پارامترهای اختصاصی...")
-    
-    brain = TradingBrain()
-    summary_results = []
-    
-    for s in config.WATCHLIST:
-        try:
-            res = run_backtest_for_symbol(s, db_path, brain)
-            if res:
-                summary_results.append(res)
-        except Exception as e:
-            print(f"❌ خطا در پردازش {s}: {e}")
-            
-    if summary_results:
-        report_path = os.path.join(os.getcwd(), "backtest_table_summary.csv")
-        pd.DataFrame(summary_results).to_csv(report_path, index=False, encoding='utf-8')
-        print(f"✅ فایل خلاصه نتایج نهایی در ریشه پروژه ذخیره شد: {report_path}")
-    else:
-        print("❌ اخطار: لیستی از نتایج بکتست برای ذخیره وجود ندارد.")
-
-if __name__ == "__main__":
-    run_all_backtests()
+def _empty_result(pair: str) -> dict:
+    return {
+        'pair': pair, 'total': 0, 'wins': 0, 'losses': 0,
+        'win_rate': 0.0, 'avg_pnl': 0.0, 'total_pnl': 0.0,
+        'max_drawdown': 0.0, 'best_trade': 0.0, 'worst_trade': 0.0,
+        'trades': [],
+    }
