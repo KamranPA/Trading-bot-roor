@@ -1,11 +1,12 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (نسخه نهایی سازگار با Supabase PostgreSQL)
+# FILE PATH: main.py (نسخه نهایی سازگار با Supabase PostgreSQL + Dynamic Params)
 # ---------------------------------------------------------
 import os
 import sys
 import logging
 import threading
 import datetime
+import json
 from concurrent.futures import ThreadPoolExecutor
 
 # اضافه کردن مسیر پروژه به سیستم
@@ -25,6 +26,34 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 BRAIN = TradingBrain()
 db_lock = threading.Lock()
+
+def get_symbol_params(symbol):
+    """
+    خواندن پارامترهای اختصاصی هر ارز از فایل best_params.json برای محیط لایو.
+    در صورتی که پارامتری یافت نشود، از مقادیر پیش‌فرض config استفاده می‌شود.
+    """
+    params_file = os.path.join(BASE_DIR, 'best_params.json')
+    
+    # مقادیر پیش‌فرض (در صورت نبودن تنظیمات اختصاصی)
+    default_params = {
+        'ADX_THRESHOLD': config.ADX_THRESHOLD if hasattr(config, 'ADX_THRESHOLD') else 15.0,
+        'SWING_WINDOW': config.SWING_WINDOW if hasattr(config, 'SWING_WINDOW') else 3,
+        'SL_RATIO': config.SL_RATIO if hasattr(config, 'SL_RATIO') else 1.0,
+        'TP_RATIO': config.TP_RATIO if hasattr(config, 'TP_RATIO') else 1.5,
+        'RSI_MIDLINE': 50.0
+    }
+    
+    if os.path.exists(params_file):
+        try:
+            with open(params_file, 'r') as f:
+                all_params = json.load(f)
+                if symbol in all_params:
+                    # ترکیب تنظیمات اختصاصی با پیش‌فرض‌ها
+                    return {**default_params, **all_params[symbol]}
+        except Exception as e:
+            logging.error(f"⚠️ خطا در خواندن فایل best_params.json برای ارز {symbol}: {e}")
+            
+    return default_params
 
 def check_exits():
     """بررسی قیمت و بستن پوزیشن‌ها در دیتابیس ابری"""
@@ -73,7 +102,11 @@ def process_pair(pair):
         if df is None or df.empty: return
         df = indicators.calculate_indicators(df)
         
-        res = strategy.generate_signal(df, pair, model=BRAIN)
+        # ۱. دریافت پارامترهای اختصاصی همین ارز
+        sym_params = get_symbol_params(pair)
+        
+        # ۲. ارسال پارامترها به ماژول استراتژی برای تصمیم‌گیری
+        res = strategy.generate_signal(df, pair, model=BRAIN, params=sym_params)
         signal = res if isinstance(res, dict) else None
         
         t_score = res.get('total_score', 0.0) if isinstance(res, dict) else 0.0
@@ -106,7 +139,6 @@ def process_pair(pair):
         logging.error(f"خطا در پردازش {pair}: {e}")
 
 def run_auto_optimization():
-    # بررسی دیتابیس ابری به جای فایل محلی
     try:
         count = database.get_open_positions_count()
         if count % 50 == 0 and count > 0:
