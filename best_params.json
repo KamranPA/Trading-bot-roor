@@ -1,49 +1,49 @@
 {
     "BTC/USDT": {
-        "ADX_THRESHOLD": 15,
+        "ADX_THRESHOLD": 20,
         "SWING_WINDOW": 7,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "ETH/USDT": {
-        "ADX_THRESHOLD": 15,
-        "SWING_WINDOW": 7,
+        "ADX_THRESHOLD": 20,
+        "SWING_WINDOW": 3,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "SOL/USDT": {
-        "ADX_THRESHOLD": 15,
+        "ADX_THRESHOLD": 20,
         "SWING_WINDOW": 7,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "DOT/USDT": {
-        "ADX_THRESHOLD": 15,
-        "SWING_WINDOW": 3,
+        "ADX_THRESHOLD": 25,
+        "SWING_WINDOW": 5,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "LINK/USDT": {
-        "ADX_THRESHOLD": 15,
+        "ADX_THRESHOLD": 25,
         "SWING_WINDOW": 3,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "AVAX/USDT": {
-        "ADX_THRESHOLD": 15,
-        "SWING_WINDOW": 3,
+        "ADX_THRESHOLD": 20,
+        "SWING_WINDOW": 7,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "XRP/USDT": {
-        "ADX_THRESHOLD": 15,
+        "ADX_THRESHOLD": 25,
         "SWING_WINDOW": 3,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "LTC/USDT": {
         "ADX_THRESHOLD": 20,
-        "SWING_WINDOW": 7,
+        "SWING_WINDOW": 5,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
@@ -55,7 +55,7 @@
     },
     "ATOM/USDT": {
         "ADX_THRESHOLD": 15,
-        "SWING_WINDOW": 3,
+        "SWING_WINDOW": 7,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     }
