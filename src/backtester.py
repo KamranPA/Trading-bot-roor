@@ -185,6 +185,17 @@ def run_backtest(
 
         trade_id = f"{pair}_{i}"
 
+        # فیچرهای مشترک برای ذخیره با معامله (ورودی آموزش مدل AI)
+        trade_features = {
+            'feat_adx':           round(current_adx, 4),
+            'feat_rsi':           round(current_rsi, 4),
+            'feat_rsi_momentum':  round(rsi_momentum, 4),
+            'feat_ema_deviation': round(dev_val, 4),
+            'feat_atr_percent':   round(float(candle.get('feat_atr_percent', 0)), 4),
+            'feat_trend_line':    round(float(candle.get('feat_trend_line', 0)), 4),
+            'feat_body_ratio':    round(float(candle.get('feat_body_ratio', 0)), 4),
+        }
+
         # ورود LONG
         if high_price > swing_high and current_rsi > 50:
             sl_dist = min(1.5 * atr_val * sl_ratio, current_price * MAX_SL_PCT)
@@ -202,6 +213,7 @@ def run_backtest(
                 'status':      'OPEN',
                 'total_score': round(total_score, 2),
                 'ai_score':    round(ai_score, 2),
+                **trade_features,
             }
             open_trades.append(trade)
             save_backtest_trade(trade)
@@ -223,6 +235,7 @@ def run_backtest(
                 'status':      'OPEN',
                 'total_score': round(total_score, 2),
                 'ai_score':    round(ai_score, 2),
+                **trade_features,
             }
             open_trades.append(trade)
             save_backtest_trade(trade)
