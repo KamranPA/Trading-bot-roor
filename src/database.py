@@ -1,9 +1,10 @@
 # ---------------------------------------------------------
-# FILE PATH: src/database.py  (v3.0 - Schema Migration)
-# تغییرات نسبت به v2.0:
-#   - اضافه شدن ALTER TABLE migrations به init_db()
-#     تا ستون‌های جدید (feat_trend_line، feat_body_ratio و ...) 
-#     به جدول موجود در Supabase اضافه شوند (idempotent — ایمن برای تکرار)
+# FILE PATH: src/database.py  (v3.1 - SSL Fix for Supabase)
+# تغییرات نسبت به v3.0:
+#   - اضافه شدن sslmode=require به اتصال psycopg2
+#     (Supabase از GitHub Actions بدون SSL رد می‌کند)
+#   - اگر DATABASE_URL قبلاً sslmode دارد: تغییر نمی‌دهیم
+#   - اگر ندارد: ?sslmode=require اضافه می‌شود
 # ---------------------------------------------------------
 import os
 import logging
@@ -24,12 +25,15 @@ def _get_database_url() -> str:
     url = os.environ.get("DATABASE_URL")
     if not url:
         raise EnvironmentError("متغیر محیطی DATABASE_URL تنظیم نشده است.")
+    # Supabase از GitHub Actions نیاز به SSL دارد
+    if "sslmode" not in url:
+        url = url + ("&" if "?" in url else "?") + "sslmode=require"
     return url
 
 
 def _get_connection():
     try:
-        conn = psycopg2.connect(_get_database_url(), connect_timeout=10)
+        conn = psycopg2.connect(_get_database_url(), connect_timeout=15)
         conn.autocommit = False
         return conn
     except OperationalError as e:
@@ -108,8 +112,6 @@ CREATE INDEX IF NOT EXISTS idx_scan_log_pair ON scan_log (pair);
 CREATE INDEX IF NOT EXISTS idx_scan_log_at   ON scan_log (scanned_at DESC);
 """
 
-# Migration: اضافه کردن ستون‌های جدید به جدول موجود
-# ADD COLUMN IF NOT EXISTS — ایمن برای تکرار، بدون خطا اگر ستون وجود داشته باشد
 _MIGRATION_SQL = """
 ALTER TABLE signals ADD COLUMN IF NOT EXISTS swing_ref          NUMERIC(20, 8);
 ALTER TABLE signals ADD COLUMN IF NOT EXISTS feat_adx           NUMERIC(10, 4);
@@ -131,17 +133,10 @@ ALTER TABLE signals ADD COLUMN IF NOT EXISTS pnl_percent        NUMERIC(10, 4);
 
 
 def init_db() -> None:
-    """
-    ساخت جدول‌ها (در صورت عدم وجود) + اجرای migration برای ستون‌های جدید.
-    ایمن برای تکرار (idempotent).
-    """
     try:
         with _db() as conn:
             with conn.cursor() as cur:
-                # ۱. ایجاد جدول‌ها
                 cur.execute(_CREATE_SQL)
-                # ۲. اضافه کردن ستون‌های جدید به جدول موجود
-                #    اگر ستون از قبل وجود دارد، IF NOT EXISTS خطا نمی‌دهد
                 for stmt in _MIGRATION_SQL.strip().split(';'):
                     stmt = stmt.strip()
                     if stmt:
@@ -252,7 +247,6 @@ def update_position_status(signal_id: int, new_status: str,
         if updated == 0:
             logger.warning("update_position_status: id=%s یافت نشد یا قبلاً بسته شده", signal_id)
             return False
-        logger.debug("پوزیشن %s → %s | PnL: %.2f%%", signal_id, new_status, pnl_percent)
         return True
     except Exception as e:
         logger.error("update_position_status خطا id=%s: %s", signal_id, e)
