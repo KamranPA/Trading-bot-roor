@@ -80,45 +80,65 @@ def save_backtest_trade(trade: dict) -> bool:
 
 def close_backtest_trade(trade_id, close_price: float, status: str = 'CLOSED') -> bool:
     """
-    یک معامله باز را با قیمت بسته‌شدن به‌روزرسانی می‌کند.
+    وضعیت بسته‌شدن یک معامله را در cache داخلی ثبت می‌کند.
+    فایل CSV در پایان بکتست از طریق flush_closed_trades() نوشته می‌شود.
 
     Args:
-        trade_id: شناسه معامله
+        trade_id:    شناسه معامله
         close_price: قیمت بسته‌شدن
-        status: 'CLOSED' یا 'SL_HIT' یا 'TP_HIT'
+        status:      'SL_HIT' | 'TP_HIT' | 'EXPIRED' | 'CLOSED'
     """
-    _ensure_dir()
+    _CLOSE_CACHE[trade_id] = {
+        'close_price': close_price,
+        'status':      status,
+        'close_time':  _utcnow_iso(),
+    }
+    return True
+
+
+def flush_closed_trades() -> bool:
+    """
+    تمام بروزرسانی‌های cache را یکجا در CSV اعمال می‌کند.
+    باید یک‌بار در پایان run_all_backtests() فراخوانی شود.
+    """
+    if not _CLOSE_CACHE:
+        return True
     if not os.path.isfile(BACKTEST_TRADES_CSV):
-        logger.warning("فایل بکتست یافت نشد: %s", BACKTEST_TRADES_CSV)
+        logger.warning("flush_closed_trades: فایل بکتست یافت نشد")
         return False
     try:
-        df = pd.read_csv(BACKTEST_TRADES_CSV)
-        mask = df['id'] == trade_id
-        if not mask.any():
-            logger.warning("معامله با id=%s یافت نشد", trade_id)
-            return False
+        df = pd.read_csv(BACKTEST_TRADES_CSV, encoding='utf-8')
 
-        row = df[mask].iloc[0]
-        entry  = float(row['entry_price'])
-        direction = str(row['direction'])
+        for trade_id, update in _CLOSE_CACHE.items():
+            mask = df['id'] == trade_id
+            if not mask.any():
+                continue
 
-        # محاسبه PnL
-        if direction == 'LONG':
-            pnl = ((close_price - entry) / entry) * 100
-        else:
-            pnl = ((entry - close_price) / entry) * 100
+            row       = df[mask].iloc[0]
+            entry     = float(row['entry_price'])
+            direction = str(row['direction'])
+            cp        = update['close_price']
 
-        df.loc[mask, 'close_price'] = round(close_price, 6)
-        df.loc[mask, 'pnl_percent'] = round(pnl, 4)
-        df.loc[mask, 'status']      = status
-        df.loc[mask, 'close_time']  = _utcnow_iso()
+            pnl = ((cp - entry) / entry * 100
+                   if direction == 'LONG'
+                   else (entry - cp) / entry * 100)
+
+            df.loc[mask, 'close_price'] = round(cp, 6)
+            df.loc[mask, 'pnl_percent'] = round(pnl, 4)
+            df.loc[mask, 'status']      = update['status']
+            df.loc[mask, 'close_time']  = update['close_time']
 
         df.to_csv(BACKTEST_TRADES_CSV, index=False, encoding='utf-8')
-        logger.debug("معامله %s بسته شد — PnL: %.2f%%", trade_id, pnl)
+        _CLOSE_CACHE.clear()
+        logger.info("✅ flush_closed_trades: %d معامله در CSV ثبت شد", len(df))
         return True
     except Exception as e:
-        logger.error("خطا در بستن معامله بکتست %s: %s", trade_id, e)
+        logger.error("flush_closed_trades خطا: %s", e)
         return False
+
+
+# cache داخلی بسته‌شدن معاملات — از نوشتن مکرر روی دیسک جلوگیری می‌کند
+_CLOSE_CACHE: dict = {}
 
 
 # ---------------------------------------------------------------------------
