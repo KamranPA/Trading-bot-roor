@@ -1,7 +1,7 @@
 name: 🐛 Debug Main - Test Signal Save
 
 on:
-  workflow_dispatch:  # اجرای دستی
+  workflow_dispatch:
   push:
     branches: [ main, master ]
     paths:
@@ -49,8 +49,31 @@ jobs:
           if [ -f debug_main.py ]; then
             echo "✅ debug_main.py found"
           else
-            echo "⚠️ debug_main.py not found - creating from template"
-            cat > debug_main.py << 'EOF'
+            echo "⚠️ debug_main.py not found"
+          fi
+      
+      - name: 🏗️ Check file structure
+        run: |
+          # اطمینان از وجود فایل database.py در src
+          if [ ! -f src/database.py ]; then
+            echo "⚠️ src/database.py not found - checking root"
+            if [ -f database.py ]; then
+              mkdir -p src
+              cp database.py src/
+              echo "✅ database.py copied to src/"
+            fi
+          fi
+          
+          # نمایش محتوای src
+          echo "📁 Files in src:"
+          ls -la src/
+      
+      - name: 🐛 Create debug_main.py if missing
+        if: steps.check.outputs.exists != 'true'
+        run: |
+          echo "Creating debug_main.py..."
+          # ایجاد فایل با استفاده از echo و cat
+          cat > debug_main.py << 'ENDOFFILE'
 #!/usr/bin/env python3
 import os
 import sys
@@ -144,24 +167,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-EOF
-          fi
-      
-      - name: 🏗️ Check file structure
-        run: |
-          # اطمینان از وجود فایل database.py در src
-          if [ ! -f src/database.py ]; then
-            echo "⚠️ src/database.py not found - checking root"
-            if [ -f database.py ]; then
-              mkdir -p src
-              cp database.py src/
-              echo "✅ database.py copied to src/"
-            fi
-          fi
-          
-          # نمایش محتوای src
-          echo "📁 Files in src:"
-          ls -la src/
+ENDOFFILE
       
       - name: 🐛 Run Debug Main
         env:
