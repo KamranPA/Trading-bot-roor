@@ -1,11 +1,9 @@
 # ---------------------------------------------------------
-# FILE PATH: src/strategy.py  (FIXED & IMPROVED v2.0)
-# تغییرات:
-#   1. except خالی → except Exception as e + logging
-#   2. جداسازی database از حلقه اصلی (db_check پیش از ورود به تابع)
-#   3. اصلاح entry_price: همیشه current_price نه swing قدیمی
-#   4. بهبود محاسبه rsi_score (باگ منطقی)
-#   5. مستندات داخلی کامل‌تر
+# FILE PATH: src/strategy.py  (v3.0 - Smart AI Handling)
+# تغییرات نسبت به v2.0:
+#   1. پشتیبانی از brain.has_model() — رفع TypeError وقتی مدل وجود ندارد
+#   2. وقتی مدل نیست: امتیاز بر اساس اندیکاتورها (بدون وزن AI مصنوعی)
+#   3. وقتی مدل هست ولی ai_score پایین است: سیگنال رد می‌شود نه crash
 # ---------------------------------------------------------
 import logging
 import datetime
@@ -14,42 +12,28 @@ import config
 from src import database, strategy_utils
 
 logger = logging.getLogger(__name__)
-
+r
 
 # ---------------------------------------------------------------------------
 # فیلتر ۸ ساعته
 # ---------------------------------------------------------------------------
 
 def is_blocked_by_8h_filter(pair: str, current_direction: str) -> bool:
-    """
-    اگر در ۸ ساعت گذشته سیگنال هم‌جهت برای این ارز صادر شده باشد،
-    True برمی‌گردد (سیگنال فعلی بلاک می‌شود).
-    """
     try:
         last_signal = database.get_last_signal_for_pair(pair)
         if not last_signal:
             return False
-
         last_direction = last_signal.get('direction')
-        last_time = last_signal.get('timestamp')
-
-        if last_direction != current_direction:
+        last_time      = last_signal.get('timestamp')
+        if last_direction != current_direction or last_time is None:
             return False
-
-        if last_time is None:
-            return False
-
         now = datetime.datetime.now(datetime.timezone.utc)
-        # اطمینان از timezone-aware بودن last_time برای مقایسه درست
         if last_time.tzinfo is None:
             last_time = last_time.replace(tzinfo=datetime.timezone.utc)
-
-        elapsed_hours = (now - last_time).total_seconds() / 3600
-        return elapsed_hours < 8
-
+        return (now - last_time).total_seconds() / 3600 < 8
     except Exception as e:
-        logger.warning("خطا در بررسی فیلتر ۸ ساعته برای %s: %s", pair, e)
-        return False  # در صورت خطا، بلاک نکن تا سیگنال از دست نرود
+        logger.warning("خطا در فیلتر ۸ ساعته برای %s: %s", pair, e)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -59,111 +43,104 @@ def is_blocked_by_8h_filter(pair: str, current_direction: str) -> bool:
 def generate_signal(df, pair: str, model=None, params: dict = None,
                     open_positions_count: int = 0) -> dict:
     """
-    نسخه اصلاح‌شده: پارامتر open_positions_count از بیرون تزریق می‌شود
-    تا وابستگی مستقیم به database در حلقه اصلی حذف شود.
+    تولید سیگنال ورود.
 
-    Args:
-        df: دیتافریم کندل‌ها با اندیکاتورهای محاسبه‌شده
-        pair: نماد ارز (مثلاً "BTC/USDT")
-        model: شیء TradingBrain برای پیش‌بینی AI
-        params: دیکشنری پارامترهای اختصاصی ارز
-        open_positions_count: تعداد پوزیشن‌های باز (از main.py تزریق می‌شود)
-
-    Returns:
-        دیکشنری امتیازها + اطلاعات سیگنال (در صورت وجود)
+    اگر مدل AI آموزش‌دیده برای این ارز وجود داشته باشد:
+        امتیاز = (AI×40 + ADX×20 + RSI×20 + EMA×20) / 100
+    اگر مدل وجود نداشته باشد:
+        امتیاز = (ADX×20 + RSI×20 + EMA×20) / 60  ← فیلتر خالص بر اساس اندیکاتورها
     """
     default_scores = {
-        'total_score': 0.0,
-        'ai_score': 0.0,
-        'rsi_score': 0.0,
-        'adx_score': 0.0,
-        'ema_score': 0.0,
+        'total_score': 0.0, 'ai_score': 0.0,
+        'rsi_score': 0.0, 'adx_score': 0.0, 'ema_score': 0.0,
         'direction': None,
     }
 
-    # --- اعتبارسنجی ورودی‌ها ---
     if df is None or len(df) < 200:
-        logger.debug("دیتافریم ناکافی برای %s (طول: %s)", pair, len(df) if df is not None else 0)
+        logger.debug("دیتافریم ناکافی برای %s (%s)", pair, len(df) if df is not None else 0)
         return default_scores
 
     if params is None:
-        logger.warning("پارامتر params برای %s ارسال نشده؛ از پیش‌فرض‌ها استفاده می‌شود.", pair)
         params = {}
 
-    # --- استخراج پارامترهای اختصاصی ---
-    adx_thresh       = float(params.get('ADX_THRESHOLD',  config.ADX_THRESHOLD))
-    tp_ratio         = float(params.get('TP_RATIO',        config.TP_RATIO))
-    sl_ratio         = float(params.get('SL_RATIO',        config.SL_RATIO))
-    ai_threshold     = float(params.get('AI_THRESHOLD',    getattr(config, 'AI_THRESHOLD', 65.0)))
-    swing_window     = int(params.get('SWING_WINDOW',      config.SWING_WINDOW))
-    MAX_SL_PERCENT   = float(getattr(config, 'MAX_SL_PERCENT', 0.03))
+    adx_thresh     = float(params.get('ADX_THRESHOLD', config.ADX_THRESHOLD))
+    tp_ratio       = float(params.get('TP_RATIO',       config.TP_RATIO))
+    sl_ratio       = float(params.get('SL_RATIO',       config.SL_RATIO))
+    ai_threshold   = float(params.get('AI_THRESHOLD',   getattr(config, 'AI_THRESHOLD', 65.0)))
+    swing_window   = int(params.get('SWING_WINDOW',     config.SWING_WINDOW))
+    MAX_SL_PERCENT = float(getattr(config, 'MAX_SL_PERCENT', 0.05))
 
-    # --- آخرین کندل ---
     candle = df.iloc[-1]
 
-    # -----------------------------------------------------------------------
-    # سیستم امتیازدهی
-    # -----------------------------------------------------------------------
-
-    # ADX score
-    current_adx = float(candle.get('feat_adx', 0))
-    if current_adx >= adx_thresh:
-        adx_score = min(100.0, 50.0 + (current_adx - adx_thresh) * 2.5)
-    else:
-        adx_score = max(0.0, (current_adx / (adx_thresh + 1e-10)) * 50.0)
-
-    # RSI score — اصلاح‌شده: منطق یکپارچه و بدون تناقض
-    current_rsi    = float(candle.get('feat_rsi', 50))
-    rsi_momentum   = float(candle.get('feat_rsi_momentum', 0))
-    if current_rsi > 50:
-        rsi_score = min(100.0, 50.0 + rsi_momentum * 5)
-    else:
-        rsi_score = min(100.0, 50.0 + (-rsi_momentum) * 5)
-    rsi_score = max(0.0, rsi_score)
-
-    # EMA deviation score
-    dev_val   = abs(float(candle.get('feat_ema_deviation', 0)))
-    ema_score = min(100.0, (dev_val / 5.0) * 100.0)
-
-    # -----------------------------------------------------------------------
-    # پیش‌بینی AI
-    # -----------------------------------------------------------------------
-    features_dict = {
-        'feat_adx':          current_adx,
-        'feat_atr_percent':  float(candle.get('feat_atr_percent', 0)),
-        'feat_rsi':          current_rsi,
-        'feat_trend_line':   float(candle.get('feat_trend_line', 0)),
-        'feat_ema_deviation': dev_val,
-        'feat_rsi_momentum': rsi_momentum,
-        'feat_body_ratio':   float(candle.get('feat_body_ratio', 0)),
-    }
-
-    ai_score    = 0.0
-    ai_approved = False
-
-    if model is not None:
-        try:
-            raw = model.predict_probability(pair, features_dict)
-            ai_score = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
-            ai_approved = ai_score >= ai_threshold
-        except Exception as e:
-            logger.error("خطا در پیش‌بینی AI برای %s: %s", pair, e)
-            return default_scores
-
-    # -----------------------------------------------------------------------
-    # امتیاز کل — وزن‌ها از config خوانده می‌شوند (مجموع وزن‌ها = 100)
-    # -----------------------------------------------------------------------
+    # --- وزن‌ها ---
     w_ai  = float(getattr(config, 'WEIGHT_AI',  40))
     w_adx = float(getattr(config, 'WEIGHT_ADX', 20))
     w_rsi = float(getattr(config, 'WEIGHT_RSI', 20))
     w_ema = float(getattr(config, 'WEIGHT_EMA', 20))
     w_sum = (w_ai + w_adx + w_rsi + w_ema) or 100.0
-    total_score = (
-        ai_score  * w_ai  +
-        adx_score * w_adx +
-        rsi_score * w_rsi +
-        ema_score * w_ema
-    ) / w_sum
+
+    # --- اندیکاتورها ---
+    current_adx  = float(candle.get('feat_adx', 0))
+    current_rsi  = float(candle.get('feat_rsi', 50))
+    rsi_momentum = float(candle.get('feat_rsi_momentum', 0))
+    dev_val      = abs(float(candle.get('feat_ema_deviation', 0)))
+
+    adx_score = (
+        min(100.0, 50.0 + (current_adx - adx_thresh) * 2.5)
+        if current_adx >= adx_thresh
+        else max(0.0, (current_adx / (adx_thresh + 1e-10)) * 50.0)
+    )
+    rsi_score = max(0.0, min(100.0,
+        50.0 + rsi_momentum * 5 if current_rsi > 50 else 50.0 - rsi_momentum * 5
+    ))
+    ema_score = min(100.0, (dev_val / 5.0) * 100.0)
+
+    # --- AI score ---
+    features_dict = {
+        'feat_adx':           current_adx,
+        'feat_atr_percent':   float(candle.get('feat_atr_percent', 0)),
+        'feat_rsi':           current_rsi,
+        'feat_trend_line':    float(candle.get('feat_trend_line', 0)),
+        'feat_ema_deviation': dev_val,
+        'feat_rsi_momentum':  rsi_momentum,
+        'feat_body_ratio':    float(candle.get('feat_body_ratio', 0)),
+    }
+
+    # بررسی وجود مدل آموزش‌دیده برای این ارز
+    model_active = (
+        model is not None
+        and hasattr(model, 'has_model')
+        and model.has_model(pair)
+    )
+
+    ai_score    = 0.0
+    ai_approved = True  # پیش‌فرض: وقتی مدلی نیست، AI فیلتر نمی‌کند
+
+    if model_active:
+        try:
+            raw = model.predict_probability(pair, features_dict)
+            if raw is None:
+                # has_model() True بود ولی None برگشت — خطای غیرمنتظره
+                logger.warning("predict_probability برای %s مقدار None برگرداند", pair)
+                ai_approved = False
+            else:
+                ai_score    = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
+                ai_approved = ai_score >= ai_threshold
+        except Exception as e:
+            logger.error("خطا در پیش‌بینی AI برای %s: %s", pair, e)
+            ai_approved = False
+
+    # --- امتیاز کل ---
+    if model_active:
+        total_score = (
+            ai_score * w_ai + adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema
+        ) / w_sum
+    else:
+        # بدون مدل: فقط اندیکاتورها — امتیاز خالص و بدون اثر مصنوعی
+        w_ind = (w_adx + w_rsi + w_ema) or 60.0
+        total_score = (
+            adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema
+        ) / w_ind
 
     score_data = {
         'total_score': round(total_score, 2),
@@ -174,100 +151,85 @@ def generate_signal(df, pair: str, model=None, params: dict = None,
         'direction':   None,
     }
 
-    # --- فیلتر امتیاز و ظرفیت پوزیشن ---
+    min_score     = float(getattr(config, 'MIN_REQUIRED_SCORE', 65))
     max_positions = getattr(config, 'MAX_OPEN_POSITIONS', 3)
-    min_score = float(getattr(config, 'MIN_REQUIRED_SCORE', 60))
+
     if total_score < min_score:
         logger.debug("%s: امتیاز %.1f زیر آستانه %.0f", pair, total_score, min_score)
         return score_data
-
     if open_positions_count >= max_positions:
-        logger.debug("%s: ظرفیت پوزیشن پر است (%d/%d)", pair, open_positions_count, max_positions)
+        logger.debug("%s: ظرفیت پوزیشن پر (%d/%d)", pair, open_positions_count, max_positions)
+        return score_data
+    if not ai_approved:
+        logger.debug("%s: AI سیگنال را رد کرد (ai_score=%.1f)", pair, ai_score)
         return score_data
 
-    # -----------------------------------------------------------------------
-    # یافتن Swing High / Low
-    # -----------------------------------------------------------------------
     last_swing_high = strategy_utils.find_last_swing(df, 'high', swing_window)
     last_swing_low  = strategy_utils.find_last_swing(df, 'low',  swing_window)
-
     if last_swing_high is None or last_swing_low is None:
-        logger.debug("%s: swing high/low یافت نشد", pair)
         return score_data
 
-    # -----------------------------------------------------------------------
-    # قیمت‌های کندل فعلی
-    # -----------------------------------------------------------------------
-    high_price = float(candle['High'])
-    low_price  = float(candle['Low'])
-    # FIX: از close به عنوان قیمت ورود واقعی استفاده می‌کنیم (نه swing قدیمی)
+    high_price  = float(candle['High'])
+    low_price   = float(candle['Low'])
     close_price = float(candle['Close'])
-    atr_val    = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
+    atr_val     = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
 
-    # مبلغ ریسک هر معامله = درصد ریسک از کل سرمایه (پیش‌فرض ۱٪)
-    risk_amount = float(getattr(config, 'TOTAL_CAPITAL', 1000.0)) * \
-        float(getattr(config, 'RISK_PERCENT', 1.0)) / 100.0
+    risk_amount = (
+        float(getattr(config, 'TOTAL_CAPITAL', 1000.0))
+        * float(getattr(config, 'RISK_PERCENT', 1.0)) / 100.0
+    )
 
-    def _position_size(sl_distance: float) -> float:
-        """حجم اسمی پوزیشن (USDT) به‌گونه‌ای که ضرر در SL برابر risk_amount شود."""
-        if sl_distance <= 0:
-            return 0.0
-        return round(risk_amount * close_price / sl_distance, 2)
+    def _position_size(sl_dist: float) -> float:
+        return round(risk_amount * close_price / sl_dist, 2) if sl_dist > 0 else 0.0
 
-    # -----------------------------------------------------------------------
-    # منطق ورود LONG
-    # -----------------------------------------------------------------------
+    # --- LONG ---
     if (high_price > last_swing_high
             and current_rsi > 50
-            and ai_approved
             and not is_blocked_by_8h_filter(pair, "LONG")):
 
         sl_dist = min(1.5 * atr_val * sl_ratio, close_price * MAX_SL_PERCENT)
         if sl_dist <= 0:
-            logger.warning("%s LONG: sl_dist صفر یا منفی — سیگنال لغو شد", pair)
             return score_data
 
         score_data.update({
-            'pair':        pair,
-            'direction':   'LONG',
-            'entry_price': round(close_price, 6),                          # FIX: close نه swing
-            'stop_loss':   round(close_price - sl_dist, 6),
-            'tp1':         round(close_price + sl_dist * tp_ratio / 2, 6),
-            'tp2':         round(close_price + sl_dist * tp_ratio,     6),
-            'swing_ref':   round(last_swing_high, 6),                      # مرجع swing برای لاگ
+            'pair':          pair,
+            'direction':     'LONG',
+            'entry_price':   round(close_price, 6),
+            'stop_loss':     round(close_price - sl_dist, 6),
+            'tp1':           round(close_price + sl_dist * tp_ratio / 2, 6),
+            'tp2':           round(close_price + sl_dist * tp_ratio,     6),
+            'swing_ref':     round(last_swing_high, 6),
             'position_size': _position_size(sl_dist),
             **features_dict,
         })
-        logger.info("🟢 LONG سیگنال: %s | امتیاز: %.1f | Entry: %.4f | SL: %.4f | TP2: %.4f",
-                    pair, total_score, close_price,
-                    score_data['stop_loss'], score_data['tp2'])
+        logger.info("🟢 LONG %s | امتیاز: %.1f%s | Entry: %.4f | SL: %.4f | TP2: %.4f",
+                    pair, total_score,
+                    f" | AI: {ai_score:.0f}" if model_active else " (بدون AI)",
+                    close_price, score_data['stop_loss'], score_data['tp2'])
 
-    # -----------------------------------------------------------------------
-    # منطق ورود SHORT
-    # -----------------------------------------------------------------------
+    # --- SHORT ---
     elif (low_price < last_swing_low
             and current_rsi < 50
-            and ai_approved
             and not is_blocked_by_8h_filter(pair, "SHORT")):
 
         sl_dist = min(1.5 * atr_val * sl_ratio, close_price * MAX_SL_PERCENT)
         if sl_dist <= 0:
-            logger.warning("%s SHORT: sl_dist صفر یا منفی — سیگنال لغو شد", pair)
             return score_data
 
         score_data.update({
-            'pair':        pair,
-            'direction':   'SHORT',
-            'entry_price': round(close_price, 6),                          # FIX: close نه swing
-            'stop_loss':   round(close_price + sl_dist, 6),
-            'tp1':         round(close_price - sl_dist * tp_ratio / 2, 6),
-            'tp2':         round(close_price - sl_dist * tp_ratio,     6),
-            'swing_ref':   round(last_swing_low, 6),
+            'pair':          pair,
+            'direction':     'SHORT',
+            'entry_price':   round(close_price, 6),
+            'stop_loss':     round(close_price + sl_dist, 6),
+            'tp1':           round(close_price - sl_dist * tp_ratio / 2, 6),
+            'tp2':           round(close_price - sl_dist * tp_ratio,     6),
+            'swing_ref':     round(last_swing_low, 6),
             'position_size': _position_size(sl_dist),
             **features_dict,
         })
-        logger.info("🔴 SHORT سیگنال: %s | امتیاز: %.1f | Entry: %.4f | SL: %.4f | TP2: %.4f",
-                    pair, total_score, close_price,
-                    score_data['stop_loss'], score_data['tp2'])
+        logger.info("🔴 SHORT %s | امتیاز: %.1f%s | Entry: %.4f | SL: %.4f | TP2: %.4f",
+                    pair, total_score,
+                    f" | AI: {ai_score:.0f}" if model_active else " (بدون AI)",
+                    close_price, score_data['stop_loss'], score_data['tp2'])
 
     return score_data
