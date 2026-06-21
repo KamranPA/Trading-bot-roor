@@ -155,7 +155,11 @@ def process_pair(pair: str, open_positions_count: int):
     try:
         df = coinex_client.get_coinex_candles(pair)
         if df is None or df.empty:
-            logger.debug("داده‌ای برای %s دریافت نشد", pair)
+            logger.warning("⚠️ دریافت کندل برای %s ناموفق بود — API_FAIL", pair)
+            try:
+                database.log_scan_status(pair, "API_FAIL")
+            except Exception:
+                pass
             return
 
         df = indicators.calculate_indicators(df)
