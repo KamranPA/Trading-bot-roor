@@ -21,7 +21,10 @@ if BASE_DIR not in sys.path:
 
 import config
 from src import indicators, strategy_utils
-from src.csv_store import save_backtest_trade, close_backtest_trade, generate_summary
+from src.csv_store import (
+    save_backtest_trade, close_backtest_trade,
+    flush_closed_trades, export_to_sqlite,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -256,9 +259,6 @@ def run_backtest(
     # --- محاسبه نتایج ---
     result = _compute_stats(pair, closed_trades)
 
-    # به‌روزرسانی Summary CSV
-    generate_summary()
-
     logger.info("📊 بکتست %s | معاملات: %d | Win Rate: %.1f%% | Total PnL: %.2f%%",
                 pair, result['total'], result['win_rate'], result['total_pnl'])
     return result
@@ -334,12 +334,12 @@ def run_all_backtests() -> dict:
     در پایان، داده‌ها در data/trading_bot_backtest.db (SQLite) نیز ذخیره می‌شوند.
     """
     from src.brain import TradingBrain
-    from src import csv_store
+    from src.csv_store import BACKTEST_TRADES_CSV
 
     # شروع از یک فایل تمیز تا معاملات اجراهای قبلی تکرار نشوند
-    if os.path.exists(csv_store.BACKTEST_TRADES_CSV):
+    if os.path.exists(BACKTEST_TRADES_CSV):
         try:
-            os.remove(csv_store.BACKTEST_TRADES_CSV)
+            os.remove(BACKTEST_TRADES_CSV)
         except OSError as e:
             logger.warning("حذف فایل بکتست قبلی ممکن نشد: %s", e)
 
@@ -362,8 +362,10 @@ def run_all_backtests() -> dict:
         params = all_params.get(symbol, {})
         results[symbol] = run_backtest(df_raw, symbol, params, model=brain)
 
-    # ۶. صادر کردن نتایج به SQLite (مورد نیاز workflow برای git add و upload artifact)
-    from src.csv_store import export_to_sqlite
+    # یک بار تمام بسته‌شدن‌ها را روی دیسک بنویس (جایگزین write مکرر)
+    flush_closed_trades()
+
+    # صادر کردن نتایج به SQLite (مورد نیاز workflow برای git add و upload artifact)
     export_to_sqlite()
 
     return results
