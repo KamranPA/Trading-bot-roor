@@ -151,27 +151,50 @@ def run_backtest(
         ema_score = min(100.0, (dev_val / 5.0) * 100.0)
 
         # AI score
+        # اگر مدل آموزش‌دیده برای این ارز وجود نداشته باشد:
+        #   - فیلتر AI خاموش می‌شود (ai_approved = True)
+        #   - امتیاز فقط بر اساس اندیکاتورها محاسبه می‌شود (بدون اثر مصنوعی AI)
+        #   - این باعث می‌شود داده بکتست خالص‌تر و منطقی‌تر باشد
+        model_active = (
+            model is not None
+            and hasattr(model, 'has_model')
+            and model.has_model(pair)
+        )
+
         ai_score    = 0.0
-        ai_approved = True  # اگر مدلی نباشد، فیلتر AI غیرفعال است
-        if model is not None:
+        ai_approved = True
+
+        if model_active:
             try:
                 features = {
-                    'feat_adx': current_adx, 'feat_rsi': current_rsi,
-                    'feat_rsi_momentum': rsi_momentum, 'feat_ema_deviation': dev_val,
-                    'feat_atr_percent': float(candle.get('feat_atr_percent', 0)),
-                    'feat_trend_line':  float(candle.get('feat_trend_line', 0)),
-                    'feat_body_ratio':  float(candle.get('feat_body_ratio', 0)),
+                    'feat_adx':           current_adx,
+                    'feat_rsi':           current_rsi,
+                    'feat_rsi_momentum':  rsi_momentum,
+                    'feat_ema_deviation': dev_val,
+                    'feat_atr_percent':   float(candle.get('feat_atr_percent', 0)),
+                    'feat_trend_line':    float(candle.get('feat_trend_line', 0)),
+                    'feat_body_ratio':    float(candle.get('feat_body_ratio', 0)),
                 }
                 raw = model.predict_probability(pair, features)
-                ai_score    = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
-                ai_approved = ai_score >= ai_threshold
+                if raw is not None:
+                    ai_score    = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
+                    ai_approved = ai_score >= ai_threshold
             except Exception as e:
                 logger.debug("AI error در بکتست %s کندل %d: %s", pair, i, e)
                 ai_approved = False
 
-        total_score = (
-            ai_score * w_ai + adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema
-        ) / w_sum
+        # محاسبه امتیاز کل
+        if model_active:
+            # مدل AI فعال: وزن کامل (AI + اندیکاتورها)
+            total_score = (
+                ai_score * w_ai + adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema
+            ) / w_sum
+        else:
+            # بدون مدل: فقط اندیکاتورها — بدون اثر مصنوعی NO_MODEL_PROBABILITY
+            w_ind = (w_adx + w_rsi + w_ema) or 60.0
+            total_score = (
+                adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema
+            ) / w_ind
 
         if total_score < min_score or not ai_approved:
             continue
