@@ -12,7 +12,6 @@ import config
 from src import database, strategy_utils
 
 logger = logging.getLogger(__name__)
-r
 
 # ---------------------------------------------------------------------------
 # فیلتر ۸ ساعته
