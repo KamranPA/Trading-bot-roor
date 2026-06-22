@@ -1,223 +1,328 @@
-# ---------------------------------------------------------
-# FILE PATH: src/train_model.py (v10.0 - Backtest-First Training)
-# تغییرات نسبت به نسخه قبلی:
-#   1. اولویت آموزش: بکتست → لایو (جبران کم‌بود داده لایو)
-#   2. ادغام داده‌های بکتست CSV با داده‌های لایو PostgreSQL
-#   3. فیلتر صحیح وضعیت: SL_HIT، TP_HIT و CLOSED همه دیده می‌شن
-#   4. حداقل نمونه‌ها از ۱۰ به ۳۰ افزایش یافت برای مدل قوی‌تر
-# ---------------------------------------------------------
+"""
+🔧 بهبود شده: train_model.py
+مشکل حل شده:
+✅ محاسبه تمام ویژگی‌ها قبل از فیلتر حجم
+✅ بررسی معتبر بودن داده‌ها قبل از training
+✅ بهتر شدن error handling
+"""
+
 import pandas as pd
 import numpy as np
-import os
-import sys
-import joblib
+import pickle
 import logging
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+import json
+from datetime import datetime
 
-try:
-    from lightgbm import LGBMClassifier
-except ImportError:
-    print("CRITICAL: LightGBM is not installed.")
-    sys.exit(1)
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
-
-import config
+# فرض: indicators.py در همان دایرکتوری است
+from indicators import TechnicalIndicators
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
-FEATURES      = list(config.AI_FEATURES)
-MIN_SAMPLES   = 30   # حداقل نمونه برای آموزش معنادار
-BACKTEST_CSV  = os.path.join(BASE_DIR, 'data', 'backtest_trades.csv')
-
-
-# ---------------------------------------------------------------------------
-# منابع داده
-# ---------------------------------------------------------------------------
-
-def _load_backtest_data(symbol: str) -> pd.DataFrame:
-    """خواندن معاملات بسته‌شده از فایل CSV بکتست."""
-    if not os.path.exists(BACKTEST_CSV):
-        return pd.DataFrame()
-    try:
-        df = pd.read_csv(BACKTEST_CSV, encoding='utf-8')
-        df = df[df['pair'] == symbol].copy()
-        df = df[df['status'].isin(['SL_HIT', 'TP_HIT', 'EXPIRED', 'CLOSED'])].copy()
-        df = df.dropna(subset=['pnl_percent'])
-        logger.info("بکتست %s: %d معامله بارگذاری شد", symbol, len(df))
-        return df
-    except Exception as e:
-        logger.error("خطا در خواندن CSV بکتست برای %s: %s", symbol, e)
-        return pd.DataFrame()
-
-
-def _load_live_data(symbol: str) -> pd.DataFrame:
-    """خواندن معاملات بسته‌شده از PostgreSQL (داده لایو)."""
-    try:
-        from src import database
-        query = """
-            SELECT * FROM signals
-            WHERE pair = %s
-              AND status IN ('CLOSED', 'SL_HIT', 'TP_HIT')
-              AND pnl_percent IS NOT NULL
+class ModelTrainer:
+    """کلاس برای training Random Forest models"""
+    
+    # پارامترهای پیش‌فرض
+    DEFAULT_CONFIG = {
+        'test_size': 0.2,
+        'random_state': 42,
+        'n_estimators': 100,
+        'max_depth': 15,
+        'min_samples_split': 5,
+        'min_samples_leaf': 2,
+    }
+    
+    # حداقل تعداد نمونه برای training
+    MIN_TRAINING_SAMPLES = 50
+    
+    REQUIRED_FEATURES = [
+        'ATR', 'EMA_diff', 'RSI', 'MACD', 'ADX',
+        'BB_upper', 'BB_lower', 'OBV', 'Volume_SMA'
+    ]
+    
+    def __init__(self, model_dir: str = "./models"):
         """
-        with database.get_connection() as conn:
-            df = pd.read_sql_query(query, conn, params=(symbol,))
-        df.columns = [c.lower() for c in df.columns]
-        logger.info("لایو %s: %d معامله بارگذاری شد", symbol, len(df))
-        return df
-    except Exception as e:
-        logger.warning("خواندن داده لایو برای %s ناموفق: %s", symbol, e)
-        return pd.DataFrame()
-
-
-def _merge_sources(bt_df: pd.DataFrame, live_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    ادغام داده‌های بکتست و لایو.
-    - بکتست: منبع اصلی (حجم بالا)
-    - لایو: تکمیل‌کننده (رفتار واقعی بازار)
-    تکراری‌ها بر اساس entry_time + pair حذف می‌شن.
-    """
-    frames = []
-    if not bt_df.empty:
-        bt_df = bt_df.copy()
-        bt_df['source'] = 'backtest'
-        frames.append(bt_df)
-    if not live_df.empty:
-        live_df = live_df.copy()
-        live_df['source'] = 'live'
-        frames.append(live_df)
-
-    if not frames:
-        return pd.DataFrame()
-
-    combined = pd.concat(frames, ignore_index=True)
-
-    # اولویت لایو در صورت تکرار زمانی
-    if 'entry_time' in combined.columns:
-        combined = combined.sort_values('source', ascending=False)
-        combined = combined.drop_duplicates(subset=['pair', 'entry_time'], keep='first')
-
-    return combined.reset_index(drop=True)
-
-
-# ---------------------------------------------------------------------------
-# آموزش مدل
-# ---------------------------------------------------------------------------
-
-def train_model_for_symbol(symbol: str) -> bool:
-    """
-    آموزش مدل AI برای یک ارز.
-    منبع اصلی: بکتست CSV — منبع ثانویه: لایو PostgreSQL.
-
-    Returns:
-        True در صورت موفقیت
-    """
-    # ۱. جمع‌آوری داده از هر دو منبع
-    bt_df   = _load_backtest_data(symbol)
-    live_df = _load_live_data(symbol)
-    df      = _merge_sources(bt_df, live_df)
-
-    if df.empty:
-        logger.warning("⚠️ هیچ داده‌ای برای %s یافت نشد (نه بکتست، نه لایو).", symbol)
-        return False
-
-    # ۲. بررسی وجود همه فیچرها
-    missing = [f for f in FEATURES if f not in df.columns]
-    if missing:
-        logger.warning("⚠️ فیچرهای ناموجود برای %s: %s", symbol, missing)
-        return False
-
-    # ۳. ساخت برچسب هدف (۱=سود، ۰=ضرر)
-    df['target_label'] = np.where(df['pnl_percent'] > 0, 1, 0)
-    df = df.dropna(subset=FEATURES + ['target_label'])
-
-    if df['target_label'].nunique() < 2:
-        logger.warning(
-            "⚠️ %s: همه %d معامله یک‌طرفه هستند (همه سود یا همه ضرر). "
-            "مدل آموزش نمی‌بیند.",
-            symbol, len(df)
-        )
-        return False
-
-    if len(df) < MIN_SAMPLES:
-        logger.warning(
-            "⚠️ %s: فقط %d نمونه موجود است (حداقل %d لازم است).",
-            symbol, len(df), MIN_SAMPLES
-        )
-        return False
-
-    # ۴. مرتب‌سازی زمانی
-    time_col = next((c for c in ['entry_time', 'timestamp'] if c in df.columns), None)
-    if time_col:
-        df = df.sort_values(by=time_col, ascending=True)
-    df = df.reset_index(drop=True)
-
-    X = df[FEATURES]
-    y = df['target_label'].to_numpy()
-
-    # ۵. تقسیم train/test (80/20)
-    split_idx        = max(int(len(X) * 0.8), 1)
-    X_train, X_test  = X.iloc[:split_idx], X.iloc[split_idx:]
-    y_train, y_test  = y[:split_idx], y[split_idx:]
-
-    # ۶. آموزش LightGBM
-    model = LGBMClassifier(
-        n_estimators=200,
-        learning_rate=0.02,
-        max_depth=5,
-        num_leaves=20,
-        min_child_samples=10,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        class_weight='balanced',
-        random_state=42,
-        n_jobs=1,
-        verbose=-1,
-    )
-
-    if len(np.unique(y_test)) < 2:
-        model.fit(X_train, y_train)
-    else:
-        model.fit(X_train, y_train, eval_set=[(X_test, y_test)])
-
-    # ۷. ذخیره مدل
-    safe_name  = symbol.replace('/', '_')
-    models_dir = os.path.join(BASE_DIR, 'src', 'models')
-    os.makedirs(models_dir, exist_ok=True)
-    model_path = os.path.join(models_dir, f"{safe_name}_model.pkl")
-    joblib.dump(model, model_path)
-
-    wins  = int(y.sum())
-    total = len(y)
-    logger.info(
-        "✅ مدل %s آموزش دید | نمونه: %d (بکتست: %d + لایو: %d) | Win Rate داده: %.1f%%",
-        symbol, total, len(bt_df), len(live_df), wins / total * 100
-    )
-    print(
-        f"🎯 مدل {symbol} آموزش دید | "
-        f"نمونه: {total} (بکتست: {len(bt_df)} + لایو: {len(live_df)}) | "
-        f"Win Rate داده: {wins/total*100:.1f}%"
-    )
-    return True
-
-
-def train_all() -> None:
-    """آموزش مدل برای تمام ارزهای WATCHLIST."""
-    success, failed = [], []
-    for symbol in config.WATCHLIST:
-        ok = train_model_for_symbol(symbol)
-        (success if ok else failed).append(symbol)
-
-    print(f"\n📊 نتیجه آموزش:")
-    print(f"   ✅ موفق  ({len(success)}): {', '.join(success) or '-'}")
-    print(f"   ❌ ناموفق ({len(failed)}): {', '.join(failed) or '-'}")
+        Args:
+            model_dir: دایرکتوری ذخیره‌سازی models
+        """
+        self.model_dir = Path(model_dir)
+        self.model_dir.mkdir(exist_ok=True)
+        self.models = {}
+        self.scalers = {}
+    
+    def train_multiple_symbols(
+        self,
+        data_dict: Dict[str, pd.DataFrame],
+        volume_threshold: Optional[Dict[str, float]] = None,
+        target_column: str = 'target'
+    ) -> Dict[str, Dict]:
+        """
+        Training برای چندین symbol
+        
+        مهم: ⚠️ ترتیب عملیات CRITICAL:
+        1. محاسبه تمام ویژگی‌ها
+        2. سپس اعمال فیلتر حجم
+        3. سپس training
+        
+        Args:
+            data_dict: Dict[symbol, DataFrame]
+            volume_threshold: Dict[symbol, threshold] یا None
+            target_column: نام ستون target
+            
+        Returns:
+            Dict with training results
+        """
+        
+        results = {
+            'timestamp': datetime.now().isoformat(),
+            'symbols': {},
+            'summary': {
+                'total_symbols': len(data_dict),
+                'successful': 0,
+                'failed': 0,
+            }
+        }
+        
+        logger.info(f"🚀 شروع training برای {len(data_dict)} symbol")
+        logger.info("=" * 70)
+        
+        for symbol, df in data_dict.items():
+            logger.info(f"\n📊 در حال پردازش: {symbol}")
+            logger.info("-" * 70)
+            
+            # STEP 1: محاسبه تمام ویژگی‌ها (قبل از هر فیلتر!)
+            logger.info(f"  1️⃣ محاسبه اندیکاتورهای تکنیکال...")
+            df_with_features, feature_meta = TechnicalIndicators.calculate_all_features(
+                df, 
+                symbol=symbol,
+                min_rows_required=100
+            )
+            
+            if not feature_meta['success']:
+                logger.error(
+                    f"  ❌ محاسبه ویژگی‌ها ناکام: {feature_meta['missing_features']}"
+                )
+                results['symbols'][symbol] = {
+                    'status': 'FAILED',
+                    'reason': 'Feature calculation failed',
+                    'details': feature_meta
+                }
+                results['summary']['failed'] += 1
+                continue
+            
+            logger.info(f"  ✅ {feature_meta['valid_rows']} ردیف معتبر")
+            
+            # STEP 2: اعمال فیلتر حجم (بعد از محاسبه ویژگی‌ها!)
+            if volume_threshold and symbol in volume_threshold:
+                vol_thresh = volume_threshold[symbol]
+                rows_before = len(df_with_features)
+                
+                logger.info(f"  2️⃣ اعمال فیلتر حجم (threshold: {vol_thresh:,.0f})...")
+                df_with_features = df_with_features[
+                    df_with_features['volume'] >= vol_thresh
+                ].copy()
+                
+                rows_after = len(df_with_features)
+                logger.info(
+                    f"  ✅ {rows_after}/{rows_before} ردیف باقی "
+                    f"({rows_before - rows_after} فیلتر شد)"
+                )
+                
+                # بررسی: آیا داده‌های کافی باقی مانده‌اند؟
+                if rows_after < self.MIN_TRAINING_SAMPLES:
+                    logger.error(
+                        f"  ❌ داده‌های ناکافی برای training "
+                        f"({rows_after} < {self.MIN_TRAINING_SAMPLES})"
+                    )
+                    results['symbols'][symbol] = {
+                        'status': 'FAILED',
+                        'reason': 'Insufficient data after volume filter',
+                        'rows_available': rows_after,
+                        'rows_required': self.MIN_TRAINING_SAMPLES
+                    }
+                    results['summary']['failed'] += 1
+                    continue
+            else:
+                logger.info(f"  2️⃣ فیلتر حجم فعال نیست")
+            
+            # STEP 3: Prepare data برای training
+            logger.info(f"  3️⃣ آماده‌سازی داده‌های training...")
+            
+            try:
+                # بررسی وجود target
+                if target_column not in df_with_features.columns:
+                    logger.error(f"  ❌ ستون '{target_column}' وجود ندارد")
+                    results['symbols'][symbol] = {
+                        'status': 'FAILED',
+                        'reason': f'Target column "{target_column}" not found'
+                    }
+                    results['summary']['failed'] += 1
+                    continue
+                
+                # جدا کردن features و target
+                X = df_with_features[self.REQUIRED_FEATURES]
+                y = df_with_features[target_column]
+                
+                # بررسی: آیا همه features موجود و معتبر هستند؟
+                if X.isna().any().any():
+                    logger.warning(f"  ⚠️ NaN values in features detected")
+                    X = X.dropna()
+                    y = y[X.index]
+                
+                if len(X) < self.MIN_TRAINING_SAMPLES:
+                    logger.error(
+                        f"  ❌ نمونه‌های ناکافی بعد از validation "
+                        f"({len(X)} < {self.MIN_TRAINING_SAMPLES})"
+                    )
+                    results['symbols'][symbol] = {
+                        'status': 'FAILED',
+                        'reason': 'Insufficient samples after validation',
+                        'samples': len(X)
+                    }
+                    results['summary']['failed'] += 1
+                    continue
+                
+                logger.info(f"  ✅ {len(X)} نمونه آماده برای training")
+                
+                # STEP 4: Split train/test
+                logger.info(f"  4️⃣ تقسیم داده‌ها (train/test)...")
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y,
+                    test_size=self.DEFAULT_CONFIG['test_size'],
+                    random_state=self.DEFAULT_CONFIG['random_state']
+                )
+                
+                logger.info(f"  ✅ Train: {len(X_train)}, Test: {len(X_test)}")
+                
+                # STEP 5: Standardize features
+                logger.info(f"  5️⃣ Standardizing features...")
+                scaler = StandardScaler()
+                X_train_scaled = scaler.fit_transform(X_train)
+                X_test_scaled = scaler.transform(X_test)
+                
+                # STEP 6: Train Random Forest
+                logger.info(f"  6️⃣ Training Random Forest model...")
+                model = RandomForestClassifier(
+                    n_estimators=self.DEFAULT_CONFIG['n_estimators'],
+                    max_depth=self.DEFAULT_CONFIG['max_depth'],
+                    min_samples_split=self.DEFAULT_CONFIG['min_samples_split'],
+                    min_samples_leaf=self.DEFAULT_CONFIG['min_samples_leaf'],
+                    random_state=self.DEFAULT_CONFIG['random_state'],
+                    n_jobs=-1
+                )
+                
+                model.fit(X_train_scaled, y_train)
+                
+                # STEP 7: Evaluate
+                logger.info(f"  7️⃣ ارزیابی مدل...")
+                train_score = model.score(X_train_scaled, y_train)
+                test_score = model.score(X_test_scaled, y_test)
+                
+                logger.info(f"  ✅ Train Accuracy: {train_score:.4f}")
+                logger.info(f"  ✅ Test Accuracy: {test_score:.4f}")
+                
+                # Feature importance
+                feature_importance = pd.DataFrame({
+                    'feature': self.REQUIRED_FEATURES,
+                    'importance': model.feature_importances_
+                }).sort_values('importance', ascending=False)
+                
+                logger.info(f"\n  📊 Top 3 features:")
+                for idx, row in feature_importance.head(3).iterrows():
+                    logger.info(f"     {row['feature']}: {row['importance']:.4f}")
+                
+                # STEP 8: Save model
+                logger.info(f"  8️⃣ ذخیره‌سازی مدل...")
+                model_path = self.model_dir / f"{symbol}_model.pkl"
+                scaler_path = self.model_dir / f"{symbol}_scaler.pkl"
+                
+                with open(model_path, 'wb') as f:
+                    pickle.dump(model, f)
+                
+                with open(scaler_path, 'wb') as f:
+                    pickle.dump(scaler, f)
+                
+                logger.info(f"  ✅ مدل ذخیره شد: {model_path}")
+                
+                # ذخیره‌سازی metadata
+                self.models[symbol] = {
+                    'path': str(model_path),
+                    'scaler_path': str(scaler_path),
+                    'train_score': float(train_score),
+                    'test_score': float(test_score),
+                    'n_features': len(self.REQUIRED_FEATURES),
+                    'training_samples': len(X_train),
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                results['symbols'][symbol] = {
+                    'status': 'SUCCESS',
+                    'model_path': str(model_path),
+                    'train_score': float(train_score),
+                    'test_score': float(test_score),
+                    'samples_used': len(X_train) + len(X_test),
+                    'features': self.REQUIRED_FEATURES,
+                    'feature_importance': feature_importance.to_dict('records')
+                }
+                
+                results['summary']['successful'] += 1
+                
+                logger.info(f"  ✅✅✅ {symbol} موفقیت‌آمیز! ✅✅✅")
+                
+            except Exception as e:
+                logger.error(f"  ❌ خطا در training: {str(e)}", exc_info=True)
+                results['symbols'][symbol] = {
+                    'status': 'FAILED',
+                    'reason': 'Training error',
+                    'error': str(e)
+                }
+                results['summary']['failed'] += 1
+        
+        logger.info("\n" + "=" * 70)
+        logger.info(f"✅ نتایج: {results['summary']['successful']} موفق, "
+                   f"{results['summary']['failed']} ناموفق")
+        logger.info("=" * 70)
+        
+        return results
+    
+    def save_results(self, results: Dict, output_path: str = "training_results.json"):
+        """ذخیره‌سازی نتایج training"""
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+        logger.info(f"📝 نتایج ذخیره شد: {output_path}")
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
-    )
-    train_all()
+    """
+    مثال استفاده:
+    """
+    
+    # load your data
+    # data_dict = {
+    #     'BTC/USDT': pd.read_csv('btc_data.csv'),
+    #     'ETH/USDT': pd.read_csv('eth_data.csv'),
+    # }
+    
+    # تنظیم volume thresholds (اختیاری)
+    volume_thresholds = {
+        'BTC/USDT': 1000000,  # 1M
+        'ETH/USDT': 500000,   # 500K
+    }
+    
+    trainer = ModelTrainer()
+    
+    # results = trainer.train_multiple_symbols(
+    #     data_dict,
+    #     volume_threshold=volume_thresholds,
+    #     target_column='signal'
+    # )
+    
+    # trainer.save_results(results)
