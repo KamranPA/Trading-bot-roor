@@ -1,204 +1,271 @@
-# ---------------------------------------------------------
-# FILE PATH: src/strategy.py (v3.1 - Volume Filter Added)
-# ---------------------------------------------------------
-import logging
-import datetime
+"""
+🔧 بهبود شده: strategy.py
+- استفاده صحیح از تمام ویژگی‌های محاسبه شده
+- اعمال فیلتر حجم بعد از محاسبه اندیکاتورها
+- بهتر شدن signal generation
+"""
 
-import config
-from src import database, strategy_utils
+import pandas as pd
+import numpy as np
+import pickle
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional
+import logging
+
+from indicators import TechnicalIndicators
 
 logger = logging.getLogger(__name__)
 
-
-def is_blocked_by_8h_filter(pair: str, current_direction: str) -> bool:
-    try:
-        last_signal = database.get_last_signal_for_pair(pair)
-        if not last_signal:
-            return False
-        last_direction = last_signal.get('direction')
-        last_time      = last_signal.get('timestamp')
-        if last_direction != current_direction or last_time is None:
-            return False
-        now = datetime.datetime.now(datetime.timezone.utc)
-        if last_time.tzinfo is None:
-            last_time = last_time.replace(tzinfo=datetime.timezone.utc)
-        return (now - last_time).total_seconds() / 3600 < 8
-    except Exception as e:
-        logger.warning("خطا در فیلتر ۸ ساعته برای %s: %s", pair, e)
-        return False
-
-
-def generate_signal(df, pair: str, model=None, params: dict = None,
-                    open_positions_count: int = 0) -> dict:
-    default_scores = {
-        'total_score': 0.0, 'ai_score': 0.0,
-        'rsi_score': 0.0, 'adx_score': 0.0, 'ema_score': 0.0,
-        'direction': None,
-    }
-
-    if df is None or len(df) < 200:
-        return default_scores
-
-    if params is None:
-        params = {}
-
-    adx_thresh     = float(params.get('ADX_THRESHOLD', config.ADX_THRESHOLD))
-    tp_ratio       = float(params.get('TP_RATIO',       config.TP_RATIO))
-    sl_ratio       = float(params.get('SL_RATIO',       config.SL_RATIO))
-    ai_threshold   = float(params.get('AI_THRESHOLD',   getattr(config, 'AI_THRESHOLD', 65.0)))
-    swing_window   = int(params.get('SWING_WINDOW',     config.SWING_WINDOW))
-    MAX_SL_PERCENT = float(getattr(config, 'MAX_SL_PERCENT', 0.05))
-
-    candle = df.iloc[-1]
-
-    w_ai  = float(getattr(config, 'WEIGHT_AI',  40))
-    w_adx = float(getattr(config, 'WEIGHT_ADX', 20))
-    w_rsi = float(getattr(config, 'WEIGHT_RSI', 20))
-    w_ema = float(getattr(config, 'WEIGHT_EMA', 20))
-    w_sum = (w_ai + w_adx + w_rsi + w_ema) or 100.0
-
-    current_adx    = float(candle.get('feat_adx', 0))
-    current_rsi    = float(candle.get('feat_rsi', 50))
-    rsi_momentum   = float(candle.get('feat_rsi_momentum', 0))
-    dev_val        = abs(float(candle.get('feat_ema_deviation', 0)))
-    volume_ratio   = float(candle.get('feat_volume_ratio', 1.0))
-
-    # فیلتر حجم — اگر حجم کمتر از ۸۰٪ میانگین باشه سیگنال صادر نمیشه
-    if volume_ratio < 0.8:
-        logger.debug("%s: حجم ناکافی (volume_ratio=%.2f) — رد شد", pair, volume_ratio)
-        return default_scores
-
-    adx_score = (
-        min(100.0, 50.0 + (current_adx - adx_thresh) * 2.5)
-        if current_adx >= adx_thresh
-        else max(0.0, (current_adx / (adx_thresh + 1e-10)) * 50.0)
-    )
-    rsi_score = max(0.0, min(100.0,
-        50.0 + rsi_momentum * 5 if current_rsi > 50 else 50.0 - rsi_momentum * 5
-    ))
-    ema_score = min(100.0, (dev_val / 5.0) * 100.0)
-
-    features_dict = {
-        'feat_adx':           current_adx,
-        'feat_atr_percent':   float(candle.get('feat_atr_percent', 0)),
-        'feat_rsi':           current_rsi,
-        'feat_trend_line':    float(candle.get('feat_trend_line', 0)),
-        'feat_ema_deviation': dev_val,
-        'feat_rsi_momentum':  rsi_momentum,
-        'feat_body_ratio':    float(candle.get('feat_body_ratio', 0)),
-        'feat_volume_ratio':  volume_ratio,
-    }
-
-    model_active = (
-        model is not None
-        and hasattr(model, 'has_model')
-        and model.has_model(pair)
-    )
-
-    ai_score    = 0.0
-    ai_approved = True
-
-    if model_active:
-        try:
-            raw = model.predict_probability(pair, features_dict)
-            if raw is None:
-                ai_approved = False
+class TradingStrategy:
+    """کلاس برای تولید سیگنال‌های معاملاتی"""
+    
+    def __init__(self, models_dir: str = "./models"):
+        """
+        Args:
+            models_dir: دایرکتوری models
+        """
+        self.models_dir = Path(models_dir)
+        self.models = {}
+        self.scalers = {}
+        self.load_models()
+    
+    def load_models(self):
+        """بارگذاری تمام trained models"""
+        model_files = list(self.models_dir.glob("*_model.pkl"))
+        
+        for model_file in model_files:
+            symbol = model_file.stem.replace("_model", "")
+            scaler_file = self.models_dir / f"{symbol}_scaler.pkl"
+            
+            try:
+                with open(model_file, 'rb') as f:
+                    self.models[symbol] = pickle.load(f)
+                
+                with open(scaler_file, 'rb') as f:
+                    self.scalers[symbol] = pickle.load(f)
+                
+                logger.info(f"✅ مدل بارگذاری شد: {symbol}")
+            except Exception as e:
+                logger.error(f"❌ خطا در بارگذاری {symbol}: {str(e)}")
+    
+    def generate_signals(
+        self,
+        data_dict: Dict[str, pd.DataFrame],
+        volume_threshold: Optional[Dict[str, float]] = None,
+        model_confidence: float = 0.6
+    ) -> Dict[str, pd.DataFrame]:
+        """
+        تولید سیگنال‌های معاملاتی برای چندین symbol
+        
+        ⚠️ مهم: ترتیب عملیات:
+        1. محاسبه تمام ویژگی‌ها
+        2. اعمال فیلتر حجم
+        3. اعمال مدل ML
+        4. تولید سیگنال
+        
+        Args:
+            data_dict: Dict[symbol, DataFrame]
+            volume_threshold: آستانه حجم
+            model_confidence: حداقل confidence برای سیگنال
+            
+        Returns:
+            Dict[symbol, DataFrame with signals]
+        """
+        
+        results = {}
+        
+        for symbol, df in data_dict.items():
+            logger.info(f"\n📊 تولید سیگنال برای: {symbol}")
+            logger.info("-" * 70)
+            
+            # STEP 1: محاسبه ویژگی‌ها
+            logger.info(f"  1️⃣ محاسبه اندیکاتورها...")
+            df_features, meta = TechnicalIndicators.calculate_all_features(
+                df,
+                symbol=symbol
+            )
+            
+            if not meta['success']:
+                logger.error(f"  ❌ محاسبه ویژگی‌ها ناموفق")
+                results[symbol] = pd.DataFrame()
+                continue
+            
+            # STEP 2: اعمال فیلتر حجم (بعد از محاسبه!)
+            if volume_threshold and symbol in volume_threshold:
+                vol_thresh = volume_threshold[symbol]
+                logger.info(f"  2️⃣ اعمال فیلتر حجم ({vol_thresh:,.0f})...")
+                
+                rows_before = len(df_features)
+                df_features = df_features[
+                    df_features['volume'] >= vol_thresh
+                ].copy()
+                
+                logger.info(f"  ✅ {len(df_features)}/{rows_before} ردیف")
+            
+            # STEP 3: حذف NaN values
+            logger.info(f"  3️⃣ تمیز‌سازی داده‌ها...")
+            df_clean = df_features.dropna()
+            logger.info(f"  ✅ {len(df_clean)} ردیف معتبر")
+            
+            if len(df_clean) == 0:
+                logger.warning(f"  ⚠️ هیچ داده معتبری وجود ندارد")
+                results[symbol] = pd.DataFrame()
+                continue
+            
+            # STEP 4: اعمال مدل ML
+            if symbol not in self.models:
+                logger.warning(f"  ⚠️ مدل برای {symbol} وجود ندارد")
+                results[symbol] = df_clean
+                continue
+            
+            logger.info(f"  4️⃣ اعمال مدل ML...")
+            
+            required_features = [
+                'ATR', 'EMA_diff', 'RSI', 'MACD', 'ADX',
+                'BB_upper', 'BB_lower', 'OBV', 'Volume_SMA'
+            ]
+            
+            X = df_clean[required_features].values
+            X_scaled = self.scalers[symbol].transform(X)
+            
+            # پیش‌بینی احتمالات
+            model = self.models[symbol]
+            probabilities = model.predict_proba(X_scaled)
+            predictions = model.predict(X_scaled)
+            
+            # confidence = احتمال پیش‌بینی شده
+            confidence = np.max(probabilities, axis=1)
+            
+            # STEP 5: تولید سیگنال‌ها
+            logger.info(f"  5️⃣ تولید سیگنال‌ها...")
+            
+            df_clean['ml_signal'] = predictions
+            df_clean['confidence'] = confidence
+            
+            # تولید سیگنال نهایی (با confidence filter)
+            df_clean['signal'] = np.where(
+                confidence >= model_confidence,
+                predictions,
+                0  # حداقل confidence
+            )
+            
+            # STEP 6: تحلیل سیگنال‌ها
+            buy_signals = (df_clean['signal'] == 1).sum()
+            sell_signals = (df_clean['signal'] == -1).sum()
+            no_signals = (df_clean['signal'] == 0).sum()
+            
+            avg_confidence = confidence.mean()
+            
+            logger.info(f"  ✅ سیگنال‌های تولید شده:")
+            logger.info(f"     خرید: {buy_signals}")
+            logger.info(f"     فروش: {sell_signals}")
+            logger.info(f"     بدون سیگنال: {no_signals}")
+            logger.info(f"     Confidence متوسط: {avg_confidence:.4f}")
+            
+            results[symbol] = df_clean
+            
+            logger.info(f"  ✅ {symbol} تکمیل شد")
+        
+        return results
+    
+    def get_trading_rules(
+        self,
+        symbol_data: pd.DataFrame,
+        symbol: str = "UNKNOWN"
+    ) -> Dict:
+        """
+        قوانین معاملاتی اضافی بر اساس اندیکاتورها
+        
+        Returns:
+            Dict با توصیات تردید
+        """
+        
+        if len(symbol_data) == 0:
+            return {'recommendation': 'NO_DATA'}
+        
+        latest = symbol_data.iloc[-1]
+        
+        rules = {
+            'symbol': symbol,
+            'timestamp': symbol_data.index[-1] if hasattr(symbol_data.index[-1], '__str__') else None,
+            'recommendation': 'HOLD',
+            'reasons': []
+        }
+        
+        # Rule 1: Trend Check (ADX)
+        if latest['ADX'] > 25:
+            rules['reasons'].append(f"قوی Trend (ADX={latest['ADX']:.2f})")
+            if latest['EMA_diff'] > 0:
+                rules['recommendation'] = 'BUY'
             else:
-                ai_score    = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
-                ai_approved = ai_score >= ai_threshold
-        except Exception as e:
-            logger.error("خطا در پیش‌بینی AI برای %s: %s", pair, e)
-            ai_approved = False
+                rules['recommendation'] = 'SELL'
+        else:
+            rules['reasons'].append("Trend ضعیف")
+        
+        # Rule 2: Momentum Check (RSI)
+        if latest['RSI'] > 70:
+            rules['reasons'].append("Overbought (RSI > 70)")
+            if rules['recommendation'] == 'BUY':
+                rules['recommendation'] = 'WAIT'
+        elif latest['RSI'] < 30:
+            rules['reasons'].append("Oversold (RSI < 30)")
+            if rules['recommendation'] == 'SELL':
+                rules['recommendation'] = 'WAIT'
+        
+        # Rule 3: Volatility Check (ATR)
+        atr_threshold = latest['close'] * 0.02  # 2% از قیمت
+        if latest['ATR'] > atr_threshold:
+            rules['reasons'].append("Volatility بالا")
+        else:
+            rules['reasons'].append("Volatility پایین")
+        
+        # Rule 4: Volume Check
+        vol_sma = latest['Volume_SMA']
+        if latest['volume'] > vol_sma * 1.5:
+            rules['reasons'].append("حجم بالای متوسط")
+        elif latest['volume'] < vol_sma * 0.5:
+            rules['reasons'].append("حجم پایین")
+        
+        # Rule 5: Bollinger Bands
+        bb_range = latest['BB_upper'] - latest['BB_lower']
+        if latest['close'] > latest['BB_upper']:
+            rules['reasons'].append("قیمت بالای BB upper")
+        elif latest['close'] < latest['BB_lower']:
+            rules['reasons'].append("قیمت پایین BB lower")
+        
+        return rules
 
-    if model_active:
-        total_score = (
-            ai_score * w_ai + adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema
-        ) / w_sum
-    else:
-        w_ind = (w_adx + w_rsi + w_ema) or 60.0
-        total_score = (
-            adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema
-        ) / w_ind
 
-    score_data = {
-        'total_score': round(total_score, 2),
-        'ai_score':    round(ai_score,    2),
-        'rsi_score':   round(rsi_score,   2),
-        'adx_score':   round(adx_score,   2),
-        'ema_score':   round(ema_score,   2),
-        'direction':   None,
-    }
-
-    min_score     = float(getattr(config, 'MIN_REQUIRED_SCORE', 65))
-    max_positions = getattr(config, 'MAX_OPEN_POSITIONS', 3)
-
-    if total_score < min_score:
-        return score_data
-    if open_positions_count >= max_positions:
-        return score_data
-    if not ai_approved:
-        return score_data
-
-    last_swing_high = strategy_utils.find_last_swing(df, 'high', swing_window)
-    last_swing_low  = strategy_utils.find_last_swing(df, 'low',  swing_window)
-    if last_swing_high is None or last_swing_low is None:
-        return score_data
-
-    high_price  = float(candle['High'])
-    low_price   = float(candle['Low'])
-    close_price = float(candle['Close'])
-    atr_val     = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
-
-    risk_amount = (
-        float(getattr(config, 'TOTAL_CAPITAL', 1000.0))
-        * float(getattr(config, 'RISK_PERCENT', 1.0)) / 100.0
-    )
-
-    def _position_size(sl_dist: float) -> float:
-        return round(risk_amount * close_price / sl_dist, 2) if sl_dist > 0 else 0.0
-
-    if (high_price > last_swing_high
-            and current_rsi > 50
-            and not is_blocked_by_8h_filter(pair, "LONG")):
-
-        sl_dist = min(1.5 * atr_val * sl_ratio, close_price * MAX_SL_PERCENT)
-        if sl_dist <= 0:
-            return score_data
-
-        score_data.update({
-            'pair':          pair,
-            'direction':     'LONG',
-            'entry_price':   round(close_price, 6),
-            'stop_loss':     round(close_price - sl_dist, 6),
-            'tp1':           round(close_price + sl_dist * tp_ratio / 2, 6),
-            'tp2':           round(close_price + sl_dist * tp_ratio,     6),
-            'swing_ref':     round(last_swing_high, 6),
-            'position_size': _position_size(sl_dist),
-            **features_dict,
+def create_signal_summary(
+    signals_dict: Dict[str, pd.DataFrame],
+    output_file: str = "trading_signals.csv"
+) -> pd.DataFrame:
+    """
+    خلاصه‌ای از تمام سیگنال‌ها
+    """
+    
+    summary_rows = []
+    
+    for symbol, df in signals_dict.items():
+        if len(df) == 0:
+            continue
+        
+        latest = df.iloc[-1]
+        
+        summary_rows.append({
+            'symbol': symbol,
+            'timestamp': df.index[-1] if hasattr(df.index[-1], '__str__') else None,
+            'close': latest.get('close', np.nan),
+            'signal': latest.get('signal', 0),
+            'confidence': latest.get('confidence', 0),
+            'RSI': latest.get('RSI', np.nan),
+            'ADX': latest.get('ADX', np.nan),
+            'volume': latest.get('volume', 0),
+            'ATR': latest.get('ATR', np.nan),
         })
-        logger.info("🟢 LONG %s | امتیاز: %.1f | Volume: %.2f | Entry: %.4f",
-                    pair, total_score, volume_ratio, close_price)
-
-    elif (low_price < last_swing_low
-            and current_rsi < 50
-            and not is_blocked_by_8h_filter(pair, "SHORT")):
-
-        sl_dist = min(1.5 * atr_val * sl_ratio, close_price * MAX_SL_PERCENT)
-        if sl_dist <= 0:
-            return score_data
-
-        score_data.update({
-            'pair':          pair,
-            'direction':     'SHORT',
-            'entry_price':   round(close_price, 6),
-            'stop_loss':     round(close_price + sl_dist, 6),
-            'tp1':           round(close_price - sl_dist * tp_ratio / 2, 6),
-            'tp2':           round(close_price - sl_dist * tp_ratio,     6),
-            'swing_ref':     round(last_swing_low, 6),
-            'position_size': _position_size(sl_dist),
-            **features_dict,
-        })
-        logger.info("🔴 SHORT %s | امتیاز: %.1f | Volume: %.2f | Entry: %.4f",
-                    pair, total_score, volume_ratio, close_price)
-
-    return score_data
+    
+    summary_df = pd.DataFrame(summary_rows)
+    summary_df.to_csv(output_file, index=False)
+    logger.info(f"📝 خلاصه سیگنال‌ها ذخیره شد: {output_file}")
+    
+    return summary_df
