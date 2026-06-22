@@ -7,30 +7,28 @@ import numpy as np
 import config
 
 def calculate_indicators(df):
-    """📊 محاسبه سنسورهای هوشمند (با اصلاح قطعی باگ RSI و بدون فیلتر حجم)"""
     if df is None or df.empty or len(df) < 50:
         return df
 
-    # ۱. محاسبات پایه قیمت
+    # ۱. EMA
     df['ema_200'] = df['Close'].ewm(span=200, adjust=False).mean()
-    
-    # ۲. 🛠️ اصلاح قطعی و ریاضی باگ RSI
+
+    # ۲. RSI
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    # اصلاح شد: برای محاسبه میانگین ضررها فقط قیمت‌های منفی بررسی می‌شوند
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / (loss + 1e-10)
     df['feat_rsi'] = 100 - (100 / (1 + rs))
-    
-    # ۳. محاسبات ATR
+
+    # ۳. ATR
     high_low = df['High'] - df['Low']
     high_close = (df['High'] - df['Close'].shift()).abs()
     low_close = (df['Low'] - df['Close'].shift()).abs()
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     df['atr'] = tr.rolling(window=14).mean()
     df['feat_atr_percent'] = (df['atr'] / df['Close']) * 100
-    
-    # ۴. محاسبات ADX
+
+    # ۴. ADX
     up_move = df['High'].diff()
     down_move = df['Low'].diff()
     plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
@@ -46,5 +44,12 @@ def calculate_indicators(df):
     df['feat_ema_deviation'] = ((df['Close'] - df['ema_200']) / df['ema_200']) * 100
     df['feat_rsi_momentum'] = df['feat_rsi'].diff().fillna(0.0)
     df['feat_body_ratio'] = (abs(df['Close'] - df['Open']) / (df['High'] - df['Low'] + 1e-10))
+
+    # ۶. فیلتر حجم — نسبت حجم فعلی به میانگین ۲۰ کندل قبل
+    if 'Volume' in df.columns:
+        vol_ma = df['Volume'].rolling(window=20).mean()
+        df['feat_volume_ratio'] = df['Volume'] / (vol_ma + 1e-10)
+    else:
+        df['feat_volume_ratio'] = 1.0
 
     return df.fillna(0.0)
