@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import logging
 
-from indicators import TechnicalIndicators
+from src.indicators import TechnicalIndicators
 
 logger = logging.getLogger(__name__)
 
