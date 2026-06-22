@@ -297,6 +297,13 @@ class TechnicalIndicators:
         اضافه کردن ستون‌های با نام قدیمی (feat_*) برای سازگاری کامل
         با backtester و optimizer قدیمی‌تر.
         """
+        # 🟢 بازگرداندن نام‌های استاندارد با حرف بزرگ برای جلوگیری از خطای KeyError
+        if 'open' in df.columns: df['Open'] = df['open']
+        if 'high' in df.columns: df['High'] = df['high']
+        if 'low' in df.columns: df['Low'] = df['low']
+        if 'close' in df.columns: df['Close'] = df['close']
+        if 'volume' in df.columns: df['Volume'] = df['volume']
+
         # Trend line (1 = بالای EMA200 ، 0 = پایین)
         if 'ema_200' in df.columns:
             df['Trend_line'] = np.where(df['close'] > df['ema_200'], 1.0, 0.0)
