@@ -72,7 +72,7 @@ AI_FEATURES = [
 
 # لیست ارزهای تحت نظر
 WATCHLIST = [
-    "BTC/USDT", "ETH/USDT", "SOL/USDT", "POL/USDT", "DOT/USDT", "LINK/USDT",
+    "BTC/USDT", "ETH/USDT", "SOL/USDT",  "DOT/USDT", "LINK/USDT",
     "AVAX/USDT", "XRP/USDT", "LTC/USDT", "BCH/USDT",
     "ATOM/USDT",
 ]
