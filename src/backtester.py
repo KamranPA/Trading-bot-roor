@@ -1,11 +1,8 @@
 # ---------------------------------------------------------
-# FILE PATH: src/backtester.py  (FIXED & IMPROVED v2.0)
-# تغییرات:
-#   1. ذخیره معاملات در CSV (از طریق csv_store) نه SQLite محلی
-#   2. اصلاح محاسبه PnL (همان فرمول check_exits اصلاح‌شده)
-#   3. تولید خودکار Summary در پایان
-#   4. جلوگیری از Look-Ahead Bias: فقط داده قبل از کندل فعلی استفاده می‌شود
-#   5. لاگ پیشرفت
+# FILE PATH: src/backtester.py  (FIXED & IMPROVED v2.1)
+# تغییرات نسبت به v2.0:
+#   1. MAX_SL_PERCENT پیش‌فرض: 0.03 → 0.05 (هماهنگ با config)
+#   2. MIN_REQUIRED_SCORE پیش‌فرض: 60 → 65 (هماهنگ با config)
 # ---------------------------------------------------------
 import os
 import sys
@@ -38,48 +35,32 @@ def run_backtest(
     model=None,
     min_score: float = None,
 ) -> dict:
-    """
-    بکتست استراتژی Swing Breakout روی داده تاریخی.
-
-    Args:
-        df_raw:    دیتافریم خام کندل‌ها (ستون‌های Open/High/Low/Close/Volume)
-        pair:      نماد ارز
-        params:    پارامترهای استراتژی (ADX_THRESHOLD, TP_RATIO, SL_RATIO, ...)
-        model:     مدل AI (اختیاری — اگر None باشد امتیاز AI صفر در نظر گرفته می‌شود)
-        min_score: حداقل امتیاز برای ورود به معامله
-
-    Returns:
-        دیکشنری نتایج: {total, wins, losses, win_rate, total_pnl, max_drawdown, trades}
-    """
     if df_raw is None or len(df_raw) < 210:
         logger.warning("داده ناکافی برای بکتست %s (طول: %s)", pair, len(df_raw) if df_raw is not None else 0)
         return _empty_result(pair)
 
     if min_score is None:
-        min_score = float(getattr(config, 'MIN_REQUIRED_SCORE', 60))
+        min_score = float(getattr(config, 'MIN_REQUIRED_SCORE', 65))
 
     adx_thresh   = float(params.get('ADX_THRESHOLD', config.ADX_THRESHOLD))
     tp_ratio     = float(params.get('TP_RATIO',      config.TP_RATIO))
     sl_ratio     = float(params.get('SL_RATIO',      config.SL_RATIO))
     ai_threshold = float(params.get('AI_THRESHOLD',  getattr(config, 'AI_THRESHOLD', 65.0)))
     swing_window = int(params.get('SWING_WINDOW',    config.SWING_WINDOW))
-    MAX_SL_PCT   = float(getattr(config, 'MAX_SL_PERCENT', 0.03))
+    MAX_SL_PCT   = float(getattr(config, 'MAX_SL_PERCENT', 0.05))
 
-    # وزن‌های امتیازدهی از config (هماهنگ با استراتژی لایو)
     w_ai  = float(getattr(config, 'WEIGHT_AI',  40))
     w_adx = float(getattr(config, 'WEIGHT_ADX', 20))
     w_rsi = float(getattr(config, 'WEIGHT_RSI', 20))
     w_ema = float(getattr(config, 'WEIGHT_EMA', 20))
     w_sum = (w_ai + w_adx + w_rsi + w_ema) or 100.0
 
-    # اندیکاتورها روی کل دیتا محاسبه می‌شوند
     df_full = indicators.calculate_indicators(df_raw.copy())
 
-    open_trades   = []   # لیست معاملات باز در حین بکتست
-    closed_trades = []   # نتایج نهایی
+    open_trades   = []
+    closed_trades = []
 
     for i in range(200, len(df_full)):
-        # FIX: فقط داده‌های پیش از کندل فعلی (بدون Look-Ahead Bias)
         df_slice = df_full.iloc[:i + 1]
         candle   = df_full.iloc[i]
 
@@ -87,7 +68,6 @@ def run_backtest(
         high_price    = float(candle['High'])
         low_price     = float(candle['Low'])
 
-        # --- بستن معاملات باز ---
         still_open = []
         for trade in open_trades:
             direction = trade['direction']
@@ -105,7 +85,7 @@ def run_backtest(
                     pnl    = ((tp2 - entry) / entry) * 100
                     reason = 'TP_HIT'
                     closed = True
-            else:  # SHORT
+            else:
                 if high_price >= sl:
                     pnl    = ((entry - sl) / entry) * 100
                     reason = 'SL_HIT'
@@ -127,34 +107,25 @@ def run_backtest(
 
         open_trades = still_open
 
-        # --- امتیازدهی ---
         current_adx  = float(candle.get('feat_adx', 0))
         current_rsi  = float(candle.get('feat_rsi', 50))
         rsi_momentum = float(candle.get('feat_rsi_momentum', 0))
         dev_val      = abs(float(candle.get('feat_ema_deviation', 0)))
         atr_val      = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
 
-        # ADX score
         adx_score = (
             min(100.0, 50.0 + (current_adx - adx_thresh) * 2.5)
             if current_adx >= adx_thresh
             else max(0.0, (current_adx / (adx_thresh + 1e-10)) * 50.0)
         )
 
-        # RSI score
         if current_rsi > 50:
             rsi_score = min(100.0, max(0.0, 50.0 + rsi_momentum * 5))
         else:
             rsi_score = min(100.0, max(0.0, 50.0 + (-rsi_momentum) * 5))
 
-        # EMA score
         ema_score = min(100.0, (dev_val / 5.0) * 100.0)
 
-        # AI score
-        # اگر مدل آموزش‌دیده برای این ارز وجود نداشته باشد:
-        #   - فیلتر AI خاموش می‌شود (ai_approved = True)
-        #   - امتیاز فقط بر اساس اندیکاتورها محاسبه می‌شود (بدون اثر مصنوعی AI)
-        #   - این باعث می‌شود داده بکتست خالص‌تر و منطقی‌تر باشد
         model_active = (
             model is not None
             and hasattr(model, 'has_model')
@@ -183,14 +154,11 @@ def run_backtest(
                 logger.debug("AI error در بکتست %s کندل %d: %s", pair, i, e)
                 ai_approved = False
 
-        # محاسبه امتیاز کل
         if model_active:
-            # مدل AI فعال: وزن کامل (AI + اندیکاتورها)
             total_score = (
                 ai_score * w_ai + adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema
             ) / w_sum
         else:
-            # بدون مدل: فقط اندیکاتورها — بدون اثر مصنوعی NO_MODEL_PROBABILITY
             w_ind = (w_adx + w_rsi + w_ema) or 60.0
             total_score = (
                 adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema
@@ -202,7 +170,6 @@ def run_backtest(
         if len(open_trades) >= MAX_OPEN_POSITIONS:
             continue
 
-        # Swing levels
         swing_high = strategy_utils.find_last_swing(df_slice, 'high', swing_window)
         swing_low  = strategy_utils.find_last_swing(df_slice, 'low',  swing_window)
 
@@ -211,7 +178,6 @@ def run_backtest(
 
         trade_id = f"{pair}_{i}"
 
-        # فیچرهای مشترک برای ذخیره با معامله (ورودی آموزش مدل AI)
         trade_features = {
             'feat_adx':           round(current_adx, 4),
             'feat_rsi':           round(current_rsi, 4),
@@ -222,7 +188,6 @@ def run_backtest(
             'feat_body_ratio':    round(float(candle.get('feat_body_ratio', 0)), 4),
         }
 
-        # ورود LONG
         if high_price > swing_high and current_rsi > 50:
             sl_dist = min(1.5 * atr_val * sl_ratio, current_price * MAX_SL_PCT)
             if sl_dist <= 0:
@@ -244,7 +209,6 @@ def run_backtest(
             open_trades.append(trade)
             save_backtest_trade(trade)
 
-        # ورود SHORT
         elif low_price < swing_low and current_rsi < 50:
             sl_dist = min(1.5 * atr_val * sl_ratio, current_price * MAX_SL_PCT)
             if sl_dist <= 0:
@@ -266,7 +230,6 @@ def run_backtest(
             open_trades.append(trade)
             save_backtest_trade(trade)
 
-    # بستن معاملات باقی‌مانده با قیمت آخر
     last_price = float(df_full.iloc[-1]['Close'])
     for trade in open_trades:
         entry     = trade['entry_price']
@@ -279,17 +242,12 @@ def run_backtest(
         closed_trades.append(trade)
         close_backtest_trade(trade['id'], last_price, 'EXPIRED')
 
-    # --- محاسبه نتایج ---
     result = _compute_stats(pair, closed_trades)
 
     logger.info("📊 بکتست %s | معاملات: %d | Win Rate: %.1f%% | Total PnL: %.2f%%",
                 pair, result['total'], result['win_rate'], result['total_pnl'])
     return result
 
-
-# ---------------------------------------------------------------------------
-# کمکی‌ها
-# ---------------------------------------------------------------------------
 
 def _compute_stats(pair: str, trades: list) -> dict:
     if not trades:
@@ -303,7 +261,6 @@ def _compute_stats(pair: str, trades: list) -> dict:
     total_pnl  = round(sum(pnls), 2)
     avg_pnl    = round(sum(pnls) / total, 2) if total else 0.0
 
-    # Max Drawdown
     equity  = 100.0
     peak    = 100.0
     max_dd  = 0.0
@@ -338,7 +295,6 @@ def _empty_result(pair: str) -> dict:
 
 
 def _load_best_params() -> dict:
-    """خواندن best_params.json از ریشه پروژه (در صورت وجود)."""
     params_file = os.path.join(BASE_DIR, 'best_params.json')
     if not os.path.exists(params_file):
         return {}
@@ -351,15 +307,9 @@ def _load_best_params() -> dict:
 
 
 def run_all_backtests() -> dict:
-    """
-    اجرای بکتست برای کل WATCHLIST با استفاده از دیتای CSV (data/4h) و مدل AI.
-    نتایج در data/backtest_trades.csv و خلاصه در backtest_table_summary.csv ذخیره می‌شود.
-    در پایان، داده‌ها در data/trading_bot_backtest.db (SQLite) نیز ذخیره می‌شوند.
-    """
     from src.brain import TradingBrain
     from src.csv_store import BACKTEST_TRADES_CSV
 
-    # شروع از یک فایل تمیز تا معاملات اجراهای قبلی تکرار نشوند
     if os.path.exists(BACKTEST_TRADES_CSV):
         try:
             os.remove(BACKTEST_TRADES_CSV)
@@ -385,10 +335,7 @@ def run_all_backtests() -> dict:
         params = all_params.get(symbol, {})
         results[symbol] = run_backtest(df_raw, symbol, params, model=brain)
 
-    # یک بار تمام بسته‌شدن‌ها را روی دیسک بنویس (جایگزین write مکرر)
     flush_closed_trades()
-
-    # صادر کردن نتایج به SQLite (مورد نیاز workflow برای git add و upload artifact)
     export_to_sqlite()
 
     return results
