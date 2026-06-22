@@ -1,11 +1,8 @@
 name: Run Backtester and Optimizer
-
 on:
   workflow_dispatch:
-
 permissions:
   contents: write
-
 jobs:
   backtest:
     runs-on: ubuntu-latest
@@ -38,30 +35,30 @@ jobs:
         run: |
           # ۱. دریافت داده‌ها
           python fetcher.py
-          
+
           # ۲. اجرای بک‌تستر
           python src/backtester.py
-          
-          # ۳. بهینه‌سازی پارامترها
-          python src/optimizer.py
-          
-          # ۴. آموزش مدل
+
+          # ۳. آموزش مدل با داده‌های جدید
           python src/train_model.py
-          
+
+          # ۴. بهینه‌سازی پارامترها با مدل جدید
+          python src/optimizer.py
+
           # ۵. تنظیمات گیت
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
-          
-          # ۶. اضافه کردن اجباری فایل‌های خروجی و دیتابیس
+
+          # ۶. اضافه کردن اجباری فایل‌های خروجی
           git add -f backtest_table_summary.csv
           git add -f best_params.json
           git add -f data/trading_bot_backtest.db
           git add .
-          
-          # ثبت تغییرات با زمان فعلی
-          git commit -m "Auto-update: Syncing backtest results and DB $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
-          
-          # ۷. ارسال به ریپازیتوری با زور
+
+          # ۷. ثبت تغییرات
+          git commit -m "Auto-update: Backtest + Train + Optimize $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
+
+          # ۸. ارسال به ریپازیتوری
           git push origin HEAD:${{ github.ref_name }} --force
 
       - name: Upload Artifacts
