@@ -3,6 +3,7 @@
 # تغییرات نسبت به v2.0:
 #   1. MAX_SL_PERCENT پیش‌فرض: 0.03 → 0.05 (هماهنگ با config)
 #   2. MIN_REQUIRED_SCORE پیش‌فرض: 60 → 65 (هماهنگ با config)
+#   3. هماهنگی کامل نام فیچرها با ماژول جدید TechnicalIndicators
 # ---------------------------------------------------------
 import os
 import sys
@@ -17,7 +18,8 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 import config
-from src import indicators, strategy_utils
+from src import strategy_utils
+from src.indicators import TechnicalIndicators
 from src.csv_store import (
     save_backtest_trade, close_backtest_trade,
     flush_closed_trades, export_to_sqlite,
@@ -55,7 +57,13 @@ def run_backtest(
     w_ema = float(getattr(config, 'WEIGHT_EMA', 20))
     w_sum = (w_ai + w_adx + w_rsi + w_ema) or 100.0
 
-    df_full = indicators.calculate_indicators(df_raw.copy())
+    # استفاده از متد جدید و دریافت دیتافریم + متا دیتا
+    df_full, meta = TechnicalIndicators.calculate_all_features(df_raw.copy(), symbol=pair)
+    
+    # اطمینان از موفقیت‌آمیز بودن محاسبه اندیکاتورها
+    if not meta.get('success', False):
+        logger.error("❌ محاسبه اندیکاتورها برای %s ناموفق بود", pair)
+        return _empty_result(pair)
 
     open_trades   = []
     closed_trades = []
@@ -107,11 +115,12 @@ def run_backtest(
 
         open_trades = still_open
 
-        current_adx  = float(candle.get('feat_adx', 0))
-        current_rsi  = float(candle.get('feat_rsi', 50))
-        rsi_momentum = float(candle.get('feat_rsi_momentum', 0))
-        dev_val      = abs(float(candle.get('feat_ema_deviation', 0)))
-        atr_val      = float(candle.get('atr', candle.get('feat_atr_percent', 1.0)))
+        # خواندن داده‌ها با پشتیبانی از نام‌گذاری جدید اندیکاتورها و Fallback به نام‌های قدیمی
+        current_adx  = float(candle.get('ADX', candle.get('feat_adx', 0)))
+        current_rsi  = float(candle.get('RSI', candle.get('feat_rsi', 50)))
+        rsi_momentum = float(candle.get('RSI_momentum', candle.get('feat_rsi_momentum', 0)))
+        dev_val      = abs(float(candle.get('EMA_diff', candle.get('feat_ema_deviation', 0))))
+        atr_val      = float(candle.get('ATR', candle.get('feat_atr_percent', 1.0)))
 
         adx_score = (
             min(100.0, 50.0 + (current_adx - adx_thresh) * 2.5)
@@ -137,15 +146,16 @@ def run_backtest(
 
         if model_active:
             try:
+                # خواندن داده‌ها با در نظر گرفتن ستون‌های جدید
                 features = {
                     'feat_adx':           current_adx,
                     'feat_rsi':           current_rsi,
                     'feat_rsi_momentum':  rsi_momentum,
                     'feat_ema_deviation': dev_val,
-                    'feat_atr_percent':   float(candle.get('feat_atr_percent', 0)),
-                    'feat_trend_line':    float(candle.get('feat_trend_line', 0)),
-                    'feat_body_ratio':    float(candle.get('feat_body_ratio', 0)),
-                    'feat_volume_ratio':  round(float(candle.get('feat_volume_ratio', 1.0)), 4),
+                    'feat_atr_percent':   float(candle.get('ATR', candle.get('feat_atr_percent', 0))),
+                    'feat_trend_line':    float(candle.get('Trend_line', candle.get('feat_trend_line', 0))),
+                    'feat_body_ratio':    float(candle.get('Body_ratio', candle.get('feat_body_ratio', 0))),
+                    'feat_volume_ratio':  round(float(candle.get('Volume_ratio', candle.get('feat_volume_ratio', 1.0))), 4),
                 }
                 raw = model.predict_probability(pair, features)
                 if raw is not None:
@@ -179,14 +189,15 @@ def run_backtest(
 
         trade_id = f"{pair}_{i}"
 
+        # استخراج فیچرهای مورد نیاز برای ذخیره در پایگاه داده/لاگ
         trade_features = {
             'feat_adx':           round(current_adx, 4),
             'feat_rsi':           round(current_rsi, 4),
             'feat_rsi_momentum':  round(rsi_momentum, 4),
             'feat_ema_deviation': round(dev_val, 4),
-            'feat_atr_percent':   round(float(candle.get('feat_atr_percent', 0)), 4),
-            'feat_trend_line':    round(float(candle.get('feat_trend_line', 0)), 4),
-            'feat_body_ratio':    round(float(candle.get('feat_body_ratio', 0)), 4),
+            'feat_atr_percent':   round(float(candle.get('ATR', candle.get('feat_atr_percent', 0))), 4),
+            'feat_trend_line':    round(float(candle.get('Trend_line', candle.get('feat_trend_line', 0))), 4),
+            'feat_body_ratio':    round(float(candle.get('Body_ratio', candle.get('feat_body_ratio', 0))), 4),
         }
 
         if high_price > swing_high and current_rsi > 50:
