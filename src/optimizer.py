@@ -16,14 +16,16 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 import config
-from src import indicators, strategy_utils
+from src import strategy_utils
+from src.indicators import TechnicalIndicators
 from src.brain import TradingBrain
 
 
 def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
     df_copy = df.copy()
-    if 'feat_adx' not in df_copy.columns:
-        df_copy = indicators.calculate_indicators(df_copy)
+    # بررسی وجود ستون‌های اندیکاتور با پشتیبانی از نام‌های جدید و قدیم
+    if 'ADX' not in df_copy.columns and 'feat_adx' not in df_copy.columns:
+        df_copy, _ = TechnicalIndicators.calculate_all_features(df_copy, symbol=symbol)
 
     if brain is None:
         brain = TradingBrain()
@@ -74,11 +76,12 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
                 is_in_position   = False
             continue
 
-        current_adx  = float(current_candle.get('feat_adx', 0))
-        current_rsi  = float(current_candle.get('feat_rsi', 50))
-        rsi_momentum = float(current_candle.get('feat_rsi_momentum', 0))
-        dev_val      = abs(float(current_candle.get('feat_ema_deviation', 0)))
-        atr_val      = float(current_candle.get('atr', current_candle.get('feat_atr_percent', 1.0)))
+        # خواندن داده‌ها با در نظر گرفتن ستون‌های جدید و فال‌بک به نام‌های قدیمی
+        current_adx  = float(current_candle.get('ADX', current_candle.get('feat_adx', 0)))
+        current_rsi  = float(current_candle.get('RSI', current_candle.get('feat_rsi', 50)))
+        rsi_momentum = float(current_candle.get('RSI_momentum', current_candle.get('feat_rsi_momentum', 0)))
+        dev_val      = abs(float(current_candle.get('EMA_diff', current_candle.get('feat_ema_deviation', 0))))
+        atr_val      = float(current_candle.get('ATR', current_candle.get('feat_atr_percent', 1.0)))
 
         if current_adx >= adx_th:
             adx_score = min(100.0, 50.0 + (current_adx - adx_th) * 2.5)
@@ -93,14 +96,15 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
         ema_score = min(100.0, (dev_val / 5.0) * 100.0)
 
         try:
+            # ارسال ویژگی‌ها به مدل با پشتیبانی از هر دو فرمت
             raw = brain.predict_probability(symbol, {
                 'feat_adx':           current_adx,
-                'feat_atr_percent':   float(current_candle.get('feat_atr_percent', 0)),
+                'feat_atr_percent':   float(current_candle.get('ATR', current_candle.get('feat_atr_percent', 0))),
                 'feat_rsi':           current_rsi,
-                'feat_trend_line':    float(current_candle.get('feat_trend_line', 0)),
+                'feat_trend_line':    float(current_candle.get('Trend_line', current_candle.get('feat_trend_line', 0))),
                 'feat_ema_deviation': dev_val,
                 'feat_rsi_momentum':  rsi_momentum,
-                'feat_body_ratio':    float(current_candle.get('feat_body_ratio', 0)),
+                'feat_body_ratio':    float(current_candle.get('Body_ratio', current_candle.get('feat_body_ratio', 0))),
             })
             ai_score = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
         except Exception:
@@ -160,7 +164,13 @@ def optimize_all(mode="backtest"):
             print(f"⚠️ فایل CSV برای {symbol} پیدا نشد — skip")
             continue
 
-        df = indicators.calculate_indicators(pd.read_csv(file_path))
+        # محاسبه اندیکاتورها با کلاس جدید به جای تابع قدیمی
+        df_raw = pd.read_csv(file_path)
+        df, meta = TechnicalIndicators.calculate_all_features(df_raw, symbol=symbol)
+        
+        if not meta.get('success', False):
+            print(f"❌ محاسبه اندیکاتورها در اپتیمایزر برای {symbol} ناموفق بود — skip")
+            continue
 
         best_pnl = -9999.0
         best_cfg = {
