@@ -11,60 +11,101 @@ permissions:
 jobs:
   retrain:
     runs-on: ubuntu-latest
+
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        persist-credentials: true
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-        cache: 'pip'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
 
-    - name: Install System Dependencies for LightGBM
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libgomp1
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgomp1
 
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy joblib lightgbm scikit-learn psycopg2-binary
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy joblib scikit-learn yfinance psycopg2-binary
 
-    - name: Execute Machine Learning Training (Monthly Mode)
-      env:
-        PYTHONPATH: ${{ github.workspace }}
-        DATABASE_URL: ${{ secrets.DATABASE_URL }} # 🟢 اتصال به ابر
-      run: |
-        python src/train_model.py --monthly
+      # اول fetcher را اجرا می‌کنیم تا CSV های به‌روز داشته باشیم
+      - name: Fetch Latest Market Data
+        run: |
+          python fetcher.py
 
-    - name: Commit and Push Upgraded Models
-      run: |
-        git config --global user.name 'github-actions'
-        git config --global user.email 'github-actions@github.com'
-        
-        # فقط فایل‌های مدل و پارامترها را اضافه می‌کنیم؛ مدل‌ها در src/models قرار دارند
-        # و در .gitignore هستند، پس با -f اجباری اضافه می‌شوند.
-        git add best_params.json
-        git add -f src/models/*.pkl 2>/dev/null || echo "No model files to add."
-        
-        if git diff --cached --quiet; then
-          echo "No changes detected."
-        else
-          git commit -m "🧠 Monthly Brain Upgrade: AI models learned from live trades."
-          git push origin HEAD:${{ github.ref_name }}
-        fi
+      # بررسی که فایل‌های CSV واقعاً ساخته شدند
+      - name: Verify CSV Files Exist
+        run: |
+          echo "=== فایل‌های CSV موجود ==="
+          ls -lh data/4h/ || echo "پوشه data/4h وجود ندارد!"
+          CSV_COUNT=$(ls data/4h/*.csv 2>/dev/null | wc -l)
+          echo "تعداد فایل CSV: $CSV_COUNT"
+          if [ "$CSV_COUNT" -eq "0" ]; then
+            echo "هیچ فایل CSV وجود ندارد - pipeline متوقف شد"
+            exit 1
+          fi
 
-    - name: Send Notification to Telegram
-      if: success()
-      env:
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: |
-        curl -s -X POST https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage \
-        -d chat_id=$TELEGRAM_CHAT_ID \
-        -d parse_mode=HTML \
-        -d text="🧠 <b>ارتقای هوش مصنوعی انجام شد!</b>%0A━━━━━━━━━━━━━━━%0A✅ مدل‌های اختصاصی ارزها با تکیه بر تجربیات ماه اخیر با موفقیت بازآموزی شدند.%0A🚀 <i>ربات شما حالا یک نسخه باهوش‌تر است.</i>"
+      # آموزش مدل‌ها
+      - name: Train AI Models
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python src/train_model.py --monthly
+
+      # بررسی که pkl ها ساخته شدند
+      - name: Verify Model Files Exist
+        run: |
+          echo "=== فایل‌های مدل ساخته‌شده ==="
+          ls -lh src/models/*.pkl 2>/dev/null || echo "هیچ pkl یافت نشد!"
+          PKL_COUNT=$(ls src/models/*.pkl 2>/dev/null | wc -l)
+          echo "تعداد مدل ذخیره‌شده: $PKL_COUNT"
+
+      # commit و push
+      - name: Commit and Push Models
+        run: |
+          git config --global user.name 'github-actions'
+          git config --global user.email 'github-actions@github.com'
+
+          # اضافه کردن مدل‌ها (با -f چون احتمالاً در .gitignore هستند)
+          git add best_params.json
+          git add -f src/models/*.pkl 2>/dev/null || echo "هیچ pkl برای اضافه کردن نیست."
+          git add -f src/models/*.pkl 2>/dev/null || true
+          git add training_results.json 2>/dev/null || true
+
+          if git diff --cached --quiet; then
+            echo "هیچ تغییری برای commit وجود ندارد."
+          else
+            PKL_COUNT=$(ls src/models/*.pkl 2>/dev/null | wc -l)
+            git commit -m "🧠 Monthly Brain Upgrade: ${PKL_COUNT} AI models retrained."
+            git push origin HEAD:${{ github.ref_name }}
+            echo "Push با موفقیت انجام شد."
+          fi
+
+      - name: Send Telegram Notification
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          PKL_COUNT=$(ls src/models/*.pkl 2>/dev/null | wc -l)
+          if [ "$PKL_COUNT" -gt "0" ]; then
+            STATUS="موفق"
+            EMOJI="🧠"
+            MSG="${EMOJI} <b>ارتقای ماهانه هوش مصنوعی انجام شد!</b>%0A━━━━━━━━━━━━━━━%0A✅ ${PKL_COUNT} مدل اختصاصی با موفقیت بازآموزی شدند.%0A🚀 <i>ربات یک نسخه باهوش‌تر است.</i>"
+          else
+            STATUS="ناموفق"
+            EMOJI="❌"
+            MSG="${EMOJI} <b>بازآموزی ماهانه ناموفق بود!</b>%0A━━━━━━━━━━━━━━━%0A⚠️ هیچ مدلی ذخیره نشد. لاگ Actions را بررسی کنید."
+          fi
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d parse_mode=HTML \
+            -d text="${MSG}"
