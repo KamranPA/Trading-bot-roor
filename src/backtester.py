@@ -145,6 +145,7 @@ def run_backtest(
                     'feat_atr_percent':   float(candle.get('feat_atr_percent', 0)),
                     'feat_trend_line':    float(candle.get('feat_trend_line', 0)),
                     'feat_body_ratio':    float(candle.get('feat_body_ratio', 0)),
+                    'feat_volume_ratio':  round(float(candle.get('feat_volume_ratio', 1.0)), 4),
                 }
                 raw = model.predict_probability(pair, features)
                 if raw is not None:
