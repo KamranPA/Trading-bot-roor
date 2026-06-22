@@ -41,9 +41,9 @@ def calculate_indicators(df):
     df['feat_body_ratio'] = (abs(df['Close'] - df['Open']) / (df['High'] - df['Low'] + 1e-10))
 
     if 'Volume' in df.columns:
-        vol_ma = df['Volume'].rolling(window=20).mean()
-        df['feat_volume_ratio'] = df['Volume'] / (vol_ma + 1e-10)
-    else:
-        df['feat_volume_ratio'] = 1.0
+    vol_ma = df['Volume'].rolling(window=20).mean()
+    df['feat_volume_ratio'] = (df['Volume'] / (vol_ma + 1e-10)).clip(0, 10)
+else:
+    df['feat_volume_ratio'] = 1.0
 
     return df.fillna(0.0)
