@@ -10,17 +10,14 @@ def calculate_indicators(df):
     if df is None or df.empty or len(df) < 50:
         return df
 
-    # ۱. EMA
     df['ema_200'] = df['Close'].ewm(span=200, adjust=False).mean()
 
-    # ۲. RSI
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / (loss + 1e-10)
     df['feat_rsi'] = 100 - (100 / (1 + rs))
 
-    # ۳. ATR
     high_low = df['High'] - df['Low']
     high_close = (df['High'] - df['Close'].shift()).abs()
     low_close = (df['Low'] - df['Close'].shift()).abs()
@@ -28,7 +25,6 @@ def calculate_indicators(df):
     df['atr'] = tr.rolling(window=14).mean()
     df['feat_atr_percent'] = (df['atr'] / df['Close']) * 100
 
-    # ۴. ADX
     up_move = df['High'].diff()
     down_move = df['Low'].diff()
     plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
@@ -39,13 +35,11 @@ def calculate_indicators(df):
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)) * 100
     df['feat_adx'] = dx.rolling(window=14).mean().fillna(25.0)
 
-    # ۵. سنسورهای روند و کندل
     df['feat_trend_line'] = np.where(df['Close'] > df['ema_200'], 1.0, 0.0)
     df['feat_ema_deviation'] = ((df['Close'] - df['ema_200']) / df['ema_200']) * 100
     df['feat_rsi_momentum'] = df['feat_rsi'].diff().fillna(0.0)
     df['feat_body_ratio'] = (abs(df['Close'] - df['Open']) / (df['High'] - df['Low'] + 1e-10))
 
-    # ۶. فیلتر حجم — نسبت حجم فعلی به میانگین ۲۰ کندل قبل
     if 'Volume' in df.columns:
         vol_ma = df['Volume'].rolling(window=20).mean()
         df['feat_volume_ratio'] = df['Volume'] / (vol_ma + 1e-10)
