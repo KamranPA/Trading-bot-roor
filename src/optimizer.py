@@ -1,12 +1,13 @@
 # ---------------------------------------------------------
-# FILE PATH: src/optimizer.py (v9.6 - TP_RATIO Optimized)
-# تغییرات نسبت به v9.5:
-#   1. TP_RATIO هم بهینه می‌شود (1.5, 2.0, 2.5)
-#   2. مقادیر پیش‌فرض از config گرفته می‌شود نه hardcode
+# FILE PATH: src/optimizer.py (v9.7 - Timestamp + TP_RATIO Optimized)
+# تغییرات نسبت به v9.6:
+#   1. اضافه شدن timestamp به best_params.json (همیشه commit میشه)
+#   2. ترتیب اجرا: بعد از train_model.py
 # ---------------------------------------------------------
 import os
 import sys
 import json
+import datetime
 import pandas as pd
 import numpy as np
 
@@ -161,7 +162,6 @@ def optimize_all(mode="backtest"):
 
         df = indicators.calculate_indicators(pd.read_csv(file_path))
 
-        # مقادیر پیش‌فرض از config
         best_pnl = -9999.0
         best_cfg = {
             "ADX_THRESHOLD": config.ADX_THRESHOLD,
@@ -187,6 +187,8 @@ def optimize_all(mode="backtest"):
 
         best_params_dict[symbol] = best_cfg
         print(f"✅ {symbol}: ADX={best_cfg['ADX_THRESHOLD']} SW={best_cfg['SWING_WINDOW']} TP={best_cfg['TP_RATIO']} | PnL={best_pnl:.2f}")
+
+    best_params_dict['_updated_at'] = datetime.datetime.utcnow().isoformat()
 
     with open(params_file, "w") as f:
         json.dump(best_params_dict, f, indent=4)
