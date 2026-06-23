@@ -1,12 +1,12 @@
 {
-  "timestamp": "2026-06-22T19:32:11.632925",
+  "timestamp": "2026-06-23T04:42:04.087416",
   "symbols": {
     "BTC/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/BTC_USDT_model.pkl",
-      "train_score": 0.9556650246305419,
-      "test_score": 0.4843568945538818,
-      "samples_used": 4314,
+      "train_score": 0.9551079136690648,
+      "test_score": 0.4890678941311853,
+      "samples_used": 4344,
       "features_used": [
         "ATR",
         "EMA_diff",
@@ -22,9 +22,9 @@
     "ETH/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/ETH_USDT_model.pkl",
-      "train_score": 0.9585627354390032,
-      "test_score": 0.5272305909617613,
-      "samples_used": 4314,
+      "train_score": 0.961726618705036,
+      "test_score": 0.5086306098964327,
+      "samples_used": 4344,
       "features_used": [
         "ATR",
         "EMA_diff",
@@ -40,9 +40,9 @@
     "SOL/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/SOL_USDT_model.pkl",
-      "train_score": 0.9629093016516952,
-      "test_score": 0.5330243337195828,
-      "samples_used": 4314,
+      "train_score": 0.9657553956834533,
+      "test_score": 0.5166858457997698,
+      "samples_used": 4344,
       "features_used": [
         "ATR",
         "EMA_diff",
@@ -58,9 +58,9 @@
     "DOT/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/DOT_USDT_model.pkl",
-      "train_score": 0.9553752535496958,
-      "test_score": 0.522595596755504,
-      "samples_used": 4314,
+      "train_score": 0.9548201438848921,
+      "test_score": 0.525891829689298,
+      "samples_used": 4344,
       "features_used": [
         "ATR",
         "EMA_diff",
@@ -76,9 +76,9 @@
     "LINK/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/LINK_USDT_model.pkl",
-      "train_score": 0.9663865546218487,
-      "test_score": 0.5307068366164542,
-      "samples_used": 4314,
+      "train_score": 0.962589928057554,
+      "test_score": 0.5408515535097813,
+      "samples_used": 4344,
       "features_used": [
         "ATR",
         "EMA_diff",
@@ -94,9 +94,9 @@
     "AVAX/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/AVAX_USDT_model.pkl",
-      "train_score": 0.9527673138220806,
-      "test_score": 0.5168018539976825,
-      "samples_used": 4314,
+      "train_score": 0.943021582733813,
+      "test_score": 0.5477560414269275,
+      "samples_used": 4344,
       "features_used": [
         "ATR",
         "EMA_diff",
@@ -112,9 +112,9 @@
     "XRP/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/XRP_USDT_model.pkl",
-      "train_score": 0.9487105186902347,
-      "test_score": 0.4947856315179606,
-      "samples_used": 4314,
+      "train_score": 0.9542446043165468,
+      "test_score": 0.5028768699654775,
+      "samples_used": 4344,
       "features_used": [
         "ATR",
         "EMA_diff",
@@ -130,9 +130,9 @@
     "LTC/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/LTC_USDT_model.pkl",
-      "train_score": 0.9550854824688496,
-      "test_score": 0.5168018539976825,
-      "samples_used": 4314,
+      "train_score": 0.9568345323741008,
+      "test_score": 0.523590333716916,
+      "samples_used": 4344,
       "features_used": [
         "ATR",
         "EMA_diff",
@@ -148,9 +148,9 @@
     "BCH/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/BCH_USDT_model.pkl",
-      "train_score": 0.9687047232686178,
-      "test_score": 0.5307068366164542,
-      "samples_used": 4314,
+      "train_score": 0.9689208633093526,
+      "test_score": 0.5051783659378596,
+      "samples_used": 4344,
       "features_used": [
         "ATR",
         "EMA_diff",
@@ -166,9 +166,9 @@
     "ATOM/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/ATOM_USDT_model.pkl",
-      "train_score": 0.9542161692263113,
-      "test_score": 0.5202780996523755,
-      "samples_used": 4314,
+      "train_score": 0.9366906474820144,
+      "test_score": 0.5051783659378596,
+      "samples_used": 4344,
       "features_used": [
         "ATR",
         "EMA_diff",
