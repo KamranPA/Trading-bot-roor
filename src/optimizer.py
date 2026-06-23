@@ -44,6 +44,8 @@ def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
             col_map[col] = 'Timestamp'
     if col_map:
         df = df.rename(columns=col_map)
+    # حذف ستون‌های تکراری که بعد از rename ممکن است ایجاد شوند
+    df = df.loc[:, ~df.columns.duplicated(keep='first')]
     return df
 
 
