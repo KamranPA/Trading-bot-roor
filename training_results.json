@@ -1,189 +1,89 @@
 {
-  "timestamp": "2026-06-23T04:42:04.087416",
+  "timestamp": "2026-06-23T05:02:55.142415",
+  "model_type": "LightGBM",
+  "features": [
+    "feat_adx",
+    "feat_atr_percent",
+    "feat_rsi",
+    "feat_trend_line",
+    "feat_ema_deviation",
+    "feat_rsi_momentum",
+    "feat_body_ratio"
+  ],
   "symbols": {
     "BTC/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/BTC_USDT_model.pkl",
-      "train_score": 0.9551079136690648,
-      "test_score": 0.4890678941311853,
-      "samples_used": 4344,
-      "features_used": [
-        "ATR",
-        "EMA_diff",
-        "RSI",
-        "MACD",
-        "ADX",
-        "BB_upper",
-        "BB_lower",
-        "OBV",
-        "Volume_SMA"
-      ]
+      "train_score": 0.6122389791183295,
+      "test_score": 0.5214368482039398,
+      "samples": 4311
     },
     "ETH/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/ETH_USDT_model.pkl",
-      "train_score": 0.961726618705036,
-      "test_score": 0.5086306098964327,
-      "samples_used": 4344,
-      "features_used": [
-        "ATR",
-        "EMA_diff",
-        "RSI",
-        "MACD",
-        "ADX",
-        "BB_upper",
-        "BB_lower",
-        "OBV",
-        "Volume_SMA"
-      ]
+      "train_score": 0.5974477958236659,
+      "test_score": 0.4982618771726535,
+      "samples": 4311
     },
     "SOL/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/SOL_USDT_model.pkl",
-      "train_score": 0.9657553956834533,
-      "test_score": 0.5166858457997698,
-      "samples_used": 4344,
-      "features_used": [
-        "ATR",
-        "EMA_diff",
-        "RSI",
-        "MACD",
-        "ADX",
-        "BB_upper",
-        "BB_lower",
-        "OBV",
-        "Volume_SMA"
-      ]
+      "train_score": 0.6174593967517401,
+      "test_score": 0.5341830822711472,
+      "samples": 4311
     },
     "DOT/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/DOT_USDT_model.pkl",
-      "train_score": 0.9548201438848921,
-      "test_score": 0.525891829689298,
-      "samples_used": 4344,
-      "features_used": [
-        "ATR",
-        "EMA_diff",
-        "RSI",
-        "MACD",
-        "ADX",
-        "BB_upper",
-        "BB_lower",
-        "OBV",
-        "Volume_SMA"
-      ]
+      "train_score": 0.5609048723897911,
+      "test_score": 0.4855156431054461,
+      "samples": 4311
     },
     "LINK/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/LINK_USDT_model.pkl",
-      "train_score": 0.962589928057554,
-      "test_score": 0.5408515535097813,
-      "samples_used": 4344,
-      "features_used": [
-        "ATR",
-        "EMA_diff",
-        "RSI",
-        "MACD",
-        "ADX",
-        "BB_upper",
-        "BB_lower",
-        "OBV",
-        "Volume_SMA"
-      ]
+      "train_score": 0.5394431554524362,
+      "test_score": 0.47856315179606024,
+      "samples": 4311
     },
     "AVAX/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/AVAX_USDT_model.pkl",
-      "train_score": 0.943021582733813,
-      "test_score": 0.5477560414269275,
-      "samples_used": 4344,
-      "features_used": [
-        "ATR",
-        "EMA_diff",
-        "RSI",
-        "MACD",
-        "ADX",
-        "BB_upper",
-        "BB_lower",
-        "OBV",
-        "Volume_SMA"
-      ]
+      "train_score": 0.595707656612529,
+      "test_score": 0.507531865585168,
+      "samples": 4311
     },
     "XRP/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/XRP_USDT_model.pkl",
-      "train_score": 0.9542446043165468,
-      "test_score": 0.5028768699654775,
-      "samples_used": 4344,
-      "features_used": [
-        "ATR",
-        "EMA_diff",
-        "RSI",
-        "MACD",
-        "ADX",
-        "BB_upper",
-        "BB_lower",
-        "OBV",
-        "Volume_SMA"
-      ]
+      "train_score": 0.5661252900232019,
+      "test_score": 0.48783314020857477,
+      "samples": 4311
     },
     "LTC/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/LTC_USDT_model.pkl",
-      "train_score": 0.9568345323741008,
-      "test_score": 0.523590333716916,
-      "samples_used": 4344,
-      "features_used": [
-        "ATR",
-        "EMA_diff",
-        "RSI",
-        "MACD",
-        "ADX",
-        "BB_upper",
-        "BB_lower",
-        "OBV",
-        "Volume_SMA"
-      ]
+      "train_score": 0.6548723897911833,
+      "test_score": 0.5272305909617613,
+      "samples": 4311
     },
     "BCH/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/BCH_USDT_model.pkl",
-      "train_score": 0.9689208633093526,
-      "test_score": 0.5051783659378596,
-      "samples_used": 4344,
-      "features_used": [
-        "ATR",
-        "EMA_diff",
-        "RSI",
-        "MACD",
-        "ADX",
-        "BB_upper",
-        "BB_lower",
-        "OBV",
-        "Volume_SMA"
-      ]
+      "train_score": 0.5275522041763341,
+      "test_score": 0.4797219003476246,
+      "samples": 4311
     },
     "ATOM/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/ATOM_USDT_model.pkl",
-      "train_score": 0.9366906474820144,
-      "test_score": 0.5051783659378596,
-      "samples_used": 4344,
-      "features_used": [
-        "ATR",
-        "EMA_diff",
-        "RSI",
-        "MACD",
-        "ADX",
-        "BB_upper",
-        "BB_lower",
-        "OBV",
-        "Volume_SMA"
-      ]
+      "train_score": 0.5690255220417634,
+      "test_score": 0.5179606025492468,
+      "samples": 4311
     }
   },
   "summary": {
-    "total_symbols": 10,
+    "total": 10,
     "successful": 10,
     "failed": 0
   }
