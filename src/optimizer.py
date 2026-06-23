@@ -106,16 +106,22 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
                 'feat_body_ratio':    body_ratio,
             })
             if raw is None:
-                ai_score = 50.0; ai_approved = True
+                # مدل وجود ندارد - AI را از معادله حذف می‌کنیم
+                ai_score = 50.0
+                w_ai_eff = 0.0
             else:
-                ai_score    = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
-                ai_approved = ai_score >= ai_threshold
+                ai_score = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
+                w_ai_eff = w_ai
         except Exception:
-            ai_score = 50.0; ai_approved = True
+            ai_score = 50.0
+            w_ai_eff = 0.0
 
-        total_score = (ai_score * w_ai + adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema) / w_sum
+        # در optimizer از ai_approved صرف‌نظر می‌کنیم
+        # هدف پیدا کردن بهترین پارامتر است، نه فیلتر سیگنال لایو
+        w_sum_eff = (w_ai_eff + w_adx + w_rsi + w_ema) or 100.0
+        total_score = (ai_score * w_ai_eff + adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema) / w_sum_eff
 
-        if total_score < min_score or not ai_approved:
+        if total_score < min_score:
             continue
 
         df_slice        = df_copy.iloc[:i + 1]
