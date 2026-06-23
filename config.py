@@ -1,36 +1,74 @@
 # ---------------------------------------------------------
-# FILE PATH: config.py (v10.1 - Volume Filter Added)
+# FILE PATH: config.py (v10.2 - Volume Filter + بهبودی‌ها)
+# تغییرات نسبت به v10.1:
+#   - ENABLE_VOLUME_FILTER اضافه شد
+#   - VOLUME_THRESHOLDS برای هر symbol
 # ---------------------------------------------------------
+
 import os
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-DB_NAME            = "trading_bot.db"
-DB_PATH_LIVE       = os.path.join(BASE_DIR, "data", DB_NAME)
-DB_NAME_BACKTEST   = "trading_bot_backtest.db"
-DB_PATH_BACKTEST   = os.path.join(BASE_DIR, "data", DB_NAME_BACKTEST)
+# ─────────────────────────────────────────────────────────────
+# Database
+# ─────────────────────────────────────────────────────────────
+DB_NAME = "trading_bot.db"
+DB_PATH_LIVE = os.path.join(BASE_DIR, "data", DB_NAME)
+DB_NAME_BACKTEST = "trading_bot_backtest.db"
+DB_PATH_BACKTEST = os.path.join(BASE_DIR, "data", DB_NAME_BACKTEST)
 
-TIMEFRAME     = "4h"
+# ─────────────────────────────────────────────────────────────
+# Backtest Parameters
+# ─────────────────────────────────────────────────────────────
+TIMEFRAME = "4h"
 CANDLES_LIMIT = 500
-
 MAX_OPEN_POSITIONS = 3
-TOTAL_CAPITAL      = 1000.0
-RISK_PERCENT       = 1.0
-RISK_MULTIPLIER    = 1.0
+TOTAL_CAPITAL = 1000.0
+RISK_PERCENT = 1.0
+RISK_MULTIPLIER = 1.0
 
-ADX_THRESHOLD  = 25.0
-SWING_WINDOW   = 5
-TP_RATIO       = 2.0
-SL_RATIO       = 1.0
+# ─────────────────────────────────────────────────────────────
+# ✅ Volume Filter (جدید)
+# ─────────────────────────────────────────────────────────────
+ENABLE_VOLUME_FILTER = True  # True = فعال ، False = غیرفعال
+
+VOLUME_THRESHOLDS = {
+    "BTC/USDT": 1000000,    # 1M
+    "ETH/USDT": 500000,     # 500K
+    "SOL/USDT": 300000,     # 300K
+    "DOT/USDT": 150000,     # 150K
+    "LINK/USDT": 200000,    # 200K
+    "AVAX/USDT": 250000,    # 250K
+    "XRP/USDT": 1000000,    # 1M
+    "LTC/USDT": 200000,     # 200K
+    "BCH/USDT": 100000,     # 100K
+    "ATOM/USDT": 150000,    # 150K
+}
+
+# ─────────────────────────────────────────────────────────────
+# Trading Parameters
+# ─────────────────────────────────────────────────────────────
+ADX_THRESHOLD = 25.0
+SWING_WINDOW = 5
+TP_RATIO = 2.0
+SL_RATIO = 1.0
 MAX_SL_PERCENT = 0.05
 
-AI_THRESHOLD       = 65.0
+# ─────────────────────────────────────────────────────────────
+# AI & Model Parameters
+# ─────────────────────────────────────────────────────────────
+AI_THRESHOLD = 65.0
 MIN_REQUIRED_SCORE = 65
 
-WEIGHT_AI  = 40
-WEIGHT_ADX = 20
-WEIGHT_RSI = 20
-WEIGHT_EMA = 20
+# ─────────────────────────────────────────────────────────────
+# Scoring Weights
+# ─────────────────────────────────────────────────────────────
+WEIGHT_AI = 40   # AI Model (LightGBM)
+WEIGHT_ADX = 20  # Trend (ADX)
+WEIGHT_RSI = 20  # Momentum (RSI)
+WEIGHT_EMA = 20  # Trend (EMA)
 
+# ✅ این 7 feature برای LightGBM است (بدون volume_ratio)
 AI_FEATURES = [
     'feat_adx',
     'feat_atr_percent',
@@ -39,13 +77,18 @@ AI_FEATURES = [
     'feat_ema_deviation',
     'feat_rsi_momentum',
     'feat_body_ratio',
-    'feat_volume_ratio',
 ]
 
+# ─────────────────────────────────────────────────────────────
+# Watchlist
+# ─────────────────────────────────────────────────────────────
 WATCHLIST = [
     "BTC/USDT", "ETH/USDT", "SOL/USDT", "DOT/USDT", "LINK/USDT",
     "AVAX/USDT", "XRP/USDT", "LTC/USDT", "BCH/USDT", "ATOM/USDT",
 ]
 
+# ─────────────────────────────────────────────────────────────
+# Telegram
+# ─────────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
