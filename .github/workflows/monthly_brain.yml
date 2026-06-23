@@ -33,7 +33,7 @@ jobs:
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy joblib scikit-learn yfinance psycopg2-binary
+          pip install pandas numpy joblib scikit-learn yfinance psycopg2-binary lightgbm 
 
       # ── مرحله ۱: دریافت داده‌های به‌روز از یاهو فایننس ──────────────────
       - name: Fetch Latest Market Data
