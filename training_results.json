@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-06-23T08:07:55.778530",
+  "timestamp": "2026-06-23T09:43:09.415952",
   "model_type": "LightGBM",
   "features": [
     "feat_adx",
@@ -28,36 +28,36 @@
     "SOL/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/SOL_USDT_model.pkl",
-      "train_score": 0.5749492606552624,
+      "train_score": 0.5752391997680487,
       "test_score": 0.4762456546929316,
       "samples": 4312
     },
     "DOT/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/DOT_USDT_model.pkl",
-      "train_score": 0.5479849231661351,
-      "test_score": 0.4982618771726535,
+      "train_score": 0.5450855320382719,
+      "test_score": 0.49710312862108924,
       "samples": 4312
     },
     "LINK/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/LINK_USDT_model.pkl",
       "train_score": 0.6607712380400116,
-      "test_score": 0.5399768250289687,
+      "test_score": 0.541135573580533,
       "samples": 4312
     },
     "AVAX/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/AVAX_USDT_model.pkl",
-      "train_score": 0.5447955929254856,
+      "train_score": 0.5445056538126993,
       "test_score": 0.5063731170336037,
       "samples": 4312
     },
     "XRP/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/XRP_USDT_model.pkl",
-      "train_score": 0.6059727457233981,
-      "test_score": 0.5237543453070683,
+      "train_score": 0.6787474630327631,
+      "test_score": 0.5086906141367323,
       "samples": 4312
     },
     "LTC/USDT": {
@@ -70,14 +70,14 @@
     "BCH/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/BCH_USDT_model.pkl",
-      "train_score": 0.5273992461583068,
+      "train_score": 0.5276891852710931,
       "test_score": 0.4936268829663963,
       "samples": 4312
     },
     "ATOM/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/ATOM_USDT_model.pkl",
-      "train_score": 0.5253696723688025,
+      "train_score": 0.5256596114815889,
       "test_score": 0.4831981460023175,
       "samples": 4312
     }
