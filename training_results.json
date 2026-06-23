@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-06-23T07:49:54.725497",
+  "timestamp": "2026-06-23T08:07:55.778530",
   "model_type": "LightGBM",
   "features": [
     "feat_adx",
@@ -14,72 +14,72 @@
     "BTC/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/BTC_USDT_model.pkl",
-      "train_score": 0.5341007194244605,
-      "test_score": 0.5086306098964327,
-      "samples": 4344
+      "train_score": 0.5778486517831255,
+      "test_score": 0.5052143684820394,
+      "samples": 4312
     },
     "ETH/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/ETH_USDT_model.pkl",
-      "train_score": 0.5671942446043166,
-      "test_score": 0.5109321058688148,
-      "samples": 4344
+      "train_score": 0.6227892142650043,
+      "test_score": 0.4936268829663963,
+      "samples": 4312
     },
     "SOL/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/SOL_USDT_model.pkl",
-      "train_score": 0.6707913669064748,
-      "test_score": 0.5132336018411968,
-      "samples": 4344
+      "train_score": 0.5749492606552624,
+      "test_score": 0.4762456546929316,
+      "samples": 4312
     },
     "DOT/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/DOT_USDT_model.pkl",
-      "train_score": 0.6189928057553957,
-      "test_score": 0.5281933256616801,
-      "samples": 4344
+      "train_score": 0.5479849231661351,
+      "test_score": 0.4982618771726535,
+      "samples": 4312
     },
     "LINK/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/LINK_USDT_model.pkl",
-      "train_score": 0.5689208633093525,
-      "test_score": 0.475258918296893,
-      "samples": 4344
+      "train_score": 0.6607712380400116,
+      "test_score": 0.5399768250289687,
+      "samples": 4312
     },
     "AVAX/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/AVAX_USDT_model.pkl",
-      "train_score": 0.5243165467625899,
-      "test_score": 0.5086306098964327,
-      "samples": 4344
+      "train_score": 0.5447955929254856,
+      "test_score": 0.5063731170336037,
+      "samples": 4312
     },
     "XRP/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/XRP_USDT_model.pkl",
-      "train_score": 0.6273381294964029,
-      "test_score": 0.5097813578826237,
-      "samples": 4344
+      "train_score": 0.6059727457233981,
+      "test_score": 0.5237543453070683,
+      "samples": 4312
     },
     "LTC/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/LTC_USDT_model.pkl",
-      "train_score": 0.5994244604316546,
-      "test_score": 0.49597238204833144,
-      "samples": 4344
+      "train_score": 0.6520730646564221,
+      "test_score": 0.5052143684820394,
+      "samples": 4312
     },
     "BCH/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/BCH_USDT_model.pkl",
-      "train_score": 0.5372661870503597,
-      "test_score": 0.5316455696202531,
-      "samples": 4344
+      "train_score": 0.5273992461583068,
+      "test_score": 0.4936268829663963,
+      "samples": 4312
     },
     "ATOM/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/ATOM_USDT_model.pkl",
-      "train_score": 0.5712230215827339,
-      "test_score": 0.5178365937859609,
-      "samples": 4344
+      "train_score": 0.5253696723688025,
+      "test_score": 0.4831981460023175,
+      "samples": 4312
     }
   },
   "summary": {
