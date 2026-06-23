@@ -1,4 +1,4 @@
-# FILE PATH: src/optimizer.py (v9.9 - feat_* aligned + LightGBM compatible)
+# FILE PATH: src/optimizer.py (v10.0 - fixed duplicate + debug prints)
 import os
 import sys
 import json
@@ -17,11 +17,10 @@ from src.brain import TradingBrain
 
 
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """تبدیل نام ستون‌ها به lowercase و حذف تکراری‌ها"""
     col_map = {}
     for col in df.columns:
         lower = col.lower()
-        if lower in ('open','high','low','close','volume','timestamp'):
+        if lower in ('open', 'high', 'low', 'close', 'volume', 'timestamp'):
             col_map[col] = lower
     if col_map:
         df = df.rename(columns=col_map)
@@ -35,21 +34,29 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
     if brain is None:
         brain = TradingBrain()
 
-    ai_threshold = float(getattr(config, 'AI_THRESHOLD', 65.0))
-    min_score    = float(getattr(config, 'MIN_REQUIRED_SCORE', 65))
-    max_sl_pct   = float(getattr(config, 'MAX_SL_PERCENT', 0.05))
+    min_score  = float(getattr(config, 'MIN_REQUIRED_SCORE', 65))
+    max_sl_pct = float(getattr(config, 'MAX_SL_PERCENT', 0.05))
     w_ai  = float(getattr(config, 'WEIGHT_AI',  40))
     w_adx = float(getattr(config, 'WEIGHT_ADX', 20))
     w_rsi = float(getattr(config, 'WEIGHT_RSI', 20))
     w_ema = float(getattr(config, 'WEIGHT_EMA', 20))
-    w_sum = (w_ai + w_adx + w_rsi + w_ema) or 100.0
 
     split_idx = int(len(df_copy) * 0.8)
 
-    ai_total_trades = 0
-    ai_total_pnl    = 0.0
-    is_in_position  = False
-    entry_price, direction, stop_loss, tp2 = 0.0, "", 0.0, 0.0
+    ai_total_trades    = 0
+    ai_total_pnl       = 0.0
+    is_in_position     = False
+    entry_price        = 0.0
+    direction          = ""
+    stop_loss          = 0.0
+    tp2                = 0.0
+
+    # debug counters
+    cnt_zero_price     = 0
+    cnt_score_fail     = 0
+    cnt_no_swing       = 0
+    cnt_no_entry       = 0
+    cnt_signal         = 0
 
     for i in range(split_idx, len(df_copy)):
         row = df_copy.iloc[i]
@@ -59,21 +66,32 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
         close_price = float(row.get('close', 0))
 
         if high_price == 0 or low_price == 0 or close_price == 0:
+            cnt_zero_price += 1
             continue
 
         if is_in_position:
-            pnl = 0.0; closed = False
+            pnl = 0.0
+            closed = False
             if direction == "LONG":
-                if low_price  <= stop_loss: pnl = ((stop_loss - entry_price) / entry_price) * 100; closed = True
-                elif high_price >= tp2:     pnl = ((tp2 - entry_price) / entry_price) * 100;       closed = True
+                if low_price <= stop_loss:
+                    pnl = ((stop_loss - entry_price) / entry_price) * 100
+                    closed = True
+                elif high_price >= tp2:
+                    pnl = ((tp2 - entry_price) / entry_price) * 100
+                    closed = True
             elif direction == "SHORT":
-                if high_price >= stop_loss: pnl = ((entry_price - stop_loss) / entry_price) * 100; closed = True
-                elif low_price  <= tp2:     pnl = ((entry_price - tp2) / entry_price) * 100;       closed = True
+                if high_price >= stop_loss:
+                    pnl = ((entry_price - stop_loss) / entry_price) * 100
+                    closed = True
+                elif low_price <= tp2:
+                    pnl = ((entry_price - tp2) / entry_price) * 100
+                    closed = True
             if closed:
-                ai_total_pnl += pnl; ai_total_trades += 1; is_in_position = False
+                ai_total_pnl += pnl
+                ai_total_trades += 1
+                is_in_position = False
             continue
 
-        # ── خواندن فیچرها — همه با نام feat_* ──────────────────────────────
         current_adx  = float(row.get('feat_adx',           row.get('ADX', 0)))
         current_rsi  = float(row.get('feat_rsi',           row.get('RSI', 50)))
         rsi_momentum = float(row.get('feat_rsi_momentum',  row.get('RSI_momentum', 0)))
@@ -84,7 +102,6 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
 
         atr_val = (atr_pct / 100.0) * close_price if atr_pct > 0 else close_price * 0.01
 
-        # ── score ها ────────────────────────────────────────────────────────
         adx_score = min(100.0, 50.0 + (current_adx - adx_th) * 2.5) if current_adx >= adx_th \
                     else max(0.0, (current_adx / (adx_th + 1e-10)) * 50.0)
 
@@ -93,7 +110,6 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
 
         ema_score = min(100.0, (dev_val / 5.0) * 100.0)
 
-        # ── AI score — با همان ۷ فیچری که مدل آموزش دیده ──────────────────
         try:
             raw = brain.predict_probability(symbol, {
                 'feat_adx':           current_adx,
@@ -105,7 +121,6 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
                 'feat_body_ratio':    body_ratio,
             })
             if raw is None:
-                # مدل وجود ندارد - AI را از معادله حذف می‌کنیم
                 ai_score = 50.0
                 w_ai_eff = 0.0
             else:
@@ -115,19 +130,21 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
             ai_score = 50.0
             w_ai_eff = 0.0
 
-        # در optimizer از ai_approved صرف‌نظر می‌کنیم
-        # هدف پیدا کردن بهترین پارامتر است، نه فیلتر سیگنال لایو
-        w_sum_eff = (w_ai_eff + w_adx + w_rsi + w_ema) or 100.0
+        w_sum_eff   = (w_ai_eff + w_adx + w_rsi + w_ema) or 100.0
         total_score = (ai_score * w_ai_eff + adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema) / w_sum_eff
 
         if total_score < min_score:
+            cnt_score_fail += 1
             continue
+
+        cnt_signal += 1
 
         df_slice        = df_copy.iloc[:i + 1]
         last_swing_high = strategy_utils.find_last_swing(df_slice, 'high', swing_w)
         last_swing_low  = strategy_utils.find_last_swing(df_slice, 'low',  swing_w)
 
         if last_swing_high is None or last_swing_low is None:
+            cnt_no_swing += 1
             continue
 
         sl_dist = min(1.5 * atr_val * sl_r, close_price * max_sl_pct)
@@ -135,11 +152,26 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
             continue
 
         if high_price > last_swing_high and current_rsi > 50:
-            is_in_position = True; direction = "LONG"
-            entry_price = close_price; stop_loss = entry_price - sl_dist; tp2 = entry_price + sl_dist * tp_r
+            is_in_position = True
+            direction      = "LONG"
+            entry_price    = close_price
+            stop_loss      = entry_price - sl_dist
+            tp2            = entry_price + sl_dist * tp_r
         elif low_price < last_swing_low and current_rsi < 50:
-            is_in_position = True; direction = "SHORT"
-            entry_price = close_price; stop_loss = entry_price + sl_dist; tp2 = entry_price - sl_dist * tp_r
+            is_in_position = True
+            direction      = "SHORT"
+            entry_price    = close_price
+            stop_loss      = entry_price + sl_dist
+            tp2            = entry_price - sl_dist * tp_r
+        else:
+            cnt_no_entry += 1
+
+    # debug فقط برای اولین ترکیب هر ارز
+    if adx_th == 15 and swing_w == 3 and tp_r == 1.5:
+        rows_tested = len(df_copy) - split_idx
+        print(f"  DEBUG {symbol}: rows={rows_tested} zero_price={cnt_zero_price} "
+              f"score_fail={cnt_score_fail} passed_score={cnt_signal} "
+              f"no_swing={cnt_no_swing} no_entry={cnt_no_entry} trades={ai_total_trades}")
 
     return ai_total_pnl, ai_total_trades
 
@@ -167,12 +199,10 @@ def optimize_all(mode="backtest"):
         df_raw = _normalize_columns(df_raw)
 
         df, meta = TechnicalIndicators.calculate_all_features(df_raw, symbol=symbol)
-
         if not meta.get('success', False):
             print(f"محاسبه اندیکاتورها برای {symbol} ناموفق - skip")
             continue
 
-        # indicators.py ستون‌ها را lowercase می‌کند — نگه می‌داریم
         df = _normalize_columns(df)
 
         best_pnl = -9999.0
@@ -197,7 +227,8 @@ def optimize_all(mode="backtest"):
                         }
 
         best_params_dict[symbol] = best_cfg
-        print(f"{symbol}: ADX={best_cfg['ADX_THRESHOLD']} SW={best_cfg['SWING_WINDOW']} TP={best_cfg['TP_RATIO']} | PnL={best_pnl:.2f}%")
+        print(f"{symbol}: ADX={best_cfg['ADX_THRESHOLD']} SW={best_cfg['SWING_WINDOW']} "
+              f"TP={best_cfg['TP_RATIO']} | PnL={best_pnl:.2f}%")
 
     best_params_dict['_updated_at'] = datetime.datetime.utcnow().isoformat()
 
