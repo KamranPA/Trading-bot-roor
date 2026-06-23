@@ -35,12 +35,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas numpy joblib scikit-learn yfinance psycopg2-binary
 
-      # اول fetcher را اجرا می‌کنیم تا CSV های به‌روز داشته باشیم
+      # ── مرحله ۱: دریافت داده‌های به‌روز از یاهو فایننس ──────────────────
       - name: Fetch Latest Market Data
         run: |
           python fetcher.py
 
-      # بررسی که فایل‌های CSV واقعاً ساخته شدند
       - name: Verify CSV Files Exist
         run: |
           echo "=== فایل‌های CSV موجود ==="
@@ -52,7 +51,7 @@ jobs:
             exit 1
           fi
 
-      # آموزش مدل‌ها
+      # ── مرحله ۲: آموزش مدل‌های AI ───────────────────────────────────────
       - name: Train AI Models
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -60,35 +59,56 @@ jobs:
         run: |
           python src/train_model.py --monthly
 
-      # بررسی که pkl ها ساخته شدند
       - name: Verify Model Files Exist
         run: |
           echo "=== فایل‌های مدل ساخته‌شده ==="
           ls -lh src/models/*.pkl 2>/dev/null || echo "هیچ pkl یافت نشد!"
           PKL_COUNT=$(ls src/models/*.pkl 2>/dev/null | wc -l)
-          echo "تعداد مدل ذخیره‌شده: $PKL_COUNT"
+          echo "تعداد مدل: $PKL_COUNT"
+          if [ "$PKL_COUNT" -eq "0" ]; then
+            echo "هیچ مدلی ساخته نشد - optimizer اجرا نمی‌شود"
+            exit 1
+          fi
 
-      # commit و push
-      - name: Commit and Push Models
+      # ── مرحله ۳: بهینه‌سازی پارامترها با مدل‌های جدید ──────────────────
+      # این مرحله best_params.json را با بهترین پارامترهای هر ارز آپدیت می‌کند
+      - name: Optimize Parameters (Update best_params.json)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python src/optimizer.py
+
+      - name: Verify best_params Updated
+        run: |
+          echo "=== محتوای best_params.json ==="
+          cat best_params.json
+
+      # ── مرحله ۴: commit و push همه چیز ──────────────────────────────────
+      - name: Commit and Push Models + Params
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
 
-          # اضافه کردن مدل‌ها (با -f چون احتمالاً در .gitignore هستند)
-          git add best_params.json
-          git add -f src/models/*.pkl 2>/dev/null || echo "هیچ pkl برای اضافه کردن نیست."
+          # مدل‌ها (با -f چون احتمالاً در .gitignore هستند)
           git add -f src/models/*.pkl 2>/dev/null || true
+          git add -f src/models/*.pkl 2>/dev/null || true
+
+          # پارامترهای بهینه‌شده
+          git add best_params.json
+
+          # نتایج training (اختیاری)
           git add training_results.json 2>/dev/null || true
 
           if git diff --cached --quiet; then
             echo "هیچ تغییری برای commit وجود ندارد."
           else
             PKL_COUNT=$(ls src/models/*.pkl 2>/dev/null | wc -l)
-            git commit -m "🧠 Monthly Brain Upgrade: ${PKL_COUNT} AI models retrained."
+            git commit -m "🧠 Monthly Upgrade: ${PKL_COUNT} models retrained + params optimized."
             git push origin HEAD:${{ github.ref_name }}
             echo "Push با موفقیت انجام شد."
           fi
 
+      # ── مرحله ۵: اطلاع‌رسانی تلگرام ────────────────────────────────────
       - name: Send Telegram Notification
         if: always()
         env:
@@ -97,13 +117,9 @@ jobs:
         run: |
           PKL_COUNT=$(ls src/models/*.pkl 2>/dev/null | wc -l)
           if [ "$PKL_COUNT" -gt "0" ]; then
-            STATUS="موفق"
-            EMOJI="🧠"
-            MSG="${EMOJI} <b>ارتقای ماهانه هوش مصنوعی انجام شد!</b>%0A━━━━━━━━━━━━━━━%0A✅ ${PKL_COUNT} مدل اختصاصی با موفقیت بازآموزی شدند.%0A🚀 <i>ربات یک نسخه باهوش‌تر است.</i>"
+            MSG="🧠 <b>ارتقای ماهانه هوش مصنوعی انجام شد!</b>%0A━━━━━━━━━━━━━━━%0A✅ ${PKL_COUNT} مدل اختصاصی بازآموزی شدند.%0A📊 پارامترهای بهینه برای هر ارز آپدیت شد.%0A🚀 <i>ربات یک نسخه باهوش‌تر است.</i>"
           else
-            STATUS="ناموفق"
-            EMOJI="❌"
-            MSG="${EMOJI} <b>بازآموزی ماهانه ناموفق بود!</b>%0A━━━━━━━━━━━━━━━%0A⚠️ هیچ مدلی ذخیره نشد. لاگ Actions را بررسی کنید."
+            MSG="❌ <b>بازآموزی ماهانه ناموفق بود!</b>%0A━━━━━━━━━━━━━━━%0A⚠️ هیچ مدلی ذخیره نشد. لاگ Actions را بررسی کنید."
           fi
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
