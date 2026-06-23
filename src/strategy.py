@@ -42,6 +42,8 @@ def generate_signal(
         'adx_score':    0.0,
         'rsi_score':    0.0,
         'ema_score':    0.0,
+        'pair':         symbol,
+        'feat_adx':     0.0,
     }
 
     if params is None:
@@ -130,6 +132,7 @@ def generate_signal(
     w_sum_eff   = (w_ai_eff + w_adx + w_rsi + w_ema) or 100.0
     total_score = (ai_score * w_ai_eff + adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema) / w_sum_eff
 
+    result['feat_adx']     = round(current_adx,  2)
     result['total_score'] = round(total_score, 2)
     result['ai_score']    = round(ai_score,    2)
     result['adx_score']   = round(adx_score,   2)
