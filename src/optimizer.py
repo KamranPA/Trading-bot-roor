@@ -1,4 +1,4 @@
-# FILE PATH: src/optimizer.py (v10.1 - volume_ratio added + no trade limit)
+# FILE PATH: src/optimizer.py (v10.2 - fix High/Low case for strategy_utils)
 import os
 import sys
 import json
@@ -28,8 +28,20 @@ def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _add_uppercase_aliases(df: pd.DataFrame) -> pd.DataFrame:
+    """اضافه کردن ستون‌های با حرف بزرگ برای سازگاری با strategy_utils"""
+    if 'high'  in df.columns: df['High']  = df['high']
+    if 'low'   in df.columns: df['Low']   = df['low']
+    if 'open'  in df.columns: df['Open']  = df['open']
+    if 'close' in df.columns: df['Close'] = df['close']
+    if 'feat_atr_percent' in df.columns and 'atr' not in df.columns:
+        df['atr'] = (df['feat_atr_percent'] / 100.0) * df['close']
+    return df
+
+
 def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
     df_copy = _normalize_columns(df.copy())
+    df_copy = _add_uppercase_aliases(df_copy)
 
     if brain is None:
         brain = TradingBrain()
@@ -84,14 +96,14 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
                 is_in_position   = False
             continue
 
-        current_adx   = float(row.get('feat_adx',           row.get('adx', 0)))
-        current_rsi   = float(row.get('feat_rsi',           row.get('rsi', 50)))
-        rsi_momentum  = float(row.get('feat_rsi_momentum',  row.get('rsi_momentum', 0)))
-        dev_val       = abs(float(row.get('feat_ema_deviation', row.get('ema_diff', 0))))
-        atr_pct       = float(row.get('feat_atr_percent',   (row.get('atr', close_price * 0.01) / close_price) * 100))
-        trend_line    = float(row.get('feat_trend_line',    row.get('trend_line', 0)))
-        body_ratio    = float(row.get('feat_body_ratio',    row.get('body_ratio', 0)))
-        volume_ratio  = float(row.get('feat_volume_ratio',  row.get('volume_ratio', 1.0)))
+        current_adx  = float(row.get('feat_adx',          row.get('adx', 0)))
+        current_rsi  = float(row.get('feat_rsi',          row.get('rsi', 50)))
+        rsi_momentum = float(row.get('feat_rsi_momentum', row.get('rsi_momentum', 0)))
+        dev_val      = abs(float(row.get('feat_ema_deviation', row.get('ema_diff', 0))))
+        atr_pct      = float(row.get('feat_atr_percent',  0))
+        trend_line   = float(row.get('feat_trend_line',   row.get('trend_line', 0)))
+        body_ratio   = float(row.get('feat_body_ratio',   row.get('body_ratio', 0)))
+        volume_ratio = float(row.get('feat_volume_ratio', row.get('volume_ratio', 1.0)))
 
         atr_val = (atr_pct / 100.0) * close_price if atr_pct > 0 else close_price * 0.01
 
@@ -119,11 +131,11 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
                 'feat_volume_ratio':  volume_ratio,
             })
             if raw is None:
-                ai_score  = 50.0
-                w_ai_eff  = 0.0
+                ai_score = 50.0
+                w_ai_eff = 0.0
             else:
-                ai_score  = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
-                w_ai_eff  = w_ai
+                ai_score = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
+                w_ai_eff = w_ai
         except Exception:
             ai_score = 50.0
             w_ai_eff = 0.0
@@ -191,6 +203,7 @@ def optimize_all(mode="backtest"):
             continue
 
         df = _normalize_columns(df)
+        df = _add_uppercase_aliases(df)
 
         best_pnl = -9999.0
         best_cfg = {
