@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-06-23T06:06:52.138346",
+  "timestamp": "2026-06-23T06:20:43.530650",
   "model_type": "LightGBM",
   "features": [
     "feat_adx",
@@ -22,7 +22,7 @@
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/ETH_USDT_model.pkl",
       "train_score": 0.5671942446043166,
-      "test_score": 0.5097813578826237,
+      "test_score": 0.5109321058688148,
       "samples": 4344
     },
     "SOL/USDT": {
@@ -64,7 +64,7 @@
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/LTC_USDT_model.pkl",
       "train_score": 0.5994244604316546,
-      "test_score": 0.49712313003452246,
+      "test_score": 0.49597238204833144,
       "samples": 4344
     },
     "BCH/USDT": {
