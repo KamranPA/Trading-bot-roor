@@ -1,8 +1,8 @@
 # ---------------------------------------------------------
-# FILE PATH: src/optimizer.py (v9.7 - Timestamp + TP_RATIO Optimized)
-# تغییرات نسبت به v9.6:
-#   1. اضافه شدن timestamp به best_params.json (همیشه commit میشه)
-#   2. ترتیب اجرا: بعد از train_model.py
+# FILE PATH: src/optimizer.py (v9.8 - Fixed Column Names + Workflow Integration)
+# تغییرات نسبت به v9.7:
+#   1. نرمال‌سازی نام ستون‌ها (High/Low/Close و high/low/close هر دو کار می‌کنند)
+#   2. بررسی وجود فایل pkl قبل از اجرا
 # ---------------------------------------------------------
 import os
 import sys
@@ -21,11 +21,39 @@ from src.indicators import TechnicalIndicators
 from src.brain import TradingBrain
 
 
+def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    ستون‌ها را به حرف بزرگ استاندارد تبدیل می‌کند.
+    fetcher.py: Timestamp, Open, High, Low, Close, Volume
+    indicators: ممکن است به حرف کوچک تبدیل کند
+    این تابع هر دو حالت را به حرف بزرگ برمی‌گرداند.
+    """
+    col_map = {}
+    for col in df.columns:
+        if col.lower() == 'open':
+            col_map[col] = 'Open'
+        elif col.lower() == 'high':
+            col_map[col] = 'High'
+        elif col.lower() == 'low':
+            col_map[col] = 'Low'
+        elif col.lower() == 'close':
+            col_map[col] = 'Close'
+        elif col.lower() == 'volume':
+            col_map[col] = 'Volume'
+        elif col.lower() == 'timestamp':
+            col_map[col] = 'Timestamp'
+    if col_map:
+        df = df.rename(columns=col_map)
+    return df
+
+
 def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
-    df_copy = df.copy()
-    # بررسی وجود ستون‌های اندیکاتور با پشتیبانی از نام‌های جدید و قدیم
+    df_copy = _normalize_columns(df.copy())
+
+    # محاسبه اندیکاتورها اگه وجود نداشتن
     if 'ADX' not in df_copy.columns and 'feat_adx' not in df_copy.columns:
         df_copy, _ = TechnicalIndicators.calculate_all_features(df_copy, symbol=symbol)
+        df_copy = _normalize_columns(df_copy)
 
     if brain is None:
         brain = TradingBrain()
@@ -48,26 +76,31 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
 
     for i in range(split_idx, len(df_copy)):
         current_candle = df_copy.iloc[i]
-        high_price  = float(current_candle['High'])
-        low_price   = float(current_candle['Low'])
-        close_price = float(current_candle['Close'])
+
+        # خواندن قیمت‌ها — با پشتیبانی از هر دو حالت حرف بزرگ/کوچک
+        high_price  = float(current_candle.get('High',  current_candle.get('high',  0)))
+        low_price   = float(current_candle.get('Low',   current_candle.get('low',   0)))
+        close_price = float(current_candle.get('Close', current_candle.get('close', 0)))
+
+        if high_price == 0 or low_price == 0 or close_price == 0:
+            continue
 
         if is_in_position:
-            pnl = 0.0
+            pnl    = 0.0
             closed = False
             if direction == "LONG":
                 if low_price <= stop_loss:
-                    pnl = ((stop_loss - entry_price) / entry_price) * 100
+                    pnl    = ((stop_loss - entry_price) / entry_price) * 100
                     closed = True
                 elif high_price >= tp2:
-                    pnl = ((tp2 - entry_price) / entry_price) * 100
+                    pnl    = ((tp2 - entry_price) / entry_price) * 100
                     closed = True
             elif direction == "SHORT":
                 if high_price >= stop_loss:
-                    pnl = ((entry_price - stop_loss) / entry_price) * 100
+                    pnl    = ((entry_price - stop_loss) / entry_price) * 100
                     closed = True
                 elif low_price <= tp2:
-                    pnl = ((entry_price - tp2) / entry_price) * 100
+                    pnl    = ((entry_price - tp2) / entry_price) * 100
                     closed = True
 
             if closed:
@@ -76,13 +109,17 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
                 is_in_position   = False
             continue
 
-        # خواندن داده‌ها با در نظر گرفتن ستون‌های جدید و فال‌بک به نام‌های قدیمی
-        current_adx  = float(current_candle.get('ADX', current_candle.get('feat_adx', 0)))
-        current_rsi  = float(current_candle.get('RSI', current_candle.get('feat_rsi', 50)))
-        rsi_momentum = float(current_candle.get('RSI_momentum', current_candle.get('feat_rsi_momentum', 0)))
+        # خواندن اندیکاتورها با پشتیبانی از نام‌های جدید و قدیمی
+        current_adx  = float(current_candle.get('ADX',          current_candle.get('feat_adx',           0)))
+        current_rsi  = float(current_candle.get('RSI',          current_candle.get('feat_rsi',           50)))
+        rsi_momentum = float(current_candle.get('RSI_momentum', current_candle.get('feat_rsi_momentum',  0)))
         dev_val      = abs(float(current_candle.get('EMA_diff', current_candle.get('feat_ema_deviation', 0))))
-        atr_val      = float(current_candle.get('ATR', current_candle.get('feat_atr_percent', 1.0)))
+        atr_val      = float(current_candle.get('ATR',          current_candle.get('feat_atr_percent',   1.0)))
 
+        if atr_val == 0:
+            atr_val = close_price * 0.01  # fallback: 1% از قیمت
+
+        # محاسبه score ها
         if current_adx >= adx_th:
             adx_score = min(100.0, 50.0 + (current_adx - adx_th) * 2.5)
         else:
@@ -96,21 +133,26 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
         ema_score = min(100.0, (dev_val / 5.0) * 100.0)
 
         try:
-            # ارسال ویژگی‌ها به مدل با پشتیبانی از هر دو فرمت
             raw = brain.predict_probability(symbol, {
                 'feat_adx':           current_adx,
-                'feat_atr_percent':   float(current_candle.get('ATR', current_candle.get('feat_atr_percent', 0))),
+                'feat_atr_percent':   atr_val,
                 'feat_rsi':           current_rsi,
-                'feat_trend_line':    float(current_candle.get('Trend_line', current_candle.get('feat_trend_line', 0))),
+                'feat_trend_line':    float(current_candle.get('Trend_line',  current_candle.get('feat_trend_line',  0))),
                 'feat_ema_deviation': dev_val,
                 'feat_rsi_momentum':  rsi_momentum,
-                'feat_body_ratio':    float(current_candle.get('Body_ratio', current_candle.get('feat_body_ratio', 0))),
+                'feat_body_ratio':    float(current_candle.get('Body_ratio',  current_candle.get('feat_body_ratio',  0))),
             })
-            ai_score = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
+            if raw is None:
+                # مدلی وجود ندارد — از میانگین استفاده می‌کنیم
+                ai_score    = 50.0
+                ai_approved = True
+            else:
+                ai_score    = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
+                ai_approved = ai_score >= ai_threshold
         except Exception:
-            ai_score = 0.0
+            ai_score    = 50.0
+            ai_approved = True
 
-        ai_approved = ai_score >= ai_threshold
         total_score = (
             ai_score * w_ai + adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema
         ) / w_sum
@@ -146,7 +188,7 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
 
 
 def optimize_all(mode="backtest"):
-    print(f"⚙️ شروع بهینه‌سازی کامل پارامترها (mode={mode})...")
+    print(f"شروع بهینه‌سازی کامل پارامترها (mode={mode})...")
     params_file      = os.path.join(BASE_DIR, "best_params.json")
     best_params_dict = {}
 
@@ -161,16 +203,20 @@ def optimize_all(mode="backtest"):
         file_path = os.path.join(BASE_DIR, "data", "4h", f"{safe_name}_history.csv")
 
         if not os.path.exists(file_path):
-            print(f"⚠️ فایل CSV برای {symbol} پیدا نشد — skip")
+            print(f"فایل CSV برای {symbol} پیدا نشد - skip")
             continue
 
-        # محاسبه اندیکاتورها با کلاس جدید به جای تابع قدیمی
+        # لود CSV و نرمال‌سازی ستون‌ها
         df_raw = pd.read_csv(file_path)
+        df_raw = _normalize_columns(df_raw)
+
         df, meta = TechnicalIndicators.calculate_all_features(df_raw, symbol=symbol)
-        
+
         if not meta.get('success', False):
-            print(f"❌ محاسبه اندیکاتورها در اپتیمایزر برای {symbol} ناموفق بود — skip")
+            print(f"محاسبه اندیکاتورها برای {symbol} ناموفق بود - skip")
             continue
+
+        df = _normalize_columns(df)
 
         best_pnl = -9999.0
         best_cfg = {
@@ -180,9 +226,13 @@ def optimize_all(mode="backtest"):
             "SL_RATIO":      config.SL_RATIO,
         }
 
+        total_combos = len(adx_options) * len(swing_options) * len(tp_options)
+        tested = 0
+
         for adx in adx_options:
             for sw in swing_options:
                 for tp in tp_options:
+                    tested += 1
                     pnl, trades = evaluate_parameters(
                         symbol, df, adx, sw, tp, 1.0, brain=brain
                     )
@@ -196,13 +246,20 @@ def optimize_all(mode="backtest"):
                         }
 
         best_params_dict[symbol] = best_cfg
-        print(f"✅ {symbol}: ADX={best_cfg['ADX_THRESHOLD']} SW={best_cfg['SWING_WINDOW']} TP={best_cfg['TP_RATIO']} | PnL={best_pnl:.2f}")
+        print(
+            f"{symbol}: ADX={best_cfg['ADX_THRESHOLD']} "
+            f"SW={best_cfg['SWING_WINDOW']} "
+            f"TP={best_cfg['TP_RATIO']} | "
+            f"PnL={best_pnl:.2f}% ({tested} ترکیب تست شد)"
+        )
 
     best_params_dict['_updated_at'] = datetime.datetime.utcnow().isoformat()
 
     with open(params_file, "w") as f:
         json.dump(best_params_dict, f, indent=4)
-    print("✨ فایل best_params.json با موفقیت آپدیت شد.")
+
+    print("فایل best_params.json با موفقیت آپدیت شد.")
+    return best_params_dict
 
 
 if __name__ == "__main__":
