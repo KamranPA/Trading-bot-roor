@@ -33,16 +33,16 @@ RISK_MULTIPLIER = 1.0
 ENABLE_VOLUME_FILTER = True  # True = فعال ، False = غیرفعال
 
 VOLUME_THRESHOLDS = {
-    "BTC/USDT": 1000000,    # 1M
-    "ETH/USDT": 500000,     # 500K
-    "SOL/USDT": 300000,     # 300K
-    "DOT/USDT": 150000,     # 150K
-    "LINK/USDT": 200000,    # 200K
-    "AVAX/USDT": 250000,    # 250K
-    "XRP/USDT": 1000000,    # 1M
-    "LTC/USDT": 200000,     # 200K
-    "BCH/USDT": 100000,     # 100K
-    "ATOM/USDT": 150000,    # 150K
+    "BTCUSDT": 1000000,    # 1M
+    "ETHUSDT": 500000,     # 500K
+    "SOLUSDT": 300000,     # 300K
+    "DOTUSDT": 150000,     # 150K
+    "LINKUSDT": 200000,    # 200K
+    "AVAXUSDT": 250000,    # 250K
+    "XRPUSDT": 1000000,    # 1M
+    "LTCUSDT": 200000,     # 200K
+    "BCHUSDT": 100000,     # 100K
+    "ATOMUSDT": 150000,    # 150K
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -83,8 +83,8 @@ AI_FEATURES = [
 # Watchlist
 # ─────────────────────────────────────────────────────────────
 WATCHLIST = [
-    "BTC/USDT", "ETH/USDT", "SOL/USDT", "DOT/USDT", "LINK/USDT",
-    "AVAX/USDT", "XRP/USDT", "LTC/USDT", "BCH/USDT", "ATOM/USDT",
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "DOTUSDT", "LINKUSDT",
+    "AVAXUSDT", "XRPUSDT", "LTCUSDT", "BCHUSDT", "ATOMUSDT",
 ]
 
 # ─────────────────────────────────────────────────────────────
