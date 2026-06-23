@@ -1,11 +1,11 @@
-# ---------------------------------------------------------
+# ---------------------------------------------------------------------------
 # FILE PATH: src/database.py  (v3.1 - SSL Fix for Supabase)
 # تغییرات نسبت به v3.0:
 #   - اضافه شدن sslmode=require به اتصال psycopg2
 #     (Supabase از GitHub Actions بدون SSL رد می‌کند)
 #   - اگر DATABASE_URL قبلاً sslmode دارد: تغییر نمی‌دهیم
 #   - اگر ندارد: ?sslmode=require اضافه می‌شود
-# ---------------------------------------------------------
+# ---------------------------------------------------------------------------
 import os
 import logging
 import datetime
@@ -165,10 +165,17 @@ def save_signal_advanced(pair: str, **kwargs) -> int | None:
         logger.warning("direction نامعتبر '%s' برای %s — ذخیره لغو شد", direction, pair)
         return None
 
+    # یکسان سازی نام کلیدها برای اطمینان از ذخیره قیمت‌ها
+    mapped_kwargs = kwargs.copy()
+    if 'entry' in mapped_kwargs and 'entry_price' not in mapped_kwargs:
+        mapped_kwargs['entry_price'] = mapped_kwargs.pop('entry')
+    if 'sl' in mapped_kwargs and 'stop_loss' not in mapped_kwargs:
+        mapped_kwargs['stop_loss'] = mapped_kwargs.pop('sl')
+
     data = {'pair': pair}
     for col in _SIGNAL_COLUMNS:
-        if col != 'pair' and col in kwargs:
-            data[col] = kwargs[col]
+        if col != 'pair' and col in mapped_kwargs:
+            data[col] = mapped_kwargs[col]
 
     cols         = ', '.join(data.keys())
     placeholders = ', '.join(['%s'] * len(data))
