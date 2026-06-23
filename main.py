@@ -211,9 +211,8 @@ def process_pair(pair: str, open_positions_count: int):
         with db_lock:
             if res.get('direction') is not None:
                 tele_signal = res.copy()
-                tele_signal['pair_display'] = (
-                    "MATIC/USDT (POL)" if pair == "POL/USDT" else pair
-                )
+                tele_signal['pair_display'] = pair
+                    
                 signal = {
                     k: v for k, v in res.items()
                     if k not in ('pair', 'symbol', 'total_score',
