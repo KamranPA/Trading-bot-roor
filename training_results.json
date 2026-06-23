@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-06-23T07:09:41.942367",
+  "timestamp": "2026-06-23T07:49:54.725497",
   "model_type": "LightGBM",
   "features": [
     "feat_adx",
@@ -28,9 +28,9 @@
     "SOL/USDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/SOL_USDT_model.pkl",
-      "train_score": 0.6174593967517401,
-      "test_score": 0.5330243337195828,
-      "samples": 4311
+      "train_score": 0.6707913669064748,
+      "test_score": 0.5132336018411968,
+      "samples": 4344
     },
     "DOT/USDT": {
       "status": "SUCCESS",

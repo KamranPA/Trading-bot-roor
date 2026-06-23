@@ -1,63 +1,63 @@
 {
     "BTC/USDT": {
-        "ADX_THRESHOLD": 25.0,
-        "SWING_WINDOW": 5,
-        "TP_RATIO": 2.0,
+        "ADX_THRESHOLD": 15,
+        "SWING_WINDOW": 3,
+        "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "ETH/USDT": {
-        "ADX_THRESHOLD": 25.0,
-        "SWING_WINDOW": 5,
-        "TP_RATIO": 2.0,
+        "ADX_THRESHOLD": 15,
+        "SWING_WINDOW": 3,
+        "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "SOL/USDT": {
-        "ADX_THRESHOLD": 25.0,
-        "SWING_WINDOW": 5,
-        "TP_RATIO": 2.0,
+        "ADX_THRESHOLD": 15,
+        "SWING_WINDOW": 3,
+        "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "DOT/USDT": {
-        "ADX_THRESHOLD": 25.0,
-        "SWING_WINDOW": 5,
-        "TP_RATIO": 2.0,
+        "ADX_THRESHOLD": 15,
+        "SWING_WINDOW": 3,
+        "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "LINK/USDT": {
-        "ADX_THRESHOLD": 25.0,
-        "SWING_WINDOW": 5,
-        "TP_RATIO": 2.0,
+        "ADX_THRESHOLD": 15,
+        "SWING_WINDOW": 3,
+        "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "AVAX/USDT": {
-        "ADX_THRESHOLD": 25.0,
-        "SWING_WINDOW": 5,
-        "TP_RATIO": 2.0,
+        "ADX_THRESHOLD": 15,
+        "SWING_WINDOW": 3,
+        "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "XRP/USDT": {
-        "ADX_THRESHOLD": 25.0,
-        "SWING_WINDOW": 5,
-        "TP_RATIO": 2.0,
+        "ADX_THRESHOLD": 15,
+        "SWING_WINDOW": 3,
+        "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "LTC/USDT": {
-        "ADX_THRESHOLD": 25.0,
-        "SWING_WINDOW": 5,
-        "TP_RATIO": 2.0,
+        "ADX_THRESHOLD": 15,
+        "SWING_WINDOW": 3,
+        "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "BCH/USDT": {
-        "ADX_THRESHOLD": 25.0,
-        "SWING_WINDOW": 5,
-        "TP_RATIO": 2.0,
+        "ADX_THRESHOLD": 15,
+        "SWING_WINDOW": 3,
+        "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "ATOM/USDT": {
-        "ADX_THRESHOLD": 25.0,
-        "SWING_WINDOW": 5,
-        "TP_RATIO": 2.0,
+        "ADX_THRESHOLD": 15,
+        "SWING_WINDOW": 3,
+        "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
-    "_updated_at": "2026-06-23T07:16:53.421593"
+    "_updated_at": "2026-06-23T07:57:17.798658"
 }
