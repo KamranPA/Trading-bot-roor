@@ -1,4 +1,4 @@
-# FILE PATH: src/optimizer.py (v10.0 - fixed duplicate + debug prints)
+# FILE PATH: src/optimizer.py (v10.1 - volume_ratio added + no trade limit)
 import os
 import sys
 import json
@@ -43,20 +43,13 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
 
     split_idx = int(len(df_copy) * 0.8)
 
-    ai_total_trades    = 0
-    ai_total_pnl       = 0.0
-    is_in_position     = False
-    entry_price        = 0.0
-    direction          = ""
-    stop_loss          = 0.0
-    tp2                = 0.0
-
-    # debug counters
-    cnt_zero_price     = 0
-    cnt_score_fail     = 0
-    cnt_no_swing       = 0
-    cnt_no_entry       = 0
-    cnt_signal         = 0
+    ai_total_trades = 0
+    ai_total_pnl    = 0.0
+    is_in_position  = False
+    entry_price     = 0.0
+    direction       = ""
+    stop_loss       = 0.0
+    tp2             = 0.0
 
     for i in range(split_idx, len(df_copy)):
         row = df_copy.iloc[i]
@@ -66,48 +59,52 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
         close_price = float(row.get('close', 0))
 
         if high_price == 0 or low_price == 0 or close_price == 0:
-            cnt_zero_price += 1
             continue
 
         if is_in_position:
-            pnl = 0.0
+            pnl    = 0.0
             closed = False
             if direction == "LONG":
                 if low_price <= stop_loss:
-                    pnl = ((stop_loss - entry_price) / entry_price) * 100
+                    pnl    = ((stop_loss - entry_price) / entry_price) * 100
                     closed = True
                 elif high_price >= tp2:
-                    pnl = ((tp2 - entry_price) / entry_price) * 100
+                    pnl    = ((tp2 - entry_price) / entry_price) * 100
                     closed = True
             elif direction == "SHORT":
                 if high_price >= stop_loss:
-                    pnl = ((entry_price - stop_loss) / entry_price) * 100
+                    pnl    = ((entry_price - stop_loss) / entry_price) * 100
                     closed = True
                 elif low_price <= tp2:
-                    pnl = ((entry_price - tp2) / entry_price) * 100
+                    pnl    = ((entry_price - tp2) / entry_price) * 100
                     closed = True
             if closed:
-                ai_total_pnl += pnl
+                ai_total_pnl    += pnl
                 ai_total_trades += 1
-                is_in_position = False
+                is_in_position   = False
             continue
 
-        current_adx  = float(row.get('feat_adx',           row.get('ADX', 0)))
-        current_rsi  = float(row.get('feat_rsi',           row.get('RSI', 50)))
-        rsi_momentum = float(row.get('feat_rsi_momentum',  row.get('RSI_momentum', 0)))
-        dev_val      = abs(float(row.get('feat_ema_deviation', row.get('EMA_diff', 0))))
-        atr_pct      = float(row.get('feat_atr_percent',   (row.get('ATR', close_price * 0.01) / close_price) * 100))
-        trend_line   = float(row.get('feat_trend_line',    row.get('Trend_line', 0)))
-        body_ratio   = float(row.get('feat_body_ratio',    row.get('Body_ratio', 0)))
+        current_adx   = float(row.get('feat_adx',           row.get('adx', 0)))
+        current_rsi   = float(row.get('feat_rsi',           row.get('rsi', 50)))
+        rsi_momentum  = float(row.get('feat_rsi_momentum',  row.get('rsi_momentum', 0)))
+        dev_val       = abs(float(row.get('feat_ema_deviation', row.get('ema_diff', 0))))
+        atr_pct       = float(row.get('feat_atr_percent',   (row.get('atr', close_price * 0.01) / close_price) * 100))
+        trend_line    = float(row.get('feat_trend_line',    row.get('trend_line', 0)))
+        body_ratio    = float(row.get('feat_body_ratio',    row.get('body_ratio', 0)))
+        volume_ratio  = float(row.get('feat_volume_ratio',  row.get('volume_ratio', 1.0)))
 
         atr_val = (atr_pct / 100.0) * close_price if atr_pct > 0 else close_price * 0.01
 
-        adx_score = min(100.0, 50.0 + (current_adx - adx_th) * 2.5) if current_adx >= adx_th \
-                    else max(0.0, (current_adx / (adx_th + 1e-10)) * 50.0)
-
-        rsi_score = min(100.0, max(0.0, 50.0 + rsi_momentum * 5)) if current_rsi > 50 \
-                    else min(100.0, max(0.0, 50.0 + (-rsi_momentum) * 5))
-
+        adx_score = (
+            min(100.0, 50.0 + (current_adx - adx_th) * 2.5)
+            if current_adx >= adx_th
+            else max(0.0, (current_adx / (adx_th + 1e-10)) * 50.0)
+        )
+        rsi_score = (
+            min(100.0, max(0.0, 50.0 + rsi_momentum * 5))
+            if current_rsi > 50
+            else min(100.0, max(0.0, 50.0 + (-rsi_momentum) * 5))
+        )
         ema_score = min(100.0, (dev_val / 5.0) * 100.0)
 
         try:
@@ -119,32 +116,31 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
                 'feat_ema_deviation': dev_val,
                 'feat_rsi_momentum':  rsi_momentum,
                 'feat_body_ratio':    body_ratio,
+                'feat_volume_ratio':  volume_ratio,
             })
             if raw is None:
-                ai_score = 50.0
-                w_ai_eff = 0.0
+                ai_score  = 50.0
+                w_ai_eff  = 0.0
             else:
-                ai_score = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
-                w_ai_eff = w_ai
+                ai_score  = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
+                w_ai_eff  = w_ai
         except Exception:
             ai_score = 50.0
             w_ai_eff = 0.0
 
         w_sum_eff   = (w_ai_eff + w_adx + w_rsi + w_ema) or 100.0
-        total_score = (ai_score * w_ai_eff + adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema) / w_sum_eff
+        total_score = (
+            ai_score * w_ai_eff + adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema
+        ) / w_sum_eff
 
         if total_score < min_score:
-            cnt_score_fail += 1
             continue
-
-        cnt_signal += 1
 
         df_slice        = df_copy.iloc[:i + 1]
         last_swing_high = strategy_utils.find_last_swing(df_slice, 'high', swing_w)
         last_swing_low  = strategy_utils.find_last_swing(df_slice, 'low',  swing_w)
 
         if last_swing_high is None or last_swing_low is None:
-            cnt_no_swing += 1
             continue
 
         sl_dist = min(1.5 * atr_val * sl_r, close_price * max_sl_pct)
@@ -163,15 +159,6 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
             entry_price    = close_price
             stop_loss      = entry_price + sl_dist
             tp2            = entry_price - sl_dist * tp_r
-        else:
-            cnt_no_entry += 1
-
-    # debug فقط برای اولین ترکیب هر ارز
-    if adx_th == 15 and swing_w == 3 and tp_r == 1.5:
-        rows_tested = len(df_copy) - split_idx
-        print(f"  DEBUG {symbol}: rows={rows_tested} zero_price={cnt_zero_price} "
-              f"score_fail={cnt_score_fail} passed_score={cnt_signal} "
-              f"no_swing={cnt_no_swing} no_entry={cnt_no_entry} trades={ai_total_trades}")
 
     return ai_total_pnl, ai_total_trades
 
@@ -216,8 +203,10 @@ def optimize_all(mode="backtest"):
         for adx in adx_options:
             for sw in swing_options:
                 for tp in tp_options:
-                    pnl, trades = evaluate_parameters(symbol, df, adx, sw, tp, 1.0, brain=brain)
-                    if trades > 3 and pnl > best_pnl:
+                    pnl, trades = evaluate_parameters(
+                        symbol, df, adx, sw, tp, 1.0, brain=brain
+                    )
+                    if pnl > best_pnl:
                         best_pnl = pnl
                         best_cfg = {
                             "ADX_THRESHOLD": adx,
