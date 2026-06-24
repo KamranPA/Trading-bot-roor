@@ -66,11 +66,6 @@ def generate_signal(
 
     ai_threshold = float(getattr(config, 'AI_THRESHOLD', 65.0))
 
-    # بررسی ظرفیت پوزیشن‌های باز
-    if open_positions_count >= max_pos:
-        logger.debug(f"{symbol}: پوزیشن‌های باز ({open_positions_count}) به حد مجاز رسیده")
-        return result
-
     # آخرین کندل
     if df is None or df.empty:
         return result
@@ -138,6 +133,11 @@ def generate_signal(
     result['adx_score']   = round(adx_score,   2)
     result['rsi_score']   = round(rsi_score,   2)
     result['ema_score']   = round(ema_score,   2)
+
+    # بررسی ظرفیت پوزیشن‌های باز — بعد از محاسبه score تا در scan_log ثبت بشه
+    if open_positions_count >= max_pos:
+        logger.debug(f"{symbol}: پوزیشن‌های باز ({open_positions_count}) به حد مجاز رسیده")
+        return result
 
     if total_score < min_score or not ai_approved:
         logger.debug(f"{symbol}: score={total_score:.1f} ai_approved={ai_approved} — بدون سیگنال")
