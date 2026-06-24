@@ -84,7 +84,11 @@ def generate_signal(
     close_price = float(row.get('close', row.get('Close', 0)))
     high_price  = float(row.get('high',  row.get('High', 0)))
     low_price   = float(row.get('low',   row.get('Low', 0)))
-    atr_val     = float(row.get('atr',   row.get('ATR', close_price * 0.01)))
+    # atr_val باید مقدار مطلق باشه (نه درصدی) برای محاسبه SL
+    atr_val = float(row.get('atr', row.get('ATR', close_price * 0.01)))
+    # اگه feat_atr_percent بود، به مقدار مطلق تبدیل کن
+    if atr_val < 1.0 and close_price > 0:
+        atr_val = atr_val * close_price
 
     if close_price == 0:
         return result
@@ -106,9 +110,16 @@ def generate_signal(
     ai_approved = True
     w_ai_eff    = 0.0
 
-    if model is not None and model.has_model(symbol):
+    # نرمال‌سازی نام symbol برای brain.py
+    # لایو: BTCUSDT → BTC/USDT (چون مدل با نام BTC_USDT ذخیره شده)
+    brain_symbol = symbol
+    if '/' not in symbol and 'USDT' in symbol:
+        base = symbol.replace('USDT', '')
+        brain_symbol = f"{base}/USDT"
+
+    if model is not None and model.has_model(brain_symbol):
         try:
-            raw = model.predict_probability(symbol, {
+            raw = model.predict_probability(brain_symbol, {
                 'feat_adx':           current_adx,
                 'feat_atr_percent':   atr_pct,
                 'feat_rsi':           current_rsi,
