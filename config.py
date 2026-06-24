@@ -22,7 +22,7 @@ DB_PATH_BACKTEST = os.path.join(BASE_DIR, "data", DB_NAME_BACKTEST)
 # ─────────────────────────────────────────────────────────────
 TIMEFRAME = "4h"
 CANDLES_LIMIT = 500
-MAX_OPEN_POSITIONS = 3
+MAX_OPEN_POSITIONS = 999
 TOTAL_CAPITAL = 1000.0
 RISK_PERCENT = 1.0
 RISK_MULTIPLIER = 1.0
