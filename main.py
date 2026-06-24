@@ -167,7 +167,7 @@ def process_pair(pair: str, open_positions_count: int):
                 pass
             return
 
-        df = indicators.calculate_indicators(df)
+        df = indicators.calculate_indicators(df, symbol=pair)
 
         sym_params = get_symbol_params(pair)
 
