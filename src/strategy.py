@@ -1,6 +1,10 @@
 """
-FILE PATH: src/strategy.py (v10.0 - generate_signal + generate_signals)
-اصلاح شده: اضافه شدن generate_signal() که main.py صدا می‌زند
+FILE PATH: src/strategy.py (v10.1 - Volume Filter Aligned)
+تغییرات نسبت به v10.0:
+  - فیلتر حجم در generate_signal() اصلاح شد:
+    * از ستون‌های 'volume' و 'Volume' هر دو پشتیبانی می‌کند
+    * آستانه از VOLUME_THRESHOLDS با کلید BTCUSDT (نه BTC/USDT) خوانده می‌شود
+    * رفتار کاملاً یکسان با backtester.py
 """
 
 import pandas as pd
@@ -13,6 +17,48 @@ from src.indicators import TechnicalIndicators
 from src import strategy_utils
 
 logger = logging.getLogger(__name__)
+
+
+def _get_volume_threshold(symbol: str) -> float:
+    """
+    خواندن آستانه حجم برای یک symbol.
+    هر دو فرمت را پشتیبانی می‌کند: 'BTCUSDT' و 'BTC/USDT'
+    """
+    thresholds = getattr(config, 'VOLUME_THRESHOLDS', {})
+    if symbol in thresholds:
+        return float(thresholds[symbol])
+    # تبدیل BTC/USDT → BTCUSDT برای جستجو
+    alt = symbol.replace('/', '')
+    if alt in thresholds:
+        return float(thresholds[alt])
+    return 0.0
+
+
+def _passes_volume_filter(row: pd.Series, symbol: str) -> bool:
+    """
+    بررسی فیلتر حجم برای یک کندل.
+    Returns True اگر فیلتر غیرفعال باشد یا کندل آستانه را رد کند.
+    """
+    if not getattr(config, 'ENABLE_VOLUME_FILTER', False):
+        return True
+
+    threshold = _get_volume_threshold(symbol)
+    if threshold <= 0:
+        return True
+
+    # پشتیبانی از هر دو نام ستون
+    vol = row.get('volume', row.get('Volume', 0))
+    try:
+        current_volume = float(vol)
+    except (TypeError, ValueError):
+        return True  # اگر حجم نامعتبر بود، رد نکن
+
+    if current_volume < threshold:
+        logger.debug(
+            f"{symbol}: حجم {current_volume:,.0f} < آستانه {threshold:,.0f} — رد شد"
+        )
+        return False
+    return True
 
 
 def generate_signal(
@@ -62,15 +108,17 @@ def generate_signal(
     w_adx = float(getattr(config, 'WEIGHT_ADX', 20))
     w_rsi = float(getattr(config, 'WEIGHT_RSI', 20))
     w_ema = float(getattr(config, 'WEIGHT_EMA', 20))
-    w_sum = (w_ai + w_adx + w_rsi + w_ema) or 100.0
 
     ai_threshold = float(getattr(config, 'AI_THRESHOLD', 65.0))
 
-    # آخرین کندل
     if df is None or df.empty:
         return result
 
     row = df.iloc[-1]
+
+    # ── فیلتر حجم (یکسان با backtester) ────────────────────────────────────
+    if not _passes_volume_filter(row, symbol):
+        return result
 
     # ── خواندن فیچرها — سازگار با feat_* و نام‌های معمول ──────────────────
     current_adx  = float(row.get('feat_adx',           row.get('ADX', 0)))
@@ -84,9 +132,9 @@ def generate_signal(
     close_price = float(row.get('close', row.get('Close', 0)))
     high_price  = float(row.get('high',  row.get('High', 0)))
     low_price   = float(row.get('low',   row.get('Low', 0)))
-    # atr_val باید مقدار مطلق باشه (نه درصدی) برای محاسبه SL
+
+    # atr_val باید مقدار مطلق باشد (نه درصدی) برای محاسبه SL
     atr_val = float(row.get('atr', row.get('ATR', close_price * 0.01)))
-    # اگه feat_atr_percent بود، به مقدار مطلق تبدیل کن
     if atr_val < 1.0 and close_price > 0:
         atr_val = atr_val * close_price
 
@@ -97,11 +145,13 @@ def generate_signal(
         atr_pct = (atr_val / close_price) * 100
 
     # ── score ها ────────────────────────────────────────────────────────────
-    adx_score = min(100.0, 50.0 + (current_adx - adx_th) * 2.5) if current_adx >= adx_th \
-                else max(0.0, (current_adx / (adx_th + 1e-10)) * 50.0)
+    adx_score = (min(100.0, 50.0 + (current_adx - adx_th) * 2.5)
+                 if current_adx >= adx_th
+                 else max(0.0, (current_adx / (adx_th + 1e-10)) * 50.0))
 
-    rsi_score = min(100.0, max(0.0, 50.0 + rsi_momentum * 5)) if current_rsi > 50 \
-                else min(100.0, max(0.0, 50.0 + (-rsi_momentum) * 5))
+    rsi_score = (min(100.0, max(0.0, 50.0 + rsi_momentum * 5))
+                 if current_rsi > 50
+                 else min(100.0, max(0.0, 50.0 + (-rsi_momentum) * 5)))
 
     ema_score = min(100.0, (dev_val / 5.0) * 100.0)
 
@@ -110,8 +160,7 @@ def generate_signal(
     ai_approved = True
     w_ai_eff    = 0.0
 
-    # نرمال‌سازی نام symbol برای brain.py
-    # لایو: BTCUSDT → BTC/USDT (چون مدل با نام BTC_USDT ذخیره شده)
+    # نرمال‌سازی نام symbol برای brain.py (BTCUSDT → BTC/USDT)
     brain_symbol = symbol
     if '/' not in symbol and 'USDT' in symbol:
         base = symbol.replace('USDT', '')
@@ -136,16 +185,21 @@ def generate_signal(
             logger.warning(f"{symbol}: خطای AI score: {e}")
 
     w_sum_eff   = (w_ai_eff + w_adx + w_rsi + w_ema) or 100.0
-    total_score = (ai_score * w_ai_eff + adx_score * w_adx + rsi_score * w_rsi + ema_score * w_ema) / w_sum_eff
+    total_score = (
+        ai_score * w_ai_eff +
+        adx_score * w_adx +
+        rsi_score * w_rsi +
+        ema_score * w_ema
+    ) / w_sum_eff
 
-    result['feat_adx']     = round(current_adx,  2)
-    result['total_score'] = round(total_score, 2)
-    result['ai_score']    = round(ai_score,    2)
-    result['adx_score']   = round(adx_score,   2)
-    result['rsi_score']   = round(rsi_score,   2)
-    result['ema_score']   = round(ema_score,   2)
+    result['feat_adx']    = round(current_adx,  2)
+    result['total_score'] = round(total_score,  2)
+    result['ai_score']    = round(ai_score,     2)
+    result['adx_score']   = round(adx_score,    2)
+    result['rsi_score']   = round(rsi_score,    2)
+    result['ema_score']   = round(ema_score,    2)
 
-    # بررسی ظرفیت پوزیشن‌های باز — بعد از محاسبه score تا در scan_log ثبت بشه
+    # بررسی ظرفیت پوزیشن — بعد از score تا در scan_log ثبت بشه
     if open_positions_count >= max_pos:
         logger.debug(f"{symbol}: پوزیشن‌های باز ({open_positions_count}) به حد مجاز رسیده")
         return result
@@ -194,7 +248,9 @@ def generate_signal(
         'tp2':         round(tp2,         6),
     })
 
-    logger.info(f"✅ سیگنال {symbol}: {direction} | score={total_score:.1f} | entry={close_price}")
+    logger.info(
+        f"✅ سیگنال {symbol}: {direction} | score={total_score:.1f} | entry={close_price}"
+    )
     return result
 
 
@@ -204,12 +260,14 @@ def generate_signals(
     params_dict: dict = None,
     open_positions_count: int = 0,
 ) -> Dict[str, dict]:
-    """
-    تولید سیگنال برای چندین ارز — wrapper دسته‌ای
-    """
+    """تولید سیگنال برای چندین ارز — wrapper دسته‌ای"""
     results = {}
     for symbol, df in data_dict.items():
         p = (params_dict or {}).get(symbol, {})
-        results[symbol] = generate_signal(df, symbol, model=model, params=p,
-                                          open_positions_count=open_positions_count)
+        results[symbol] = generate_signal(
+            df, symbol,
+            model=model,
+            params=p,
+            open_positions_count=open_positions_count,
+        )
     return results
