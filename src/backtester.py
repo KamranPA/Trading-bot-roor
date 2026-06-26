@@ -1,9 +1,10 @@
 """
-🔧 backtester.py (v3.1 - Live/Backtest Aligned)
-تغییرات نسبت به v3.0:
-✅ نام symbol برای brain نرمال‌سازی شد (BTCUSDT → BTC/USDT)
-✅ ATR مطلق برای SL (نه درصدی)
-✅ total_score یکسان با strategy.py لایو
+FILE PATH: src/backtester.py (v3.2 - Volume Filter Aligned)
+تغییرات نسبت به v3.1:
+  - فیلتر حجم به صورت per-candle (یکسان با strategy.py لایو)
+  - _get_volume_threshold() مشترک با strategy.py
+  - _passes_volume_filter() روی candle (نه DataFrame کامل)
+  - حذف _apply_volume_filter() که روی DataFrame کامل کار می‌کرد
 """
 
 import os
@@ -31,23 +32,60 @@ from src.csv_store import (
 logger = logging.getLogger(__name__)
 
 MAX_OPEN_POSITIONS = getattr(config, 'MAX_OPEN_POSITIONS', 999)
-MAX_SL_PERCENT = float(getattr(config, 'MAX_SL_PERCENT', 0.05))
-MIN_REQUIRED_SCORE = float(getattr(config, 'MIN_REQUIRED_SCORE', 65))
+MAX_SL_PERCENT     = float(getattr(config, 'MAX_SL_PERCENT',      0.05))
+MIN_REQUIRED_SCORE = float(getattr(config, 'MIN_REQUIRED_SCORE',  65))
 
-ENABLE_VOLUME_FILTER = getattr(config, 'ENABLE_VOLUME_FILTER', False)
-VOLUME_THRESHOLDS = getattr(config, 'VOLUME_THRESHOLDS', {})
-
-WEIGHT_AI = float(getattr(config, 'WEIGHT_AI', 40))
+WEIGHT_AI  = float(getattr(config, 'WEIGHT_AI',  40))
 WEIGHT_ADX = float(getattr(config, 'WEIGHT_ADX', 20))
 WEIGHT_RSI = float(getattr(config, 'WEIGHT_RSI', 20))
 WEIGHT_EMA = float(getattr(config, 'WEIGHT_EMA', 20))
-WEIGHTS_SUM = WEIGHT_AI + WEIGHT_ADX + WEIGHT_RSI + WEIGHT_EMA
 
 REQUIRED_FEATURES = [
     'feat_adx', 'feat_atr_percent', 'feat_rsi', 'feat_trend_line',
     'feat_ema_deviation', 'feat_rsi_momentum', 'feat_body_ratio',
 ]
 
+
+# ─── Volume Filter (یکسان با strategy.py) ────────────────────────────────────
+
+def _get_volume_threshold(symbol: str) -> float:
+    """
+    خواندن آستانه حجم برای یک symbol.
+    هر دو فرمت را پشتیبانی می‌کند: 'BTCUSDT' و 'BTC/USDT'
+    """
+    thresholds = getattr(config, 'VOLUME_THRESHOLDS', {})
+    if symbol in thresholds:
+        return float(thresholds[symbol])
+    alt = symbol.replace('/', '')
+    if alt in thresholds:
+        return float(thresholds[alt])
+    return 0.0
+
+
+def _passes_volume_filter(candle: pd.Series, symbol: str) -> bool:
+    """
+    بررسی فیلتر حجم برای یک کندل — رفتار کاملاً یکسان با strategy.py
+    Returns True اگر فیلتر غیرفعال باشد یا کندل آستانه را رد کند.
+    """
+    if not getattr(config, 'ENABLE_VOLUME_FILTER', False):
+        return True
+
+    threshold = _get_volume_threshold(symbol)
+    if threshold <= 0:
+        return True
+
+    vol = candle.get('volume', candle.get('Volume', 0))
+    try:
+        current_volume = float(vol)
+    except (TypeError, ValueError):
+        return True
+
+    if current_volume < threshold:
+        return False
+    return True
+
+
+# ─── توابع کمکی ──────────────────────────────────────────────────────────────
 
 def _to_brain_symbol(symbol: str) -> str:
     """BTCUSDT → BTC/USDT برای brain.py"""
@@ -58,31 +96,14 @@ def _to_brain_symbol(symbol: str) -> str:
 
 
 def _normalize_dataframe(df: pd.DataFrame, symbol: str = "UNKNOWN") -> Tuple[pd.DataFrame, bool]:
-    col_map = {col: col.lower() for col in df.columns}
-    df_norm = df.rename(columns=col_map)
+    col_map  = {col: col.lower() for col in df.columns}
+    df_norm  = df.rename(columns=col_map)
     required = ['close', 'high', 'low', 'open']
-    missing = [c for c in required if c not in df_norm.columns]
+    missing  = [c for c in required if c not in df_norm.columns]
     if missing:
         logger.error(f"❌ {symbol}: ستون‌های الزامی وجود ندارند: {missing}")
         return df_norm, False
     return df_norm, True
-
-
-def _apply_volume_filter(df: pd.DataFrame, symbol: str, threshold: Optional[float] = None) -> pd.DataFrame:
-    if not ENABLE_VOLUME_FILTER:
-        return df
-    if 'volume' not in df.columns:
-        return df
-    if threshold is None:
-        threshold = VOLUME_THRESHOLDS.get(symbol, 0)
-    if threshold <= 0:
-        return df
-    rows_before = len(df)
-    df_filtered = df[df['volume'] >= threshold].copy()
-    if len(df_filtered) == 0:
-        return df
-    logger.info(f"   Volume Filter: {len(df_filtered)}/{rows_before} ردیف")
-    return df_filtered
 
 
 def _extract_features_for_model(candle: pd.Series, symbol: str = "UNKNOWN") -> Dict:
@@ -106,6 +127,8 @@ def _validate_features(features: Dict, symbol: str = "UNKNOWN") -> bool:
             return False
     return True
 
+
+# ─── بکتست اصلی ──────────────────────────────────────────────────────────────
 
 def run_backtest(
     df_raw: pd.DataFrame,
@@ -132,24 +155,19 @@ def run_backtest(
 
     logger.info(f"✅ {meta['valid_rows']} ردیف معتبر")
 
-    volume_threshold = VOLUME_THRESHOLDS.get(pair, None)
-    if ENABLE_VOLUME_FILTER:
-        df_full = _apply_volume_filter(df_full, pair, volume_threshold)
-
-    adx_thresh  = float(params.get('ADX_THRESHOLD', config.ADX_THRESHOLD))
-    tp_ratio    = float(params.get('TP_RATIO',       config.TP_RATIO))
-    sl_ratio    = float(params.get('SL_RATIO',       config.SL_RATIO))
-    ai_threshold = float(params.get('AI_THRESHOLD',  getattr(config, 'AI_THRESHOLD', 65.0)))
-    swing_window = int(params.get('SWING_WINDOW',    config.SWING_WINDOW))
+    adx_thresh   = float(params.get('ADX_THRESHOLD', config.ADX_THRESHOLD))
+    tp_ratio     = float(params.get('TP_RATIO',       config.TP_RATIO))
+    sl_ratio     = float(params.get('SL_RATIO',       config.SL_RATIO))
+    ai_threshold = float(params.get('AI_THRESHOLD',   getattr(config, 'AI_THRESHOLD', 65.0)))
+    swing_window = int(params.get('SWING_WINDOW',     config.SWING_WINDOW))
 
     if min_score is None:
         min_score = float(getattr(config, 'MIN_REQUIRED_SCORE', 65))
 
-    # FIX: نام symbol برای brain
     brain_pair = _to_brain_symbol(pair)
 
-    open_trades     = []
-    closed_trades   = []
+    open_trades       = []
+    closed_trades     = []
     signals_generated = 0
 
     for i in range(200, len(df_full)):
@@ -167,15 +185,21 @@ def run_backtest(
         still_open = []
         for trade in open_trades:
             direction = trade['direction']
-            sl = trade['stop_loss']; tp2 = trade['tp2']; entry = trade['entry_price']
-            closed = False; pnl = 0; reason = None
+            sl        = trade['stop_loss']
+            tp2       = trade['tp2']
+            entry     = trade['entry_price']
+            closed    = False; pnl = 0; reason = None
 
             if direction == 'LONG':
-                if low_price <= sl:   pnl = ((sl  - entry) / entry) * 100; reason = 'SL_HIT'; closed = True
-                elif high_price >= tp2: pnl = ((tp2 - entry) / entry) * 100; reason = 'TP_HIT'; closed = True
+                if low_price <= sl:
+                    pnl = ((sl  - entry) / entry) * 100; reason = 'SL_HIT'; closed = True
+                elif high_price >= tp2:
+                    pnl = ((tp2 - entry) / entry) * 100; reason = 'TP_HIT'; closed = True
             else:
-                if high_price >= sl:  pnl = ((entry - sl)  / entry) * 100; reason = 'SL_HIT'; closed = True
-                elif low_price <= tp2:  pnl = ((entry - tp2) / entry) * 100; reason = 'TP_HIT'; closed = True
+                if high_price >= sl:
+                    pnl = ((entry - sl)  / entry) * 100; reason = 'SL_HIT'; closed = True
+                elif low_price <= tp2:
+                    pnl = ((entry - tp2) / entry) * 100; reason = 'TP_HIT'; closed = True
 
             if closed:
                 trade['pnl_percent'] = round(pnl, 4)
@@ -188,13 +212,17 @@ def run_backtest(
                 still_open.append(trade)
         open_trades = still_open
 
+        # ── فیلتر حجم (per-candle — یکسان با strategy.py لایو) ─────────────
+        if not _passes_volume_filter(candle, pair):
+            continue
+
         # ── score ها ────────────────────────────────────────────────────────
         current_adx  = float(candle.get('feat_adx',           candle.get('ADX', 0)))
         current_rsi  = float(candle.get('feat_rsi',           candle.get('RSI', 50)))
         rsi_momentum = float(candle.get('feat_rsi_momentum',  candle.get('RSI_momentum', 0)))
         dev_val      = abs(float(candle.get('feat_ema_deviation', candle.get('EMA_diff', 0))))
 
-        # FIX: ATR مطلق نه درصدی
+        # ATR مطلق (نه درصدی)
         atr_raw = float(candle.get('atr', candle.get('ATR', 0)) or 0)
         if atr_raw == 0:
             atr_pct = float(candle.get('feat_atr_percent', 1.0) or 1.0)
@@ -205,7 +233,8 @@ def run_backtest(
                      if current_adx >= adx_thresh
                      else max(0.0, (current_adx / (adx_thresh + 1e-10)) * 50.0))
 
-        rsi_score = (min(100.0, max(0.0, 50.0 + rsi_momentum * 5)) if current_rsi > 50
+        rsi_score = (min(100.0, max(0.0, 50.0 + rsi_momentum * 5))
+                     if current_rsi > 50
                      else min(100.0, max(0.0, 50.0 + (-rsi_momentum) * 5)))
 
         ema_score = min(100.0, (dev_val / 5.0) * 100.0)
@@ -217,7 +246,7 @@ def run_backtest(
         model_active = (
             model is not None
             and hasattr(model, 'has_model')
-            and model.has_model(brain_pair)  # FIX: brain_pair
+            and model.has_model(brain_pair)
         )
 
         if model_active:
@@ -226,7 +255,7 @@ def run_backtest(
                 if not _validate_features(features, pair):
                     ai_approved = False
                 else:
-                    raw = model.predict_probability(brain_pair, features)  # FIX: brain_pair
+                    raw = model.predict_probability(brain_pair, features)
                     if raw is not None:
                         ai_score    = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
                         ai_approved = ai_score >= ai_threshold
@@ -234,12 +263,13 @@ def run_backtest(
                 logger.debug(f"⚠️ {pair} کندل {i}: خطا در AI - {e}")
                 ai_approved = False
 
-        # FIX: total_score یکسان با strategy.py لایو
         w_ai_eff  = WEIGHT_AI if model_active else 0.0
         w_sum_eff = (w_ai_eff + WEIGHT_ADX + WEIGHT_RSI + WEIGHT_EMA) or 100.0
         total_score = (
-            ai_score * w_ai_eff + adx_score * WEIGHT_ADX +
-            rsi_score * WEIGHT_RSI + ema_score * WEIGHT_EMA
+            ai_score * w_ai_eff +
+            adx_score * WEIGHT_ADX +
+            rsi_score * WEIGHT_RSI +
+            ema_score * WEIGHT_EMA
         ) / w_sum_eff
 
         if total_score < min_score or not ai_approved:
@@ -258,39 +288,51 @@ def run_backtest(
 
         if high_price > swing_high and current_rsi > 50:
             sl_dist = min(1.5 * atr_val * sl_ratio, current_price * MAX_SL_PERCENT)
-            if sl_dist <= 0: continue
+            if sl_dist <= 0:
+                continue
             trade = {
                 'id': trade_id, 'pair': pair, 'direction': 'LONG',
                 'entry_price': round(current_price, 6),
                 'stop_loss':   round(current_price - sl_dist, 6),
                 'tp1':         round(current_price + sl_dist * tp_ratio / 2, 6),
-                'tp2':         round(current_price + sl_dist * tp_ratio, 6),
-                'entry_time': str(i), 'status': 'OPEN',
-                'total_score': round(total_score, 2), 'ai_score': round(ai_score, 2),
-                'feat_adx': round(current_adx, 4), 'feat_rsi': round(current_rsi, 4),
+                'tp2':         round(current_price + sl_dist * tp_ratio,     6),
+                'entry_time':  str(i), 'status': 'OPEN',
+                'total_score': round(total_score, 2),
+                'ai_score':    round(ai_score,    2),
+                'feat_adx':    round(current_adx, 4),
+                'feat_rsi':    round(current_rsi, 4),
             }
-            open_trades.append(trade); save_backtest_trade(trade); signals_generated += 1
+            open_trades.append(trade)
+            save_backtest_trade(trade)
+            signals_generated += 1
 
         elif low_price < swing_low and current_rsi < 50:
             sl_dist = min(1.5 * atr_val * sl_ratio, current_price * MAX_SL_PERCENT)
-            if sl_dist <= 0: continue
+            if sl_dist <= 0:
+                continue
             trade = {
                 'id': trade_id, 'pair': pair, 'direction': 'SHORT',
                 'entry_price': round(current_price, 6),
                 'stop_loss':   round(current_price + sl_dist, 6),
                 'tp1':         round(current_price - sl_dist * tp_ratio / 2, 6),
-                'tp2':         round(current_price - sl_dist * tp_ratio, 6),
-                'entry_time': str(i), 'status': 'OPEN',
-                'total_score': round(total_score, 2), 'ai_score': round(ai_score, 2),
-                'feat_adx': round(current_adx, 4), 'feat_rsi': round(current_rsi, 4),
+                'tp2':         round(current_price - sl_dist * tp_ratio,     6),
+                'entry_time':  str(i), 'status': 'OPEN',
+                'total_score': round(total_score, 2),
+                'ai_score':    round(ai_score,    2),
+                'feat_adx':    round(current_adx, 4),
+                'feat_rsi':    round(current_rsi, 4),
             }
-            open_trades.append(trade); save_backtest_trade(trade); signals_generated += 1
+            open_trades.append(trade)
+            save_backtest_trade(trade)
+            signals_generated += 1
 
     # ── بستن معاملات باقی‌مانده ─────────────────────────────────────────────
     last_price = float(df_full.iloc[-1]['close'])
     for trade in open_trades:
-        entry = trade['entry_price']; direction = trade['direction']
-        pnl = ((last_price - entry) / entry * 100 if direction == 'LONG'
+        entry     = trade['entry_price']
+        direction = trade['direction']
+        pnl = ((last_price - entry) / entry * 100
+               if direction == 'LONG'
                else (entry - last_price) / entry * 100)
         trade['pnl_percent'] = round(pnl, 4)
         trade['close_price'] = round(last_price, 6)
@@ -299,9 +341,14 @@ def run_backtest(
         close_backtest_trade(trade['id'], last_price, 'EXPIRED')
 
     result = _compute_stats(pair, closed_trades)
-    logger.info(f"✅ {pair}: {result['total']} معامله | WR: {result['win_rate']}% | PnL: {result['total_pnl']}%")
+    logger.info(
+        f"✅ {pair}: {result['total']} معامله | "
+        f"WR: {result['win_rate']}% | PnL: {result['total_pnl']}%"
+    )
     return result
 
+
+# ─── آمار ────────────────────────────────────────────────────────────────────
 
 def _compute_stats(pair: str, trades: list) -> dict:
     if not trades:
@@ -320,11 +367,16 @@ def _compute_stats(pair: str, trades: list) -> dict:
         max_dd  = max(max_dd, dd)
     wins_sum   = sum(p for p in pnls if p > 0)
     losses_sum = abs(sum(p for p in pnls if p < 0))
-    pf = round(wins_sum / losses_sum, 2) if losses_sum > 0 else (float('inf') if wins_sum > 0 else 0.0)
+    pf = (round(wins_sum / losses_sum, 2)
+          if losses_sum > 0
+          else (float('inf') if wins_sum > 0 else 0.0))
     return {
-        'pair': pair, 'total': total, 'wins': wins, 'losses': losses,
+        'pair':          pair,
+        'total':         total,
+        'wins':          wins,
+        'losses':        losses,
         'win_rate':      round(wins / total * 100, 1) if total else 0.0,
-        'avg_pnl':       round(sum(pnls) / total, 2) if total else 0.0,
+        'avg_pnl':       round(sum(pnls) / total, 2)  if total else 0.0,
         'total_pnl':     round(sum(pnls), 2),
         'max_drawdown':  round(-max_dd, 2),
         'best_trade':    round(max(pnls), 2),
@@ -348,21 +400,23 @@ def _save_backtest_summary(results: Dict) -> None:
     rows = []
     for symbol, result in results.items():
         rows.append({
-            'pair': result.get('pair', symbol),
-            'total': result.get('total', 0),
-            'wins': result.get('wins', 0),
-            'losses': result.get('losses', 0),
-            'win_rate': result.get('win_rate', 0.0),
-            'avg_pnl': result.get('avg_pnl', 0.0),
-            'total_pnl': result.get('total_pnl', 0.0),
-            'max_drawdown': result.get('max_drawdown', 0.0),
-            'best_trade': result.get('best_trade', 0.0),
-            'worst_trade': result.get('worst_trade', 0.0),
+            'pair':          result.get('pair',          symbol),
+            'total':         result.get('total',         0),
+            'wins':          result.get('wins',          0),
+            'losses':        result.get('losses',        0),
+            'win_rate':      result.get('win_rate',      0.0),
+            'avg_pnl':       result.get('avg_pnl',       0.0),
+            'total_pnl':     result.get('total_pnl',     0.0),
+            'max_drawdown':  result.get('max_drawdown',  0.0),
+            'best_trade':    result.get('best_trade',    0.0),
+            'worst_trade':   result.get('worst_trade',   0.0),
             'profit_factor': result.get('profit_factor', 0.0),
         })
     df_summary = pd.DataFrame(rows)
-    column_order = ['pair','total','wins','losses','win_rate','avg_pnl',
-                    'total_pnl','max_drawdown','best_trade','worst_trade','profit_factor']
+    column_order = [
+        'pair', 'total', 'wins', 'losses', 'win_rate', 'avg_pnl',
+        'total_pnl', 'max_drawdown', 'best_trade', 'worst_trade', 'profit_factor',
+    ]
     df_summary = df_summary[column_order]
     try:
         df_summary.to_csv(csv_path, index=False, encoding='utf-8')
@@ -409,7 +463,7 @@ def run_all_backtests() -> dict:
         except Exception as e:
             logger.error(f"❌ خطا در خواندن {symbol}: {e}")
             continue
-        params = all_params.get(symbol, {})
+        params          = all_params.get(symbol, {})
         results[symbol] = run_backtest(df_raw, symbol, params, model=brain)
 
     flush_closed_trades()
@@ -419,6 +473,8 @@ def run_all_backtests() -> dict:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+    )
     run_all_backtests()
