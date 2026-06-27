@@ -155,6 +155,15 @@ def run_backtest(
 
     logger.info(f"✅ {meta['valid_rows']} ردیف معتبر")
 
+    # اضافه کردن ستون‌های Capitalized برای strategy_utils.find_last_swing
+    # که از df['High'] و df['Low'] استفاده می‌کند — یکسان با optimizer.py
+    # حذف ستون‌های تکراری قبل از اضافه کردن aliases
+    df_full = df_full.loc[:, ~df_full.columns.duplicated(keep='first')]
+    for _lower, _upper in [('high','High'),('low','Low'),('open','Open'),
+                            ('close','Close'),('volume','Volume')]:
+        if _lower in df_full.columns and _upper not in df_full.columns:
+            df_full[_upper] = df_full[_lower].to_numpy()
+
     adx_thresh   = float(params.get('ADX_THRESHOLD', config.ADX_THRESHOLD))
     tp_ratio     = float(params.get('TP_RATIO',       config.TP_RATIO))
     sl_ratio     = float(params.get('SL_RATIO',       config.SL_RATIO))
