@@ -1,10 +1,10 @@
 """
-FILE PATH: src/strategy.py (v10.1 - Volume Filter Aligned)
-تغییرات نسبت به v10.0:
-  - فیلتر حجم در generate_signal() اصلاح شد:
-    * از ستون‌های 'volume' و 'Volume' هر دو پشتیبانی می‌کند
-    * آستانه از VOLUME_THRESHOLDS با کلید BTCUSDT (نه BTC/USDT) خوانده می‌شود
-    * رفتار کاملاً یکسان با backtester.py
+FILE PATH: src/strategy.py (v10.2 - Fix Zero Score in scan_log)
+تغییرات نسبت به v10.1:
+  - ترتیب عملیات اصلاح شد:
+    1. ابتدا همیشه score محاسبه می‌شود
+    2. سپس فیلترها اعمال می‌شوند
+    → scan_log همیشه score واقعی دارد، حتی برای NOSIGNAL
 """
 
 import pandas as pd
@@ -20,14 +20,9 @@ logger = logging.getLogger(__name__)
 
 
 def _get_volume_threshold(symbol: str) -> float:
-    """
-    خواندن آستانه حجم برای یک symbol.
-    هر دو فرمت را پشتیبانی می‌کند: 'BTCUSDT' و 'BTC/USDT'
-    """
     thresholds = getattr(config, 'VOLUME_THRESHOLDS', {})
     if symbol in thresholds:
         return float(thresholds[symbol])
-    # تبدیل BTC/USDT → BTCUSDT برای جستجو
     alt = symbol.replace('/', '')
     if alt in thresholds:
         return float(thresholds[alt])
@@ -35,28 +30,18 @@ def _get_volume_threshold(symbol: str) -> float:
 
 
 def _passes_volume_filter(row: pd.Series, symbol: str) -> bool:
-    """
-    بررسی فیلتر حجم برای یک کندل.
-    Returns True اگر فیلتر غیرفعال باشد یا کندل آستانه را رد کند.
-    """
     if not getattr(config, 'ENABLE_VOLUME_FILTER', False):
         return True
-
     threshold = _get_volume_threshold(symbol)
     if threshold <= 0:
         return True
-
-    # پشتیبانی از هر دو نام ستون
     vol = row.get('volume', row.get('Volume', 0))
     try:
         current_volume = float(vol)
     except (TypeError, ValueError):
-        return True  # اگر حجم نامعتبر بود، رد نکن
-
+        return True
     if current_volume < threshold:
-        logger.debug(
-            f"{symbol}: حجم {current_volume:,.0f} < آستانه {threshold:,.0f} — رد شد"
-        )
+        logger.debug(f"{symbol}: حجم {current_volume:,.0f} < آستانه {threshold:,.0f} — رد شد")
         return False
     return True
 
@@ -69,33 +54,35 @@ def generate_signal(
     open_positions_count: int = 0,
 ) -> dict:
     """
-    تولید سیگنال برای یک ارز — صدا زده شده از main.py
+    تولید سیگنال برای یک ارز.
+
+    ⚠️ مهم: score همیشه محاسبه می‌شود — حتی اگر سیگنالی صادر نشود.
+    این باعث می‌شود scan_log همیشه مقادیر واقعی داشته باشد.
 
     Returns:
-        dict با کلیدهای:
-          direction, entry_price, stop_loss, tp1, tp2,
-          total_score, ai_score, adx_score, rsi_score, ema_score
-        یا direction=None اگه سیگنالی نباشد
+        dict با direction=None اگر سیگنالی نباشد،
+        اما total_score/ai_score/... همیشه پر هستند.
     """
+    # مقادیر پیش‌فرض
     result = {
-        'direction':    None,
-        'entry_price':  None,
-        'stop_loss':    None,
-        'tp1':          None,
-        'tp2':          None,
-        'total_score':  0.0,
-        'ai_score':     0.0,
-        'adx_score':    0.0,
-        'rsi_score':    0.0,
-        'ema_score':    0.0,
-        'pair':         symbol,
-        'feat_adx':     0.0,
+        'direction':   None,
+        'entry_price': None,
+        'stop_loss':   None,
+        'tp1':         None,
+        'tp2':         None,
+        'total_score': 0.0,
+        'ai_score':    0.0,
+        'adx_score':   0.0,
+        'rsi_score':   0.0,
+        'ema_score':   0.0,
+        'pair':        symbol,
+        'feat_adx':    0.0,
     }
 
     if params is None:
         params = {}
 
-    # پارامترها با fallback به config
+    # پارامترها
     adx_th    = float(params.get('ADX_THRESHOLD', getattr(config, 'ADX_THRESHOLD', 15.0)))
     swing_w   = int(params.get('SWING_WINDOW',    getattr(config, 'SWING_WINDOW',   3)))
     sl_ratio  = float(params.get('SL_RATIO',      getattr(config, 'SL_RATIO',       1.0)))
@@ -103,48 +90,42 @@ def generate_signal(
     min_score = float(getattr(config, 'MIN_REQUIRED_SCORE', 65))
     max_sl    = float(getattr(config, 'MAX_SL_PERCENT',     0.05))
     max_pos   = int(getattr(config,   'MAX_OPEN_POSITIONS', 5))
-
-    w_ai  = float(getattr(config, 'WEIGHT_AI',  40))
-    w_adx = float(getattr(config, 'WEIGHT_ADX', 20))
-    w_rsi = float(getattr(config, 'WEIGHT_RSI', 20))
-    w_ema = float(getattr(config, 'WEIGHT_EMA', 20))
-
+    w_ai      = float(getattr(config, 'WEIGHT_AI',  40))
+    w_adx     = float(getattr(config, 'WEIGHT_ADX', 20))
+    w_rsi     = float(getattr(config, 'WEIGHT_RSI', 20))
+    w_ema     = float(getattr(config, 'WEIGHT_EMA', 20))
     ai_threshold = float(getattr(config, 'AI_THRESHOLD', 65.0))
 
+    # ── بررسی اولیه df ───────────────────────────────────────────────────────
     if df is None or df.empty:
         return result
 
     row = df.iloc[-1]
 
-    # ── فیلتر حجم (یکسان با backtester) ────────────────────────────────────
-    if not _passes_volume_filter(row, symbol):
-        return result
-
-    # ── خواندن فیچرها — سازگار با feat_* و نام‌های معمول ──────────────────
-    current_adx  = float(row.get('feat_adx',           row.get('ADX', 0)))
-    current_rsi  = float(row.get('feat_rsi',           row.get('RSI', 50)))
-    rsi_momentum = float(row.get('feat_rsi_momentum',  row.get('RSI_momentum', 0)))
-    dev_val      = abs(float(row.get('feat_ema_deviation', row.get('EMA_diff', 0))))
-    atr_pct      = float(row.get('feat_atr_percent',   0))
-    trend_line   = float(row.get('feat_trend_line',    row.get('Trend_line', 0)))
-    body_ratio   = float(row.get('feat_body_ratio',    row.get('Body_ratio', 0)))
-
+    # خواندن قیمت‌ها
     close_price = float(row.get('close', row.get('Close', 0)))
-    high_price  = float(row.get('high',  row.get('High', 0)))
-    low_price   = float(row.get('low',   row.get('Low', 0)))
-
-    # atr_val باید مقدار مطلق باشد (نه درصدی) برای محاسبه SL
-    atr_val = float(row.get('atr', row.get('ATR', close_price * 0.01)))
+    high_price  = float(row.get('high',  row.get('High',  0)))
+    low_price   = float(row.get('low',   row.get('Low',   0)))
+    atr_val     = float(row.get('atr',   row.get('ATR',   close_price * 0.01)))
     if atr_val < 1.0 and close_price > 0:
         atr_val = atr_val * close_price
 
     if close_price == 0:
         return result
 
+    atr_pct = float(row.get('feat_atr_percent', 0))
     if atr_pct == 0 and atr_val > 0:
         atr_pct = (atr_val / close_price) * 100
 
-    # ── score ها ────────────────────────────────────────────────────────────
+    # ── خواندن فیچرها ────────────────────────────────────────────────────────
+    current_adx  = float(row.get('feat_adx',           row.get('ADX', 0)))
+    current_rsi  = float(row.get('feat_rsi',           row.get('RSI', 50)))
+    rsi_momentum = float(row.get('feat_rsi_momentum',  row.get('RSI_momentum', 0)))
+    dev_val      = abs(float(row.get('feat_ema_deviation', row.get('EMA_diff', 0))))
+    trend_line   = float(row.get('feat_trend_line',    row.get('Trend_line', 0)))
+    body_ratio   = float(row.get('feat_body_ratio',    row.get('Body_ratio', 0)))
+
+    # ── ۱. محاسبه score (همیشه — قبل از هر فیلتری) ──────────────────────────
     adx_score = (min(100.0, 50.0 + (current_adx - adx_th) * 2.5)
                  if current_adx >= adx_th
                  else max(0.0, (current_adx / (adx_th + 1e-10)) * 50.0))
@@ -155,16 +136,14 @@ def generate_signal(
 
     ema_score = min(100.0, (dev_val / 5.0) * 100.0)
 
-    # ── AI score ────────────────────────────────────────────────────────────
+    # ── ۲. AI score ──────────────────────────────────────────────────────────
     ai_score    = 50.0
     ai_approved = True
     w_ai_eff    = 0.0
 
-    # نرمال‌سازی نام symbol برای brain.py (BTCUSDT → BTC/USDT)
     brain_symbol = symbol
     if '/' not in symbol and 'USDT' in symbol:
-        base = symbol.replace('USDT', '')
-        brain_symbol = f"{base}/USDT"
+        brain_symbol = symbol.replace('USDT', '') + '/USDT'
 
     if model is not None and model.has_model(brain_symbol):
         try:
@@ -186,12 +165,13 @@ def generate_signal(
 
     w_sum_eff   = (w_ai_eff + w_adx + w_rsi + w_ema) or 100.0
     total_score = (
-        ai_score * w_ai_eff +
+        ai_score  * w_ai_eff +
         adx_score * w_adx +
         rsi_score * w_rsi +
         ema_score * w_ema
     ) / w_sum_eff
 
+    # ── score را همیشه در result ذخیره می‌کنیم ──────────────────────────────
     result['feat_adx']    = round(current_adx,  2)
     result['total_score'] = round(total_score,  2)
     result['ai_score']    = round(ai_score,     2)
@@ -199,24 +179,32 @@ def generate_signal(
     result['rsi_score']   = round(rsi_score,    2)
     result['ema_score']   = round(ema_score,    2)
 
-    # بررسی ظرفیت پوزیشن — بعد از score تا در scan_log ثبت بشه
+    # ── ۳. فیلترها (بعد از محاسبه score) ────────────────────────────────────
+
+    # فیلتر حجم
+    if not _passes_volume_filter(row, symbol):
+        logger.debug(f"{symbol}: حجم کافی نیست | score={total_score:.1f}")
+        return result  # score پر است، direction=None
+
+    # ظرفیت پوزیشن
     if open_positions_count >= max_pos:
-        logger.debug(f"{symbol}: پوزیشن‌های باز ({open_positions_count}) به حد مجاز رسیده")
+        logger.debug(f"{symbol}: پوزیشن‌های باز ({open_positions_count}) به حد رسیده | score={total_score:.1f}")
         return result
 
+    # حداقل score
     if total_score < min_score or not ai_approved:
         logger.debug(f"{symbol}: score={total_score:.1f} ai_approved={ai_approved} — بدون سیگنال")
         return result
 
-    # ── پیدا کردن swing ─────────────────────────────────────────────────────
+    # ── ۴. پیدا کردن swing ───────────────────────────────────────────────────
     last_swing_high = strategy_utils.find_last_swing(df, 'high', swing_w)
     last_swing_low  = strategy_utils.find_last_swing(df, 'low',  swing_w)
 
     if last_swing_high is None or last_swing_low is None:
-        logger.debug(f"{symbol}: swing یافت نشد")
+        logger.debug(f"{symbol}: swing یافت نشد | score={total_score:.1f}")
         return result
 
-    # ── تعیین جهت ───────────────────────────────────────────────────────────
+    # ── ۵. تعیین جهت ─────────────────────────────────────────────────────────
     direction = None
     if high_price > last_swing_high and current_rsi > 50:
         direction = "LONG"
@@ -226,7 +214,7 @@ def generate_signal(
     if direction is None:
         return result
 
-    # ── محاسبه SL و TP ──────────────────────────────────────────────────────
+    # ── ۶. محاسبه SL و TP ────────────────────────────────────────────────────
     sl_dist = min(1.5 * atr_val * sl_ratio, close_price * max_sl)
     if sl_dist <= 0:
         return result
@@ -249,7 +237,8 @@ def generate_signal(
     })
 
     logger.info(
-        f"✅ سیگنال {symbol}: {direction} | score={total_score:.1f} | entry={close_price}"
+        f"✅ سیگنال {symbol}: {direction} | "
+        f"score={total_score:.1f} | entry={close_price:.4f}"
     )
     return result
 
