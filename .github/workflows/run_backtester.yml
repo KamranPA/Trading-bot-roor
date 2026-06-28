@@ -1,8 +1,10 @@
 name: Run Backtester and Optimizer
 on:
   workflow_dispatch:
+
 permissions:
   contents: write
+
 jobs:
   backtest:
     runs-on: ubuntu-latest
@@ -29,18 +31,34 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pandas requests ccxt numpy joblib yfinance lightgbm psycopg2-binary SQLAlchemy
 
-      - name: Check CSV columns
+      - name: Fetch Market Data
+        run: |
+          python fetcher.py
+          echo "✅ fetcher.py تمام شد"
+
+      - name: Verify CSV Files
         run: |
           python -c "
-          import pandas as pd
-          import os
-          path = 'data/4h/BTC_USDT_history.csv'
-          if os.path.exists(path):
-              df = pd.read_csv(path)
-              print('ستون‌ها:', list(df.columns))
-              print(df.head(2))
-          else:
-              print('فایل وجود ندارد')
+          import os, sys
+          data_dir = 'data/4h'
+          watchlist = [
+              'BTCUSDT','ETHUSDT','SOLUSDT','DOTUSDT','LINKUSDT',
+              'AVAXUSDT','XRPUSDT','LTCUSDT','BCHUSDT','ATOMUSDT',
+          ]
+          missing = []
+          for sym in watchlist:
+              path = os.path.join(data_dir, f'{sym}_history.csv')
+              if not os.path.exists(path):
+                  missing.append(path)
+                  print(f'❌ فایل یافت نشد: {path}')
+              else:
+                  import pandas as pd
+                  df = pd.read_csv(path)
+                  print(f'✅ {sym}: {len(df)} ردیف | ستون‌ها: {list(df.columns)}')
+          if missing:
+              print(f'تعداد فایل‌های گمشده: {len(missing)}')
+              sys.exit(1)
+          print('✅ همه فایل‌های CSV آماده هستند')
           "
 
       - name: Execute Pipeline and Force Commit Results
@@ -49,35 +67,36 @@ jobs:
         run: |
           rm -f data/backtest_trades.csv
 
-          python fetcher.py
-
-          python -c "
-          import pandas as pd
-          df = pd.read_csv('data/4h/BTC_USDT_history.csv')
-          print('ستون‌ها بعد از fetcher:', list(df.columns))
-          "
-
+          echo "▶️ شروع backtester..."
           python src/backtester.py
+          echo "✅ backtester تمام شد"
+
+          echo "▶️ شروع train_model..."
           python src/train_model.py
+          echo "✅ train_model تمام شد"
+
+          echo "▶️ شروع optimizer..."
           python src/optimizer.py
+          echo "✅ optimizer تمام شد"
 
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
-
-          git add -f backtest_table_summary.csv
-          git add -f best_params.json
-          git add -f data/trading_bot_backtest.db
+          git add -f backtest_table_summary.csv || true
+          git add -f best_params.json           || true
+          git add -f data/trading_bot_backtest.db || true
+          git add -f training_results.json      || true
+          git add -f src/models/                || true
           git add .
-
           git commit -m "Auto-update: Backtest + Train + Optimize $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
-
           git push origin HEAD:${{ github.ref_name }} --force
 
       - name: Upload Artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: backtest-results
           path: |
             backtest_table_summary.csv
             best_params.json
+            training_results.json
             data/trading_bot_backtest.db
