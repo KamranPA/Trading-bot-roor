@@ -1,8 +1,8 @@
 # ---------------------------------------------------------
-# FILE PATH: config.py (v10.2 - Volume Filter + بهبودی‌ها)
-# تغییرات نسبت به v10.1:
-#   - ENABLE_VOLUME_FILTER اضافه شد
-#   - VOLUME_THRESHOLDS برای هر symbol
+# FILE PATH: config.py (v10.3 - feat_volume_ratio added to AI_FEATURES)
+# تغییرات نسبت به v10.2:
+#   ✅ feat_volume_ratio به AI_FEATURES اضافه شد (8 فیچر)
+#      سازگار با train_model.py v11.0، brain.py v9.1
 # ---------------------------------------------------------
 
 import os
@@ -28,47 +28,47 @@ RISK_PERCENT = 1.0
 RISK_MULTIPLIER = 1.0
 
 # ─────────────────────────────────────────────────────────────
-# ✅ Volume Filter (جدید)
+# Volume Filter
 # ─────────────────────────────────────────────────────────────
-ENABLE_VOLUME_FILTER = True  # True = فعال ، False = غیرفعال
+ENABLE_VOLUME_FILTER = True
 
 VOLUME_THRESHOLDS = {
-    "BTCUSDT": 1000000,    # 1M
-    "ETHUSDT": 500000,     # 500K
-    "SOLUSDT": 300000,     # 300K
-    "DOTUSDT": 150000,     # 150K
-    "LINKUSDT": 200000,    # 200K
-    "AVAXUSDT": 250000,    # 250K
-    "XRPUSDT": 1000000,    # 1M
-    "LTCUSDT": 200000,     # 200K
-    "BCHUSDT": 100000,     # 100K
-    "ATOMUSDT": 150000,    # 150K
+    "BTCUSDT":  1000000,
+    "ETHUSDT":  500000,
+    "SOLUSDT":  300000,
+    "DOTUSDT":  150000,
+    "LINKUSDT": 200000,
+    "AVAXUSDT": 250000,
+    "XRPUSDT":  1000000,
+    "LTCUSDT":  200000,
+    "BCHUSDT":  100000,
+    "ATOMUSDT": 150000,
 }
 
 # ─────────────────────────────────────────────────────────────
 # Trading Parameters
 # ─────────────────────────────────────────────────────────────
-ADX_THRESHOLD = 25.0
-SWING_WINDOW = 5
-TP_RATIO = 2.0
-SL_RATIO = 1.0
+ADX_THRESHOLD  = 25.0
+SWING_WINDOW   = 5
+TP_RATIO       = 2.0
+SL_RATIO       = 1.0
 MAX_SL_PERCENT = 0.05
 
 # ─────────────────────────────────────────────────────────────
 # AI & Model Parameters
 # ─────────────────────────────────────────────────────────────
-AI_THRESHOLD = 65.0
+AI_THRESHOLD      = 65.0
 MIN_REQUIRED_SCORE = 65
 
 # ─────────────────────────────────────────────────────────────
 # Scoring Weights
 # ─────────────────────────────────────────────────────────────
-WEIGHT_AI = 40   # AI Model (LightGBM)
-WEIGHT_ADX = 20  # Trend (ADX)
-WEIGHT_RSI = 20  # Momentum (RSI)
-WEIGHT_EMA = 20  # Trend (EMA)
+WEIGHT_AI  = 40
+WEIGHT_ADX = 20
+WEIGHT_RSI = 20
+WEIGHT_EMA = 20
 
-# ✅ این 7 feature برای LightGBM است (بدون volume_ratio)
+# ✅ 8 فیچر برای LightGBM (feat_volume_ratio اضافه شد)
 AI_FEATURES = [
     'feat_adx',
     'feat_atr_percent',
@@ -77,6 +77,7 @@ AI_FEATURES = [
     'feat_ema_deviation',
     'feat_rsi_momentum',
     'feat_body_ratio',
+    'feat_volume_ratio',   # v10.3: اضافه شد — حجم نسبی
 ]
 
 # ─────────────────────────────────────────────────────────────
@@ -91,4 +92,4 @@ WATCHLIST = [
 # Telegram
 # ─────────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID")
