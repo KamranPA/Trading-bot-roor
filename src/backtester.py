@@ -406,6 +406,10 @@ def _empty_result(pair: str) -> dict:
 
 def _save_backtest_summary(results: Dict) -> None:
     csv_path = os.path.join(BASE_DIR, 'backtest_table_summary.csv')
+    column_order = [
+        'pair', 'total', 'wins', 'losses', 'win_rate', 'avg_pnl',
+        'total_pnl', 'max_drawdown', 'best_trade', 'worst_trade', 'profit_factor',
+    ]
     rows = []
     for symbol, result in results.items():
         rows.append({
@@ -421,16 +425,19 @@ def _save_backtest_summary(results: Dict) -> None:
             'worst_trade':   result.get('worst_trade',   0.0),
             'profit_factor': result.get('profit_factor', 0.0),
         })
-    df_summary = pd.DataFrame(rows)
-    column_order = [
-        'pair', 'total', 'wins', 'losses', 'win_rate', 'avg_pnl',
-        'total_pnl', 'max_drawdown', 'best_trade', 'worst_trade', 'profit_factor',
-    ]
-    df_summary = df_summary[column_order]
+
+    # ✅ FIX: اگر results خالی باشد، DataFrame با ستون‌های صحیح می‌سازیم
+    if not rows:
+        df_summary = pd.DataFrame(columns=column_order)
+        logger.warning('⚠️ هیچ نتیجه‌ای برای ذخیره وجود ندارد')
+    else:
+        df_summary = pd.DataFrame(rows, columns=column_order)
+
     try:
         df_summary.to_csv(csv_path, index=False, encoding='utf-8')
         logger.info(f"✅ نتایج ذخیره شد: {csv_path}")
-        logger.info(df_summary.to_string(index=False))
+        if not df_summary.empty:
+            logger.info(df_summary.to_string(index=False))
     except Exception as e:
         logger.error(f"❌ خطا در ذخیره‌سازی: {e}")
 
