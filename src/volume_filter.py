@@ -1,12 +1,5 @@
 """
-FILE PATH: src/volume_filter.py  (v1.0 - Dynamic Volume Filter)
-ماژول مشترک فیلتر حجم پویا — استفاده در:
-  strategy.py, backtester.py, optimizer.py, train_model.py
-
-منطق: volume >= Volume_SMA_20 * VOLUME_MULTIPLIER
-  - به جای عدد ثابت، از میانگین متحرک خود داده استفاده می‌شود
-  - با هر ارز و هر دوره زمانی خودکار تنظیم می‌شود
-  - VOLUME_MULTIPLIER = 0.5 (پیشنهاد بهینه)
+FILE PATH: src/volume_filter.py  (v1.1 - Fixed)
 """
 
 import pandas as pd
@@ -17,13 +10,13 @@ logger = logging.getLogger(__name__)
 
 try:
     import config
-    VOLUME_MULTIPLIER = float(getattr(config, 'VOLUME_MULTIPLIER', 0.5))
+    VOLUME_MULTIPLIER    = float(getattr(config, 'VOLUME_MULTIPLIER', 0.5))
     ENABLE_VOLUME_FILTER = getattr(config, 'ENABLE_VOLUME_FILTER', True)
 except ImportError:
     VOLUME_MULTIPLIER    = 0.5
     ENABLE_VOLUME_FILTER = True
 
-VOLUME_SMA_WINDOW = 20   # یکسان با indicators.py
+VOLUME_SMA_WINDOW = 20
 
 
 def passes_volume_filter(
@@ -31,44 +24,40 @@ def passes_volume_filter(
     symbol: str = "UNKNOWN",
     multiplier: float = None,
 ) -> bool:
-    """
-    بررسی فیلتر حجم پویا برای یک کندل.
-
-    منطق:
-      volume >= Volume_SMA_20 * multiplier
-
-    اگر Volume_SMA موجود نباشد (مثلاً اولین 20 کندل)، فیلتر رد نمی‌کند.
-
-    Args:
-        row: یک ردیف DataFrame (pd.Series)
-        symbol: نام ارز برای لاگ
-        multiplier: ضریب (پیش‌فرض از config)
-
-    Returns:
-        True  اگر حجم کافی است یا فیلتر غیرفعال است
-        False اگر حجم ناکافی است
-    """
     if not ENABLE_VOLUME_FILTER:
         return True
 
     m = multiplier if multiplier is not None else VOLUME_MULTIPLIER
 
-    # خواندن حجم فعلی
-    vol = row.get('volume', row.get('Volume', None))
-    if vol is None or pd.isna(vol):
-        return True   # اگر حجم نداریم، فیلتر نمی‌کنیم
+    # خواندن حجم — همه حالت‌های ممکن
+    vol = None
+    for key in ('volume', 'Volume', 'VOLUME'):
+        v = row.get(key, None)
+        if v is not None and not (isinstance(v, float) and np.isnan(v)):
+            vol = v
+            break
+
+    if vol is None:
+        return True  # ستون حجم نداریم → فیلتر نمی‌کنیم
 
     try:
         current_vol = float(vol)
     except (TypeError, ValueError):
         return True
 
-    # خواندن Volume_SMA (از indicators.py محاسبه شده)
-    sma = row.get('Volume_SMA', row.get('volume_sma', None))
-
-    if sma is None or pd.isna(sma) or float(sma) <= 0:
-        # SMA موجود نیست → فیلتر نمی‌کنیم
+    if current_vol <= 0:
         return True
+
+    # خواندن Volume_SMA — همه حالت‌های ممکن
+    sma = None
+    for key in ('Volume_SMA', 'volume_sma', 'volume_sma20', 'Volume_SMA_20'):
+        v = row.get(key, None)
+        if v is not None and not (isinstance(v, float) and np.isnan(v)):
+            sma = v
+            break
+
+    if sma is None or float(sma) <= 0:
+        return True  # SMA نداریم → فیلتر نمی‌کنیم
 
     threshold = float(sma) * m
 
@@ -87,32 +76,37 @@ def apply_volume_filter_df(
     symbol: str = "UNKNOWN",
     multiplier: float = None,
 ) -> pd.DataFrame:
-    """
-    اعمال فیلتر حجم پویا روی کل DataFrame.
-    برای training استفاده می‌شود.
-
-    اگر Volume_SMA در df نباشد، آن را محاسبه می‌کند.
-    """
     if not ENABLE_VOLUME_FILTER:
         return df
 
     m = multiplier if multiplier is not None else VOLUME_MULTIPLIER
 
-    vol_col = 'volume' if 'volume' in df.columns else 'Volume'
-    if vol_col not in df.columns:
+    vol_col = None
+    for c in ('volume', 'Volume', 'VOLUME'):
+        if c in df.columns:
+            vol_col = c
+            break
+
+    if vol_col is None:
         logger.warning(f"{symbol}: ستون حجم وجود ندارد — فیلتر اعمال نشد")
         return df
 
-    # محاسبه Volume_SMA اگر موجود نباشد
-    if 'Volume_SMA' not in df.columns:
+    sma_col = None
+    for c in ('Volume_SMA', 'volume_sma', 'volume_sma20', 'Volume_SMA_20'):
+        if c in df.columns:
+            sma_col = c
+            break
+
+    if sma_col is None:
         df = df.copy()
         df['Volume_SMA'] = df[vol_col].rolling(window=VOLUME_SMA_WINDOW, min_periods=1).mean()
+        sma_col = 'Volume_SMA'
 
-    threshold    = df['Volume_SMA'] * m
-    mask         = df[vol_col] >= threshold
-    rows_before  = len(df)
-    df_filtered  = df[mask].copy()
-    rows_after   = len(df_filtered)
+    threshold   = df[sma_col] * m
+    mask        = df[vol_col] >= threshold
+    rows_before = len(df)
+    df_filtered = df[mask].copy()
+    rows_after  = len(df_filtered)
 
     if rows_before > 0:
         pct = rows_after / rows_before * 100
@@ -123,6 +117,6 @@ def apply_volume_filter_df(
 
     if rows_after == 0:
         logger.warning(f"{symbol}: فیلتر حجم همه ردیف‌ها را حذف کرد — برمی‌گردیم")
-        return df  # بدون فیلتر برمی‌گردیم
+        return df
 
     return df_filtered
