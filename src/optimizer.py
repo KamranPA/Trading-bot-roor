@@ -22,6 +22,7 @@ import config
 from src import strategy_utils
 from src.indicators import TechnicalIndicators
 from src.brain import TradingBrain
+from src.volume_filter import passes_volume_filter, VOLUME_MULTIPLIER
 
 
 # ─── توابع کمکی مشترک ────────────────────────────────────────────────────────
@@ -34,29 +35,8 @@ def _to_brain_symbol(symbol: str) -> str:
     return symbol
 
 
-def _get_volume_threshold(symbol: str) -> float:
-    """یکسان با strategy.py و backtester.py"""
-    thresholds = getattr(config, 'VOLUME_THRESHOLDS', {})
-    if symbol in thresholds:
-        return float(thresholds[symbol])
-    alt = symbol.replace('/', '')
-    if alt in thresholds:
-        return float(thresholds[alt])
-    return 0.0
-
-
-def _passes_volume_filter(row: pd.Series, symbol: str) -> bool:
-    """یکسان با strategy.py و backtester.py"""
-    if not getattr(config, 'ENABLE_VOLUME_FILTER', False):
-        return True
-    threshold = _get_volume_threshold(symbol)
-    if threshold <= 0:
-        return True
-    vol = row.get('volume', row.get('Volume', 0))
-    try:
-        return float(vol) >= threshold
-    except (TypeError, ValueError):
-        return True
+# فیلتر حجم پویا از ماژول مشترک — volume >= Volume_SMA_20 * VOLUME_MULTIPLIER
+_passes_volume_filter = passes_volume_filter
 
 
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
