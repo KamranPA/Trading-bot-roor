@@ -53,7 +53,7 @@ MAX_SL_PERCENT = 0.05
 # AI & Model Parameters
 # ─────────────────────────────────────────────────────────────
 AI_THRESHOLD      = 65.0
-MIN_REQUIRED_SCORE = 65
+MIN_REQUIRED_SCORE = 40
 
 # ─────────────────────────────────────────────────────────────
 # Scoring Weights
