@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-06-29T18:14:37.861957",
+  "timestamp": "2026-06-29T18:38:56.007241",
   "model_type": "LightGBM",
   "features": [
     "feat_adx",
