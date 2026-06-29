@@ -24,6 +24,7 @@ if BASE_DIR not in sys.path:
 import config
 from src import strategy_utils
 from src.indicators import TechnicalIndicators
+from src.volume_filter import passes_volume_filter, VOLUME_MULTIPLIER
 from src.csv_store import (
     save_backtest_trade, close_backtest_trade,
     flush_closed_trades, export_to_sqlite,
@@ -46,43 +47,9 @@ REQUIRED_FEATURES = [
 ]
 
 
-# ─── Volume Filter (یکسان با strategy.py) ────────────────────────────────────
-
-def _get_volume_threshold(symbol: str) -> float:
-    """
-    خواندن آستانه حجم برای یک symbol.
-    هر دو فرمت را پشتیبانی می‌کند: 'BTCUSDT' و 'BTC/USDT'
-    """
-    thresholds = getattr(config, 'VOLUME_THRESHOLDS', {})
-    if symbol in thresholds:
-        return float(thresholds[symbol])
-    alt = symbol.replace('/', '')
-    if alt in thresholds:
-        return float(thresholds[alt])
-    return 0.0
-
-
-def _passes_volume_filter(candle: pd.Series, symbol: str) -> bool:
-    """
-    بررسی فیلتر حجم برای یک کندل — رفتار کاملاً یکسان با strategy.py
-    Returns True اگر فیلتر غیرفعال باشد یا کندل آستانه را رد کند.
-    """
-    if not getattr(config, 'ENABLE_VOLUME_FILTER', False):
-        return True
-
-    threshold = _get_volume_threshold(symbol)
-    if threshold <= 0:
-        return True
-
-    vol = candle.get('volume', candle.get('Volume', 0))
-    try:
-        current_volume = float(vol)
-    except (TypeError, ValueError):
-        return True
-
-    if current_volume < threshold:
-        return False
-    return True
+# ─── Volume Filter پویا (از ماژول مشترک) ────────────────────────────────────
+# volume >= Volume_SMA_20 * VOLUME_MULTIPLIER (0.5)
+_passes_volume_filter = passes_volume_filter
 
 
 # ─── توابع کمکی ──────────────────────────────────────────────────────────────
