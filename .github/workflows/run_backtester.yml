@@ -22,7 +22,7 @@ jobs:
 
       - name: Install System Dependencies
         run: |
-          sudo apt-get update
+          sudo apt-get update -qq
           sudo apt-get install -y libgomp1
 
       - name: Install dependencies
@@ -33,14 +33,21 @@ jobs:
 
       - name: Fetch Market Data
         run: |
+          echo "📂 working directory: $(pwd)"
           python fetcher.py
-          echo "✅ fetcher.py تمام شد"
 
       - name: Verify CSV Files
         run: |
           python -c "
-          import os, sys
-          data_dir = 'data/4h'
+          import os, sys, glob
+
+          data_dir = os.path.join(os.path.dirname(os.path.abspath('.')), 'data', '4h')
+          data_dir = os.path.join(os.getcwd(), 'data', '4h')
+
+          print(f'بررسی پوشه: {data_dir}')
+          all_csv = glob.glob(os.path.join(data_dir, '*.csv'))
+          print(f'فایل‌های CSV یافت شده: {[os.path.basename(f) for f in all_csv]}')
+
           watchlist = [
               'BTCUSDT','ETHUSDT','SOLUSDT','DOTUSDT','LINKUSDT',
               'AVAXUSDT','XRPUSDT','LTCUSDT','BCHUSDT','ATOMUSDT',
@@ -49,16 +56,16 @@ jobs:
           for sym in watchlist:
               path = os.path.join(data_dir, f'{sym}_history.csv')
               if not os.path.exists(path):
-                  missing.append(path)
-                  print(f'❌ فایل یافت نشد: {path}')
+                  missing.append(sym)
+                  print(f'❌ {sym}: {path}')
               else:
                   import pandas as pd
                   df = pd.read_csv(path)
                   print(f'✅ {sym}: {len(df)} ردیف | ستون‌ها: {list(df.columns)}')
           if missing:
-              print(f'تعداد فایل‌های گمشده: {len(missing)}')
+              print(f'ناموفق: {missing}')
               sys.exit(1)
-          print('✅ همه فایل‌های CSV آماده هستند')
+          print('✅ همه فایل‌ها آماده‌اند')
           "
 
       - name: Execute Pipeline and Force Commit Results
@@ -67,27 +74,27 @@ jobs:
         run: |
           rm -f data/backtest_trades.csv
 
-          echo "▶️ شروع backtester..."
+          echo "▶️ backtester..."
           python src/backtester.py
           echo "✅ backtester تمام شد"
 
-          echo "▶️ شروع train_model..."
+          echo "▶️ train_model..."
           python src/train_model.py
           echo "✅ train_model تمام شد"
 
-          echo "▶️ شروع optimizer..."
+          echo "▶️ optimizer..."
           python src/optimizer.py
           echo "✅ optimizer تمام شد"
 
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
-          git add -f backtest_table_summary.csv || true
-          git add -f best_params.json           || true
+          git add -f backtest_table_summary.csv  || true
+          git add -f best_params.json            || true
           git add -f data/trading_bot_backtest.db || true
-          git add -f training_results.json      || true
-          git add -f src/models/                || true
+          git add -f training_results.json       || true
+          git add -f src/models/                 || true
           git add .
-          git commit -m "Auto-update: Backtest + Train + Optimize $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
+          git commit -m "Auto-update: Backtest + Train + Optimize $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes"
           git push origin HEAD:${{ github.ref_name }} --force
 
       - name: Upload Artifacts
