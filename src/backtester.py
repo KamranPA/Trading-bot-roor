@@ -1,13 +1,17 @@
 """
-FILE PATH: src/backtester.py (v3.3 - Debug Counters)
+FILE PATH: src/backtester.py (v3.4 - Aligned with strategy.py)
+تغییرات نسبت به v3.3:
+  - ai_score پیش‌فرض = 50.0 (یکسان با strategy.py لایو)
+  - w_ai_eff = 0.0 وقتی مدل نداره (یکسان با strategy.py)
+  - ai_approved همیشه True وقتی مدل نداره (یکسان با strategy.py)
+  - debug counters باقی مانده
 """
 
 import os
 import sys
 import json
 import logging
-from datetime import datetime
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 import pandas as pd
 import numpy as np
@@ -40,7 +44,6 @@ REQUIRED_FEATURES = [
     'feat_adx', 'feat_atr_percent', 'feat_rsi', 'feat_trend_line',
     'feat_ema_deviation', 'feat_rsi_momentum', 'feat_body_ratio',
 ]
-
 
 _passes_volume_filter = passes_volume_filter
 
@@ -85,6 +88,26 @@ def _validate_features(features: Dict, symbol: str = "UNKNOWN") -> bool:
     return True
 
 
+def _compute_scores(candle: pd.Series, adx_thresh: float) -> Tuple[float, float, float]:
+    """محاسبه adx_score, rsi_score, ema_score — یکسان با strategy.py"""
+    current_adx  = float(candle.get('feat_adx',           candle.get('ADX', 0)))
+    current_rsi  = float(candle.get('feat_rsi',           candle.get('RSI', 50)))
+    rsi_momentum = float(candle.get('feat_rsi_momentum',  candle.get('RSI_momentum', 0)))
+    dev_val      = abs(float(candle.get('feat_ema_deviation', candle.get('EMA_diff', 0))))
+
+    adx_score = (min(100.0, 50.0 + (current_adx - adx_thresh) * 2.5)
+                 if current_adx >= adx_thresh
+                 else max(0.0, (current_adx / (adx_thresh + 1e-10)) * 50.0))
+
+    rsi_score = (min(100.0, max(0.0, 50.0 + rsi_momentum * 5))
+                 if current_rsi > 50
+                 else min(100.0, max(0.0, 50.0 + (-rsi_momentum) * 5)))
+
+    ema_score = min(100.0, (dev_val / 5.0) * 100.0)
+
+    return adx_score, rsi_score, ema_score
+
+
 def run_backtest(
     df_raw: pd.DataFrame,
     pair: str,
@@ -110,19 +133,13 @@ def run_backtest(
 
     logger.info(f"✅ {meta['valid_rows']} ردیف معتبر")
 
-    # ── debug: ستون‌های موجود ──────────────────────────────────────────────
-    all_cols = list(df_full.columns)
-    vol_cols = [c for c in all_cols if 'vol' in c.lower()]
+    # debug: ستون‌های volume
+    vol_cols = [c for c in df_full.columns if 'vol' in c.lower()]
     logger.info(f"📋 {pair}: ستون‌های volume: {vol_cols}")
-
-    # نمونه مقادیر Volume_SMA
     for c in ('Volume_SMA', 'volume_sma', 'volume_sma20'):
         if c in df_full.columns:
-            sample = df_full[c].iloc[200:203].tolist()
-            logger.info(f"📊 {pair}: {c} نمونه: {sample}")
+            logger.info(f"📊 {pair}: {c} نمونه: {df_full[c].iloc[200:203].tolist()}")
             break
-    else:
-        logger.warning(f"⚠️ {pair}: هیچ ستون Volume_SMA یافت نشد!")
 
     df_full = df_full.loc[:, ~df_full.columns.duplicated(keep='first')]
     for _lower, _upper in [('high','High'),('low','Low'),('open','Open'),
@@ -145,7 +162,6 @@ def run_backtest(
     closed_trades     = []
     signals_generated = 0
 
-    # ── counters برای debug ───────────────────────────────────────────────
     cnt_volume  = 0
     cnt_swing   = 0
     cnt_score   = 0
@@ -200,30 +216,17 @@ def run_backtest(
             cnt_volume += 1
             continue
 
-        # ── score ها ────────────────────────────────────────────────────────
-        current_adx  = float(candle.get('feat_adx',           candle.get('ADX', 0)))
-        current_rsi  = float(candle.get('feat_rsi',           candle.get('RSI', 50)))
-        rsi_momentum = float(candle.get('feat_rsi_momentum',  candle.get('RSI_momentum', 0)))
-        dev_val      = abs(float(candle.get('feat_ema_deviation', candle.get('EMA_diff', 0))))
+        # ── محاسبه scores (یکسان با strategy.py) ────────────────────────────
+        adx_score, rsi_score, ema_score = _compute_scores(candle, adx_thresh)
 
-        atr_raw = float(candle.get('atr', candle.get('ATR', 0)) or 0)
-        if atr_raw == 0:
-            atr_pct = float(candle.get('feat_atr_percent', 1.0) or 1.0)
-            atr_raw = (atr_pct / 100.0) * current_price if atr_pct > 1.0 else atr_pct * current_price
-        atr_val = atr_raw if atr_raw > 1.0 else current_price * 0.01
+        current_adx = float(candle.get('feat_adx', candle.get('ADX', 0)))
+        current_rsi = float(candle.get('feat_rsi', candle.get('RSI', 50)))
 
-        adx_score = (min(100.0, 50.0 + (current_adx - adx_thresh) * 2.5)
-                     if current_adx >= adx_thresh
-                     else max(0.0, (current_adx / (adx_thresh + 1e-10)) * 50.0))
-
-        rsi_score = (min(100.0, max(0.0, 50.0 + rsi_momentum * 5))
-                     if current_rsi > 50
-                     else min(100.0, max(0.0, 50.0 + (-rsi_momentum) * 5)))
-
-        ema_score = min(100.0, (dev_val / 5.0) * 100.0)
-
-        ai_score    = 0.0
+        # ── AI score — یکسان با strategy.py ─────────────────────────────────
+        # وقتی مدل نداره: ai_score=50.0, w_ai_eff=0.0, ai_approved=True
+        ai_score    = 50.0   # ← پیش‌فرض یکسان با strategy.py
         ai_approved = True
+        w_ai_eff    = 0.0    # ← وقتی مدل نداره وزن صفره
 
         model_active = (
             model is not None
@@ -234,21 +237,22 @@ def run_backtest(
         if model_active:
             try:
                 features = _extract_features_for_model(candle, pair)
-                if not _validate_features(features, pair):
-                    ai_approved = False
-                else:
+                if _validate_features(features, pair):
                     raw = model.predict_probability(brain_pair, features)
                     if raw is not None:
                         ai_score    = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
                         ai_approved = ai_score >= ai_threshold
+                        w_ai_eff    = WEIGHT_AI   # ← فقط وقتی مدل داره وزن می‌گیره
+                else:
+                    ai_approved = False
             except Exception as e:
                 logger.debug(f"⚠️ {pair} کندل {i}: خطا در AI - {e}")
                 ai_approved = False
 
-        w_ai_eff  = WEIGHT_AI if model_active else 0.0
+        # ── total_score — یکسان با strategy.py ──────────────────────────────
         w_sum_eff = (w_ai_eff + WEIGHT_ADX + WEIGHT_RSI + WEIGHT_EMA) or 100.0
         total_score = (
-            ai_score * w_ai_eff +
+            ai_score  * w_ai_eff  +
             adx_score * WEIGHT_ADX +
             rsi_score * WEIGHT_RSI +
             ema_score * WEIGHT_EMA
@@ -261,6 +265,13 @@ def run_backtest(
         if len(open_trades) >= MAX_OPEN_POSITIONS:
             cnt_max_pos += 1
             continue
+
+        # ── ATR مطلق ─────────────────────────────────────────────────────────
+        atr_raw = float(candle.get('atr', candle.get('ATR', 0)) or 0)
+        if atr_raw == 0:
+            atr_pct = float(candle.get('feat_atr_percent', 1.0) or 1.0)
+            atr_raw = (atr_pct / 100.0) * current_price if atr_pct > 1.0 else atr_pct * current_price
+        atr_val = atr_raw if atr_raw > 1.0 else current_price * 0.01
 
         swing_high = strategy_utils.find_last_swing(df_slice, 'high', swing_window)
         swing_low  = strategy_utils.find_last_swing(df_slice, 'low',  swing_window)
@@ -311,7 +322,6 @@ def run_backtest(
             save_backtest_trade(trade)
             signals_generated += 1
 
-    # ── لاگ debug ─────────────────────────────────────────────────────────
     logger.info(
         f"📊 DEBUG {pair}: "
         f"checked={cnt_checked} | "
