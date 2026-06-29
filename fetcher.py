@@ -24,7 +24,12 @@ def fetch_data_intel(symbol, timeframe="4h") -> bool:
     """
     Returns True اگر فایل با موفقیت ذخیره شد، False در غیر این صورت.
     """
-    yahoo_symbol = symbol.replace('/', '-').replace('USDT', 'USD')
+    # تبدیل BTCUSDT → BTC-USD برای yfinance
+    if 'USDT' in symbol:
+        base = symbol.replace('USDT', '').replace('/', '')
+        yahoo_symbol = f'{base}-USD'
+    else:
+        yahoo_symbol = symbol.replace('/', '-')
 
     if yahoo_symbol == 'POL-USD':
         yahoo_symbol = 'MATIC-USD'
