@@ -35,7 +35,7 @@ RISK_MULTIPLIER = 1.0
 ENABLE_VOLUME_FILTER = True
 
 # ✅ ضریب پویا: 0.5 = حجم باید حداقل 50% میانگین 20 کندل اخیر باشد
-VOLUME_MULTIPLIER = 0.5
+VOLUME_MULTIPLIER = 0.3
 
 # VOLUME_THRESHOLDS دیگر استفاده نمی‌شود (حذف شد — v2.0)
 # فیلتر پویا خودکار برای همه ارزها تنظیم می‌شود
