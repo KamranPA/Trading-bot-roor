@@ -15,35 +15,14 @@ from typing import Dict, Optional
 import config
 from src.indicators import TechnicalIndicators
 from src import strategy_utils
+from src.volume_filter import passes_volume_filter, VOLUME_MULTIPLIER
 
 logger = logging.getLogger(__name__)
 
 
-def _get_volume_threshold(symbol: str) -> float:
-    thresholds = getattr(config, 'VOLUME_THRESHOLDS', {})
-    if symbol in thresholds:
-        return float(thresholds[symbol])
-    alt = symbol.replace('/', '')
-    if alt in thresholds:
-        return float(thresholds[alt])
-    return 0.0
-
-
-def _passes_volume_filter(row: pd.Series, symbol: str) -> bool:
-    if not getattr(config, 'ENABLE_VOLUME_FILTER', False):
-        return True
-    threshold = _get_volume_threshold(symbol)
-    if threshold <= 0:
-        return True
-    vol = row.get('volume', row.get('Volume', 0))
-    try:
-        current_volume = float(vol)
-    except (TypeError, ValueError):
-        return True
-    if current_volume < threshold:
-        logger.debug(f"{symbol}: حجم {current_volume:,.0f} < آستانه {threshold:,.0f} — رد شد")
-        return False
-    return True
+# فیلتر حجم پویا — از ماژول مشترک src/volume_filter.py
+# volume >= Volume_SMA_20 * VOLUME_MULTIPLIER (0.5)
+_passes_volume_filter = passes_volume_filter
 
 
 def generate_signal(
