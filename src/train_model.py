@@ -25,6 +25,13 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 import config
+try:
+    from src.volume_filter import apply_volume_filter_df
+except ImportError:
+    try:
+        from volume_filter import apply_volume_filter_df
+    except ImportError:
+        apply_volume_filter_df = None
 
 try:
     import lightgbm as lgb
@@ -159,45 +166,17 @@ def _build_target(df: pd.DataFrame, symbol: str) -> pd.Series:
 
 # ─── فیلتر حجم (یکسان با strategy.py و backtester.py) ───────────────────────
 
-def _get_volume_threshold(symbol: str) -> float:
-    thresholds = getattr(config, 'VOLUME_THRESHOLDS', {})
-    if symbol in thresholds:
-        return float(thresholds[symbol])
-    alt = symbol.replace('/', '')
-    if alt in thresholds:
-        return float(thresholds[alt])
-    return 0.0
+# فیلتر حجم از ماژول مشترک src/volume_filter.py
 
 
 def _apply_volume_filter(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
     """
-    فیلتر حجم — یکسان با pipeline لایو.
-    کندل‌هایی که حجم کافی ندارند از training حذف می‌شوند.
+    فیلتر حجم پویا — یکسان با strategy.py و backtester.py.
+    volume >= Volume_SMA_20 * VOLUME_MULTIPLIER (0.5)
     """
-    if not getattr(config, 'ENABLE_VOLUME_FILTER', False):
-        return df
-
-    threshold = _get_volume_threshold(symbol)
-    if threshold <= 0:
-        return df
-
-    vol_col = 'volume' if 'volume' in df.columns else 'Volume'
-    if vol_col not in df.columns:
-        return df
-
-    rows_before = len(df)
-    df_filtered = df[df[vol_col] >= threshold].copy()
-    rows_after  = len(df_filtered)
-
-    if rows_after == 0:
-        logger.warning(f"  فیلتر حجم همه کندل‌ها را حذف کرد! threshold={threshold:,.0f}")
-        return df  # برگشت به اصل تا training کاملاً از دست نرود
-
-    logger.info(
-        f"  فیلتر حجم: {rows_after}/{rows_before} کندل باقی ماند "
-        f"(threshold={threshold:,.0f})"
-    )
-    return df_filtered
+    if apply_volume_filter_df is not None:
+        return apply_volume_filter_df(df, symbol)
+    return df
 
 
 # ─── نام امن مدل (سازگار با brain.py) ───────────────────────────────────────
