@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-06-29T19:16:01.697136",
+  "timestamp": "2026-06-29T19:31:01.650668",
   "model_type": "LightGBM",
   "features": [
     "feat_adx",
@@ -86,9 +86,9 @@
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/DOT_USDT_model.pkl",
       "brain_key": "DOTUSDT",
-      "train_score": 0.6023391812865497,
-      "test_score": 0.643312101910828,
-      "samples": 2352,
+      "train_score": 0.6032345013477088,
+      "test_score": 0.6400862068965517,
+      "samples": 2319,
       "tp_percent": 38.9,
       "top_features": [
         [
@@ -96,11 +96,11 @@
           "5"
         ],
         [
-          "feat_ema_deviation",
+          "feat_rsi",
           "4"
         ],
         [
-          "feat_volume_ratio",
+          "feat_ema_deviation",
           "4"
         ]
       ]
@@ -155,22 +155,22 @@
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/XRP_USDT_model.pkl",
       "brain_key": "XRPUSDT",
-      "train_score": 0.6229143492769744,
-      "test_score": 0.6288888888888889,
-      "samples": 2248,
-      "tp_percent": 37.6,
+      "train_score": 0.624221844934918,
+      "test_score": 0.6266968325791855,
+      "samples": 2209,
+      "tp_percent": 37.5,
       "top_features": [
         [
-          "feat_ema_deviation",
-          "16"
+          "feat_volume_ratio",
+          "17"
         ],
         [
-          "feat_body_ratio",
-          "13"
+          "feat_adx",
+          "15"
         ],
         [
-          "feat_atr_percent",
-          "11"
+          "feat_rsi",
+          "10"
         ]
       ]
     },
@@ -224,22 +224,22 @@
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/ATOM_USDT_model.pkl",
       "brain_key": "ATOMUSDT",
-      "train_score": 0.6169438669438669,
-      "test_score": 0.6078838174273858,
-      "samples": 2406,
-      "tp_percent": 38.5,
+      "train_score": 0.6128691983122363,
+      "test_score": 0.5936842105263158,
+      "samples": 2371,
+      "tp_percent": 39.1,
       "top_features": [
         [
-          "feat_rsi",
-          "7"
-        ],
-        [
           "feat_adx",
-          "5"
+          "13"
         ],
         [
           "feat_atr_percent",
-          "2"
+          "9"
+        ],
+        [
+          "feat_ema_deviation",
+          "5"
         ]
       ]
     }
