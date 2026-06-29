@@ -28,22 +28,17 @@ RISK_PERCENT = 1.0
 RISK_MULTIPLIER = 1.0
 
 # ─────────────────────────────────────────────────────────────
-# Volume Filter
+# Volume Filter (Dynamic — v2.0)
+# به جای آستانه ثابت، از میانگین متحرک 20 کندل استفاده می‌شود:
+#   volume >= Volume_SMA_20 * VOLUME_MULTIPLIER
 # ─────────────────────────────────────────────────────────────
 ENABLE_VOLUME_FILTER = True
 
-VOLUME_THRESHOLDS = {
-    "BTCUSDT":  1000000,
-    "ETHUSDT":  500000,
-    "SOLUSDT":  300000,
-    "DOTUSDT":  150000,
-    "LINKUSDT": 200000,
-    "AVAXUSDT": 250000,
-    "XRPUSDT":  1000000,
-    "LTCUSDT":  200000,
-    "BCHUSDT":  100000,
-    "ATOMUSDT": 150000,
-}
+# ✅ ضریب پویا: 0.5 = حجم باید حداقل 50% میانگین 20 کندل اخیر باشد
+VOLUME_MULTIPLIER = 0.5
+
+# VOLUME_THRESHOLDS دیگر استفاده نمی‌شود (حذف شد — v2.0)
+# فیلتر پویا خودکار برای همه ارزها تنظیم می‌شود
 
 # ─────────────────────────────────────────────────────────────
 # Trading Parameters
