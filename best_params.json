@@ -1,63 +1,63 @@
 {
-    "BTC/USDT": {
-        "ADX_THRESHOLD": 20,
-        "SWING_WINDOW": 7,
-        "TP_RATIO": 1.5,
-        "SL_RATIO": 1.0
-    },
-    "ETH/USDT": {
-        "ADX_THRESHOLD": 15,
-        "SWING_WINDOW": 7,
-        "TP_RATIO": 1.5,
-        "SL_RATIO": 1.0
-    },
-    "SOL/USDT": {
-        "ADX_THRESHOLD": 25,
-        "SWING_WINDOW": 3,
-        "TP_RATIO": 2.5,
-        "SL_RATIO": 1.0
-    },
-    "DOT/USDT": {
+    "BTCUSDT": {
         "ADX_THRESHOLD": 15,
         "SWING_WINDOW": 3,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
-    "LINK/USDT": {
+    "ETHUSDT": {
         "ADX_THRESHOLD": 15,
         "SWING_WINDOW": 3,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
-    "AVAX/USDT": {
+    "SOLUSDT": {
         "ADX_THRESHOLD": 15,
         "SWING_WINDOW": 3,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
-    "XRP/USDT": {
+    "DOTUSDT": {
         "ADX_THRESHOLD": 15,
         "SWING_WINDOW": 3,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
-    "LTC/USDT": {
-        "ADX_THRESHOLD": 15,
-        "SWING_WINDOW": 3,
-        "TP_RATIO": 2.5,
-        "SL_RATIO": 1.0
-    },
-    "BCH/USDT": {
-        "ADX_THRESHOLD": 20,
-        "SWING_WINDOW": 7,
-        "TP_RATIO": 1.5,
-        "SL_RATIO": 1.0
-    },
-    "ATOM/USDT": {
+    "LINKUSDT": {
         "ADX_THRESHOLD": 15,
         "SWING_WINDOW": 3,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
-    "_updated_at": "2026-06-23T16:06:42.965071"
+    "AVAXUSDT": {
+        "ADX_THRESHOLD": 15,
+        "SWING_WINDOW": 3,
+        "TP_RATIO": 1.5,
+        "SL_RATIO": 1.0
+    },
+    "XRPUSDT": {
+        "ADX_THRESHOLD": 15,
+        "SWING_WINDOW": 3,
+        "TP_RATIO": 1.5,
+        "SL_RATIO": 1.0
+    },
+    "LTCUSDT": {
+        "ADX_THRESHOLD": 15,
+        "SWING_WINDOW": 3,
+        "TP_RATIO": 1.5,
+        "SL_RATIO": 1.0
+    },
+    "BCHUSDT": {
+        "ADX_THRESHOLD": 15,
+        "SWING_WINDOW": 3,
+        "TP_RATIO": 1.5,
+        "SL_RATIO": 1.0
+    },
+    "ATOMUSDT": {
+        "ADX_THRESHOLD": 15,
+        "SWING_WINDOW": 3,
+        "TP_RATIO": 1.5,
+        "SL_RATIO": 1.0
+    },
+    "_updated_at": "2026-06-29T05:08:26.629621"
 }
