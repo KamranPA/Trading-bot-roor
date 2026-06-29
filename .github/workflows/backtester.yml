@@ -31,62 +31,104 @@ jobs:
 
       - name: Fetch Market Data
         run: |
+          echo "📂 working directory: $(pwd)"
           python fetcher.py
 
       - name: Verify CSV Files
         run: |
           python -c "
-          import os, sys, glob, pandas as pd
+          import os, sys, glob
           data_dir = os.path.join(os.getcwd(), 'data', '4h')
-          watchlist = ['BTCUSDT','ETHUSDT','SOLUSDT','DOTUSDT','LINKUSDT','AVAXUSDT','XRPUSDT','LTCUSDT','BCHUSDT','ATOMUSDT']
+          print(f'بررسی پوشه: {data_dir}')
+          all_csv = glob.glob(os.path.join(data_dir, '*.csv'))
+          print(f'فایل‌های CSV: {[os.path.basename(f) for f in all_csv]}')
+          watchlist = [
+              'BTCUSDT','ETHUSDT','SOLUSDT','DOTUSDT','LINKUSDT',
+              'AVAXUSDT','XRPUSDT','LTCUSDT','BCHUSDT','ATOMUSDT',
+          ]
           missing = []
           for sym in watchlist:
               path = os.path.join(data_dir, f'{sym}_history.csv')
               if not os.path.exists(path):
                   missing.append(sym)
-                  print(f'MISSING: {sym}')
+                  print(f'❌ {sym}: {path}')
               else:
+                  import pandas as pd
                   df = pd.read_csv(path)
-                  print(f'OK {sym}: {len(df)} rows')
+                  print(f'✅ {sym}: {len(df)} ردیف')
           if missing:
+              print(f'ناموفق: {missing}')
               sys.exit(1)
-          print('All files ready')
+          print('✅ همه فایل‌ها آماده‌اند')
           "
 
-      - name: Patch backtester ai_score default
+      - name: Patch backtester.py
+        run: |
+          python - << 'EOF'
+          with open('src/backtester.py', 'r', encoding='utf-8') as f:
+              content = f.read()
+
+          original = content
+
+          # پچ: هر نسخه‌ای از ai_score=0.0 رو به 50.0 تبدیل کن
+          import re
+          content = re.sub(
+              r'ai_score\s*=\s*0\.0(\s*#[^\n]*)?(\s*\n\s*ai_approved)',
+              'ai_score    = 50.0  # پیش‌فرض یکسان با strategy.py\\2',
+              content
+          )
+
+          if content != original:
+              with open('src/backtester.py', 'w', encoding='utf-8') as f:
+                  f.write(content)
+              print('✅ پچ اعمال شد: ai_score=0.0 → 50.0')
+          else:
+              print('ℹ️  پچ نیازی نیست — قبلاً اعمال شده یا فرمت متفاوته')
+
+          # تایید
+          for i, line in enumerate(content.split('\n'), 1):
+              if 'ai_score' in line and ('= 0' in line or '= 50' in line):
+                  print(f'  خط {i}: {line.strip()}')
+          EOF
+
+      - name: Verify Score Distribution
         run: |
           python -c "
-          path = 'src/backtester.py'
-          with open(path, 'r', encoding='utf-8') as f:
-              src = f.read()
+          import sys
+          sys.path.insert(0, '.')
+          import pandas as pd, config
+          from src.indicators import TechnicalIndicators
 
-          if 'ai_score    = 50.0' in src:
-              print('Already patched')
-          elif 'ai_score    = 0.0' in src:
-              src = src.replace('ai_score    = 0.0', 'ai_score    = 50.0', 1)
-              with open(path, 'w', encoding='utf-8') as f:
-                  f.write(src)
-              print('Patched: ai_score 0.0 -> 50.0')
-          else:
-              print('Pattern not found - checking file')
-              import re
-              m = re.findall(r'ai_score\s*=\s*[\d.]+', src)
-              print('Found:', m)
+          print('MIN_REQUIRED_SCORE:', config.MIN_REQUIRED_SCORE)
+          print('ADX_THRESHOLD:', config.ADX_THRESHOLD)
+          print('VOLUME_MULTIPLIER:', config.VOLUME_MULTIPLIER)
 
-          with open(path, 'r') as f:
-              content = f.read()
-          for line in content.split('\n'):
-              if 'ai_score' in line and '=' in line and 'approved' not in line and 'w_ai' not in line:
-                  print('LINE:', line.strip())
-                  break
+          df = pd.read_csv('data/4h/BTCUSDT_history.csv')
+          df_norm = df.rename(columns={c: c.lower() for c in df.columns})
+          df_full, _ = TechnicalIndicators.calculate_all_features(df_norm, 'BTCUSDT')
+
+          scores = []
+          for i in range(200, 300):
+              c  = df_full.iloc[i]
+              th = config.ADX_THRESHOLD
+              adx = float(c.get('feat_adx', 0))
+              rsi = float(c.get('feat_rsi', 50))
+              mom = float(c.get('feat_rsi_momentum', 0))
+              dev = abs(float(c.get('feat_ema_deviation', 0)))
+              adx_s = min(100, 50+(adx-th)*2.5) if adx>=th else max(0,(adx/(th+1e-10))*50)
+              rsi_s = min(100,max(0,50+mom*5)) if rsi>50 else min(100,max(0,50+(-mom)*5))
+              ema_s = min(100,(dev/5.0)*100)
+              total = (adx_s*20 + rsi_s*20 + ema_s*20) / 60
+              scores.append(total)
+
+          above = sum(1 for s in scores if s >= config.MIN_REQUIRED_SCORE)
+          print(f'بالای threshold ({config.MIN_REQUIRED_SCORE}): {above}/{len(scores)} کندل')
+          print(f'میانگین score: {sum(scores)/len(scores):.1f}')
+          print(f'حداکثر score: {max(scores):.1f}')
+          print(f'حداقل score: {min(scores):.1f}')
           "
 
-      - name: Verify Patch
-        run: |
-          echo "=== ai_score lines in backtester ==="
-          grep -n "ai_score\s*=" src/backtester.py | head -5
-
-      - name: Execute Pipeline
+      - name: Execute Pipeline and Force Commit Results
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
@@ -94,21 +136,19 @@ jobs:
 
           echo "▶️ backtester..."
           python src/backtester.py
-          echo "✅ backtester done"
+          echo "✅ backtester تمام شد"
 
           echo "=== backtest_table_summary.csv ==="
-          cat backtest_table_summary.csv || echo "FILE NOT FOUND"
+          cat backtest_table_summary.csv || echo "فایل وجود ندارد!"
 
           echo "▶️ train_model..."
           python src/train_model.py
-          echo "✅ train_model done"
+          echo "✅ train_model تمام شد"
 
           echo "▶️ optimizer..."
           python src/optimizer.py
-          echo "✅ optimizer done"
+          echo "✅ optimizer تمام شد"
 
-      - name: Commit Results
-        run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           git add -f backtest_table_summary.csv  || true
@@ -116,9 +156,8 @@ jobs:
           git add -f data/trading_bot_backtest.db || true
           git add -f training_results.json       || true
           git add -f src/models/                 || true
-          git add src/backtester.py              || true
+          git add .
           git status
-          git diff --cached --stat
           git commit -m "Auto-update: Backtest + Train + Optimize $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes"
           git push origin HEAD:${{ github.ref_name }} --force
 
