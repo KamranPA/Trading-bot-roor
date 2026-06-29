@@ -1,10 +1,5 @@
 """
-FILE PATH: src/backtester.py (v3.2 - Volume Filter Aligned)
-تغییرات نسبت به v3.1:
-  - فیلتر حجم به صورت per-candle (یکسان با strategy.py لایو)
-  - _get_volume_threshold() مشترک با strategy.py
-  - _passes_volume_filter() روی candle (نه DataFrame کامل)
-  - حذف _apply_volume_filter() که روی DataFrame کامل کار می‌کرد
+FILE PATH: src/backtester.py (v3.3 - Debug Counters)
 """
 
 import os
@@ -47,15 +42,10 @@ REQUIRED_FEATURES = [
 ]
 
 
-# ─── Volume Filter پویا (از ماژول مشترک) ────────────────────────────────────
-# volume >= Volume_SMA_20 * VOLUME_MULTIPLIER (0.5)
 _passes_volume_filter = passes_volume_filter
 
 
-# ─── توابع کمکی ──────────────────────────────────────────────────────────────
-
 def _to_brain_symbol(symbol: str) -> str:
-    """BTCUSDT → BTC/USDT برای brain.py"""
     if '/' not in symbol and 'USDT' in symbol:
         base = symbol.replace('USDT', '')
         return f"{base}/USDT"
@@ -95,8 +85,6 @@ def _validate_features(features: Dict, symbol: str = "UNKNOWN") -> bool:
     return True
 
 
-# ─── بکتست اصلی ──────────────────────────────────────────────────────────────
-
 def run_backtest(
     df_raw: pd.DataFrame,
     pair: str,
@@ -122,9 +110,20 @@ def run_backtest(
 
     logger.info(f"✅ {meta['valid_rows']} ردیف معتبر")
 
-    # اضافه کردن ستون‌های Capitalized برای strategy_utils.find_last_swing
-    # که از df['High'] و df['Low'] استفاده می‌کند — یکسان با optimizer.py
-    # حذف ستون‌های تکراری قبل از اضافه کردن aliases
+    # ── debug: ستون‌های موجود ──────────────────────────────────────────────
+    all_cols = list(df_full.columns)
+    vol_cols = [c for c in all_cols if 'vol' in c.lower()]
+    logger.info(f"📋 {pair}: ستون‌های volume: {vol_cols}")
+
+    # نمونه مقادیر Volume_SMA
+    for c in ('Volume_SMA', 'volume_sma', 'volume_sma20'):
+        if c in df_full.columns:
+            sample = df_full[c].iloc[200:203].tolist()
+            logger.info(f"📊 {pair}: {c} نمونه: {sample}")
+            break
+    else:
+        logger.warning(f"⚠️ {pair}: هیچ ستون Volume_SMA یافت نشد!")
+
     df_full = df_full.loc[:, ~df_full.columns.duplicated(keep='first')]
     for _lower, _upper in [('high','High'),('low','Low'),('open','Open'),
                             ('close','Close'),('volume','Volume')]:
@@ -146,9 +145,17 @@ def run_backtest(
     closed_trades     = []
     signals_generated = 0
 
+    # ── counters برای debug ───────────────────────────────────────────────
+    cnt_volume  = 0
+    cnt_swing   = 0
+    cnt_score   = 0
+    cnt_max_pos = 0
+    cnt_checked = 0
+
     for i in range(200, len(df_full)):
         df_slice = df_full.iloc[:i + 1]
         candle   = df_full.iloc[i]
+        cnt_checked += 1
 
         try:
             current_price = float(candle['close'])
@@ -188,8 +195,9 @@ def run_backtest(
                 still_open.append(trade)
         open_trades = still_open
 
-        # ── فیلتر حجم (per-candle — یکسان با strategy.py لایو) ─────────────
+        # ── فیلتر حجم ───────────────────────────────────────────────────────
         if not _passes_volume_filter(candle, pair):
+            cnt_volume += 1
             continue
 
         # ── score ها ────────────────────────────────────────────────────────
@@ -198,7 +206,6 @@ def run_backtest(
         rsi_momentum = float(candle.get('feat_rsi_momentum',  candle.get('RSI_momentum', 0)))
         dev_val      = abs(float(candle.get('feat_ema_deviation', candle.get('EMA_diff', 0))))
 
-        # ATR مطلق (نه درصدی)
         atr_raw = float(candle.get('atr', candle.get('ATR', 0)) or 0)
         if atr_raw == 0:
             atr_pct = float(candle.get('feat_atr_percent', 1.0) or 1.0)
@@ -215,7 +222,6 @@ def run_backtest(
 
         ema_score = min(100.0, (dev_val / 5.0) * 100.0)
 
-        # ── AI score ────────────────────────────────────────────────────────
         ai_score    = 0.0
         ai_approved = True
 
@@ -249,15 +255,18 @@ def run_backtest(
         ) / w_sum_eff
 
         if total_score < min_score or not ai_approved:
+            cnt_score += 1
             continue
 
         if len(open_trades) >= MAX_OPEN_POSITIONS:
+            cnt_max_pos += 1
             continue
 
         swing_high = strategy_utils.find_last_swing(df_slice, 'high', swing_window)
         swing_low  = strategy_utils.find_last_swing(df_slice, 'low',  swing_window)
 
         if swing_high is None or swing_low is None:
+            cnt_swing += 1
             continue
 
         trade_id = f"{pair}_{i}"
@@ -302,6 +311,16 @@ def run_backtest(
             save_backtest_trade(trade)
             signals_generated += 1
 
+    # ── لاگ debug ─────────────────────────────────────────────────────────
+    logger.info(
+        f"📊 DEBUG {pair}: "
+        f"checked={cnt_checked} | "
+        f"volume_blocked={cnt_volume} | "
+        f"swing_blocked={cnt_swing} | "
+        f"score_blocked={cnt_score} | "
+        f"signals={signals_generated}"
+    )
+
     # ── بستن معاملات باقی‌مانده ─────────────────────────────────────────────
     last_price = float(df_full.iloc[-1]['close'])
     for trade in open_trades:
@@ -323,8 +342,6 @@ def run_backtest(
     )
     return result
 
-
-# ─── آمار ────────────────────────────────────────────────────────────────────
 
 def _compute_stats(pair: str, trades: list) -> dict:
     if not trades:
@@ -393,7 +410,6 @@ def _save_backtest_summary(results: Dict) -> None:
             'profit_factor': result.get('profit_factor', 0.0),
         })
 
-    # ✅ FIX: اگر results خالی باشد، DataFrame با ستون‌های صحیح می‌سازیم
     if not rows:
         df_summary = pd.DataFrame(columns=column_order)
         logger.warning('⚠️ هیچ نتیجه‌ای برای ذخیره وجود ندارد')
