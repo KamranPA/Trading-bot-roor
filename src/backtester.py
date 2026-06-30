@@ -24,6 +24,7 @@ import config
 from src import strategy_utils
 from src.indicators import TechnicalIndicators
 from src.volume_filter import passes_volume_filter, VOLUME_MULTIPLIER
+from src.ai_threshold import get_ai_threshold
 from src.csv_store import (
     save_backtest_trade, close_backtest_trade,
     flush_closed_trades, export_to_sqlite,
@@ -150,7 +151,14 @@ def run_backtest(
     adx_thresh   = float(params.get('ADX_THRESHOLD', config.ADX_THRESHOLD))
     tp_ratio     = float(params.get('TP_RATIO',       config.TP_RATIO))
     sl_ratio     = float(params.get('SL_RATIO',       config.SL_RATIO))
-    ai_threshold = float(params.get('AI_THRESHOLD',   getattr(config, 'AI_THRESHOLD', 65.0)))
+    # ✅ AI_THRESHOLD per-symbol (کالیبره‌شده توسط train_model.py)
+    # اولویت: params (از optimizer) > ai_thresholds.json (کالیبره‌شده) > config ثابت
+    _default_ai_th = float(getattr(config, 'AI_THRESHOLD', 65.0))
+    if 'AI_THRESHOLD' in params:
+        ai_threshold = float(params['AI_THRESHOLD'])
+    else:
+        ai_threshold = get_ai_threshold(pair, default=_default_ai_th)
+    logger.info(f"📐 {pair}: AI_THRESHOLD مورد استفاده = {ai_threshold:.2f}")
     swing_window = int(params.get('SWING_WINDOW',     config.SWING_WINDOW))
 
     if min_score is None:
