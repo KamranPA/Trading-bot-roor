@@ -1,11 +1,6 @@
-# FILE PATH: src/optimizer.py (v10.3 - Fully Aligned with strategy.py + backtester.py)
-# تغییرات نسبت به v10.2:
-#   ✅ فیلتر حجم per-candle اضافه شد (مثل strategy.py)
-#   ✅ نام symbol برای brain نرمال‌سازی شد (BTCUSDT → BTC/USDT)
-#   ✅ ATR مطلق — ابتدا از ستون 'atr'/'ATR' خوانده می‌شود، بعد از feat_atr_percent
-#   ✅ ai_approved (AI_THRESHOLD) چک می‌شود
-#   ✅ MAX_OPEN_POSITIONS پشتیبانی شد (مثل backtester)
-#   ✅ feat_volume_ratio از features مدل حذف شد (در AI_FEATURES نیست)
+# FILE PATH: src/optimizer.py (v10.4 - Per-symbol AI_THRESHOLD support)
+# تغییرات نسبت به v10.3:
+#   ✅ AI_THRESHOLD per-symbol از ai_thresholds.json خوانده می‌شود (مثل backtester.py)
 
 import os
 import sys
@@ -23,6 +18,7 @@ from src import strategy_utils
 from src.indicators import TechnicalIndicators
 from src.brain import TradingBrain
 from src.volume_filter import passes_volume_filter, VOLUME_MULTIPLIER
+from src.ai_threshold import get_ai_threshold
 
 
 # ─── توابع کمکی مشترک ────────────────────────────────────────────────────────
@@ -35,7 +31,6 @@ def _to_brain_symbol(symbol: str) -> str:
     return symbol
 
 
-# فیلتر حجم پویا از ماژول مشترک — volume >= Volume_SMA_20 * VOLUME_MULTIPLIER
 _passes_volume_filter = passes_volume_filter
 
 
@@ -52,28 +47,16 @@ def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _add_uppercase_aliases(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    اضافه کردن ستون‌های Capitalized برای سازگاری با strategy_utils.find_last_swing
-    که از df['High'] و df['Low'] استفاده می‌کند.
-    یکسان با indicators.py _restore_capitalized_ohlcv()
-    """
     for lower, upper in [('high','High'),('low','Low'),('open','Open'),
                           ('close','Close'),('volume','Volume')]:
         if lower in df.columns and upper not in df.columns:
             df[upper] = df[lower]
-    # atr مطلق برای محاسبه SL
     if 'feat_atr_percent' in df.columns and 'atr' not in df.columns:
         df['atr'] = (df['feat_atr_percent'] / 100.0) * df['close']
     return df
 
 
 def _get_atr(row: pd.Series, close_price: float) -> float:
-    """
-    خواندن ATR مطلق — یکسان با backtester.py و strategy.py:
-    1. ابتدا از ستون 'atr' یا 'ATR' (مطلق > 1)
-    2. اگر نبود، از feat_atr_percent (همیشه درصد است)
-    3. فال‌بک: 1% قیمت
-    """
     atr_raw = float(row.get('atr', row.get('ATR', 0)) or 0)
     if atr_raw > 1.0:
         return atr_raw
@@ -96,9 +79,13 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
     if brain is None:
         brain = TradingBrain()
 
-    brain_symbol  = _to_brain_symbol(symbol)          # ✅ FIX: BTCUSDT → BTC/USDT
+    brain_symbol  = _to_brain_symbol(symbol)
     min_score     = float(getattr(config, 'MIN_REQUIRED_SCORE', 65))
-    ai_threshold  = float(getattr(config, 'AI_THRESHOLD',       65.0))
+
+    # ✅ AI_THRESHOLD per-symbol — یکسان با backtester.py
+    _default_ai_th = float(getattr(config, 'AI_THRESHOLD', 65.0))
+    ai_threshold    = get_ai_threshold(symbol, default=_default_ai_th)
+
     max_sl_pct    = float(getattr(config, 'MAX_SL_PERCENT',      0.05))
     max_open      = int(getattr(config,   'MAX_OPEN_POSITIONS',  999))
     w_ai  = float(getattr(config, 'WEIGHT_AI',  40))
@@ -147,7 +134,7 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
                 still_open.append(trade)
         open_trades = still_open
 
-        # ── فیلتر حجم per-candle (✅ FIX: اضافه شد) ─────────────────────────
+        # ── فیلتر حجم per-candle ────────────────────────────────────────────
         if not _passes_volume_filter(row, symbol):
             continue
 
@@ -160,7 +147,6 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
         trend_line   = float(row.get('feat_trend_line',    row.get('Trend_line', 0)))
         body_ratio   = float(row.get('feat_body_ratio',    row.get('Body_ratio', 0)))
 
-        # ✅ FIX: ATR مطلق — یکسان با backtester.py
         atr_val = _get_atr(row, close_price)
 
         adx_score = (min(100.0, 50.0 + (current_adx - adx_th) * 2.5)
@@ -174,14 +160,15 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
         ema_score = min(100.0, (dev_val / 5.0) * 100.0)
 
         # ── AI score ────────────────────────────────────────────────────────
-        ai_score    = 0.0
+        # ✅ یکسان با strategy.py/backtester.py: پیش‌فرض 50.0 وقتی مدل نداره
+        ai_score    = 50.0
         ai_approved = True
         w_ai_eff    = 0.0
 
-        model_active = brain.has_model(brain_symbol)  # ✅ FIX: brain_symbol
+        model_active = brain.has_model(brain_symbol)
         if model_active:
             try:
-                raw = brain.predict_probability(brain_symbol, {  # ✅ FIX
+                raw = brain.predict_probability(brain_symbol, {
                     'feat_adx':           current_adx,
                     'feat_atr_percent':   atr_pct,
                     'feat_rsi':           current_rsi,
@@ -189,11 +176,10 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
                     'feat_ema_deviation': dev_val,
                     'feat_rsi_momentum':  rsi_momentum,
                     'feat_body_ratio':    body_ratio,
-                    # ✅ FIX: feat_volume_ratio حذف شد (در AI_FEATURES نیست)
                 })
                 if raw is not None:
                     ai_score    = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
-                    ai_approved = ai_score >= ai_threshold  # ✅ FIX: اضافه شد
+                    ai_approved = ai_score >= ai_threshold
                     w_ai_eff    = w_ai
             except Exception:
                 ai_approved = False
@@ -206,11 +192,9 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
             ema_score * w_ema
         ) / w_sum_eff
 
-        # ✅ FIX: ai_approved هم چک می‌شود — یکسان با backtester
         if total_score < min_score or not ai_approved:
             continue
 
-        # ✅ FIX: MAX_OPEN_POSITIONS چک می‌شود — یکسان با backtester
         if len(open_trades) >= max_open:
             continue
 
