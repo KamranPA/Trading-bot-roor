@@ -62,34 +62,43 @@ jobs:
           print('✅ همه فایل‌ها آماده‌اند')
           "
 
-      - name: Patch backtester.py
+      - name: Show current backtester.py ai_score lines (BEFORE)
         run: |
-          python - << 'EOF'
-          with open('src/backtester.py', 'r', encoding='utf-8') as f:
-              content = f.read()
+          echo "=== خطوط ai_score در فایل فعلی ریپو ==="
+          grep -n "ai_score" src/backtester.py | head -20
+          echo "=== نسخه فایل (اولین کامنت) ==="
+          head -10 src/backtester.py
 
-          original = content
-
-          # پچ: هر نسخه‌ای از ai_score=0.0 رو به 50.0 تبدیل کن
+      - name: Patch backtester.py (robust)
+        run: |
+          python3 -c "
           import re
-          content = re.sub(
-              r'ai_score\s*=\s*0\.0(\s*#[^\n]*)?(\s*\n\s*ai_approved)',
-              'ai_score    = 50.0  # پیش‌فرض یکسان با strategy.py\\2',
-              content
-          )
-
-          if content != original:
-              with open('src/backtester.py', 'w', encoding='utf-8') as f:
+          path = 'src/backtester.py'
+          with open(path, 'r', encoding='utf-8') as f:
+              content = f.read()
+          original = content
+          patterns = [
+              (r'ai_score\s*=\s*0\.0', 'ai_score = 50.0'),
+          ]
+          changed = False
+          for pat, repl in patterns:
+              new_content, n = re.subn(pat, repl, content)
+              if n > 0:
+                  content = new_content
+                  changed = True
+                  print(f'✅ {n} مورد جایگزین شد با الگو: {pat}')
+          if changed:
+              with open(path, 'w', encoding='utf-8') as f:
                   f.write(content)
-              print('✅ پچ اعمال شد: ai_score=0.0 → 50.0')
+              print('✅ فایل ذخیره شد')
           else:
-              print('ℹ️  پچ نیازی نیست — قبلاً اعمال شده یا فرمت متفاوته')
+              print('⚠️ هیچ موردی پیدا نشد - فایل را بررسی کنید')
+          "
 
-          # تایید
-          for i, line in enumerate(content.split('\n'), 1):
-              if 'ai_score' in line and ('= 0' in line or '= 50' in line):
-                  print(f'  خط {i}: {line.strip()}')
-          EOF
+      - name: Show backtester.py ai_score lines (AFTER)
+        run: |
+          echo "=== خطوط ai_score بعد از پچ ==="
+          grep -n "ai_score" src/backtester.py | head -20
 
       - name: Verify Score Distribution
         run: |
