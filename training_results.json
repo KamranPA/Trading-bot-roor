@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-06-30T09:00:40.933354",
+  "timestamp": "2026-06-30T09:32:32.134250",
   "model_type": "LightGBM",
   "features": [
     "feat_adx",
@@ -12,11 +12,12 @@
     "feat_volume_ratio"
   ],
   "target": "SL/TP simulation (lookahead=20 candles)",
+  "ai_threshold_percentile": 60.0,
   "symbols": {
     "BTCUSDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/BTC_USDT_model.pkl",
-      "brain_key": "BTCUSDT",
+      "brain_key": "BTC/USDT",
       "train_score": 0.6541623843782117,
       "test_score": 0.6427104722792608,
       "samples": 2433,
@@ -34,12 +35,20 @@
           "feat_ema_deviation",
           "8"
         ]
-      ]
+      ],
+      "ai_threshold": 35.9,
+      "score_stats": {
+        "min": 32.86,
+        "p25": 35.11,
+        "median": 35.67,
+        "p75": 35.92,
+        "max": 37.31
+      }
     },
     "ETHUSDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/ETH_USDT_model.pkl",
-      "brain_key": "ETHUSDT",
+      "brain_key": "ETH/USDT",
       "train_score": 0.6708494208494209,
       "test_score": 0.6447876447876448,
       "samples": 2590,
@@ -57,12 +66,20 @@
           "feat_rsi",
           "31"
         ]
-      ]
+      ],
+      "ai_threshold": 36.15,
+      "score_stats": {
+        "min": 29.25,
+        "p25": 34.06,
+        "median": 35.64,
+        "p75": 37.14,
+        "max": 42.88
+      }
     },
     "SOLUSDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/SOL_USDT_model.pkl",
-      "brain_key": "SOLUSDT",
+      "brain_key": "SOL/USDT",
       "train_score": 0.6532905296950241,
       "test_score": 0.7029914529914529,
       "samples": 2337,
@@ -80,12 +97,20 @@
           "feat_rsi",
           "4"
         ]
-      ]
+      ],
+      "ai_threshold": 35.18,
+      "score_stats": {
+        "min": 34.09,
+        "p25": 34.53,
+        "median": 35.18,
+        "p75": 35.69,
+        "max": 36.48
+      }
     },
     "DOTUSDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/DOT_USDT_model.pkl",
-      "brain_key": "DOTUSDT",
+      "brain_key": "DOT/USDT",
       "train_score": 0.6026595744680852,
       "test_score": 0.6404255319148936,
       "samples": 2350,
@@ -103,12 +128,20 @@
           "feat_adx",
           "4"
         ]
-      ]
+      ],
+      "ai_threshold": 40.03,
+      "score_stats": {
+        "min": 38.95,
+        "p25": 39.7,
+        "median": 40.03,
+        "p75": 40.19,
+        "max": 41.43
+      }
     },
     "LINKUSDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/LINK_USDT_model.pkl",
-      "brain_key": "LINKUSDT",
+      "brain_key": "LINK/USDT",
       "train_score": 0.6101063829787234,
       "test_score": 0.6666666666666666,
       "samples": 2351,
@@ -126,12 +159,20 @@
           "feat_rsi",
           "4"
         ]
-      ]
+      ],
+      "ai_threshold": 39.31,
+      "score_stats": {
+        "min": 37.83,
+        "p25": 39.31,
+        "median": 39.31,
+        "p75": 39.59,
+        "max": 40.57
+      }
     },
     "AVAXUSDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/AVAX_USDT_model.pkl",
-      "brain_key": "AVAXUSDT",
+      "brain_key": "AVAX/USDT",
       "train_score": 0.6035031847133758,
       "test_score": 0.6758474576271186,
       "samples": 2356,
@@ -149,12 +190,20 @@
           "feat_body_ratio",
           "4"
         ]
-      ]
+      ],
+      "ai_threshold": 39.97,
+      "score_stats": {
+        "min": 38.47,
+        "p25": 39.68,
+        "median": 39.96,
+        "p75": 40.24,
+        "max": 41.21
+      }
     },
     "XRPUSDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/XRP_USDT_model.pkl",
-      "brain_key": "XRPUSDT",
+      "brain_key": "XRP/USDT",
       "train_score": 0.6230512249443207,
       "test_score": 0.6280623608017817,
       "samples": 2245,
@@ -172,12 +221,20 @@
           "feat_adx",
           "7"
         ]
-      ]
+      ],
+      "ai_threshold": 38.7,
+      "score_stats": {
+        "min": 36.06,
+        "p25": 37.92,
+        "median": 38.58,
+        "p75": 38.9,
+        "max": 40.62
+      }
     },
     "LTCUSDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/LTC_USDT_model.pkl",
-      "brain_key": "LTCUSDT",
+      "brain_key": "LTC/USDT",
       "train_score": 0.7017359284587059,
       "test_score": 0.6995798319327731,
       "samples": 2377,
@@ -195,12 +252,20 @@
           "feat_rsi",
           "4"
         ]
-      ]
+      ],
+      "ai_threshold": 30.44,
+      "score_stats": {
+        "min": 29.31,
+        "p25": 30.21,
+        "median": 30.33,
+        "p75": 30.51,
+        "max": 31.74
+      }
     },
     "BCHUSDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/BCH_USDT_model.pkl",
-      "brain_key": "BCHUSDT",
+      "brain_key": "BCH/USDT",
       "train_score": 0.6834451901565995,
       "test_score": 0.6674107142857143,
       "samples": 2236,
@@ -218,30 +283,46 @@
           "feat_atr_percent",
           "4"
         ]
-      ]
+      ],
+      "ai_threshold": 32.23,
+      "score_stats": {
+        "min": 30.71,
+        "p25": 31.9,
+        "median": 32.17,
+        "p75": 32.52,
+        "max": 33.53
+      }
     },
     "ATOMUSDT": {
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/ATOM_USDT_model.pkl",
-      "brain_key": "ATOMUSDT",
-      "train_score": 0.6172646905876235,
-      "test_score": 0.6091476091476091,
-      "samples": 2404,
-      "tp_percent": 38.4,
+      "brain_key": "ATOM/USDT",
+      "train_score": 0.6174636174636174,
+      "test_score": 0.6070686070686071,
+      "samples": 2405,
+      "tp_percent": 38.5,
       "top_features": [
         [
           "feat_adx",
-          "15"
-        ],
-        [
-          "feat_atr_percent",
-          "9"
+          "5"
         ],
         [
           "feat_rsi",
-          "7"
+          "4"
+        ],
+        [
+          "feat_body_ratio",
+          "3"
         ]
-      ]
+      ],
+      "ai_threshold": 38.7,
+      "score_stats": {
+        "min": 37.58,
+        "p25": 38.28,
+        "median": 38.7,
+        "p75": 38.7,
+        "max": 40.12
+      }
     }
   },
   "summary": {
