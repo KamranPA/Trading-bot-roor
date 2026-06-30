@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-06-30T06:15:07.856719",
+  "timestamp": "2026-06-30T08:49:57.436544",
   "model_type": "LightGBM",
   "features": [
     "feat_adx",
@@ -40,22 +40,22 @@
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/ETH_USDT_model.pkl",
       "brain_key": "ETHUSDT",
-      "train_score": 0.6706904876871077,
-      "test_score": 0.6467181467181468,
-      "samples": 2589,
+      "train_score": 0.6708494208494209,
+      "test_score": 0.6447876447876448,
+      "samples": 2590,
       "tp_percent": 33.4,
       "top_features": [
         [
           "feat_ema_deviation",
-          "29"
-        ],
-        [
-          "feat_adx",
-          "25"
+          "37"
         ],
         [
           "feat_atr_percent",
-          "23"
+          "31"
+        ],
+        [
+          "feat_rsi",
+          "31"
         ]
       ]
     },
@@ -63,14 +63,14 @@
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/SOL_USDT_model.pkl",
       "brain_key": "SOLUSDT",
-      "train_score": 0.6532905296950241,
+      "train_score": 0.6536402569593148,
       "test_score": 0.7029914529914529,
-      "samples": 2337,
-      "tp_percent": 33.7,
+      "samples": 2336,
+      "tp_percent": 33.6,
       "top_features": [
         [
           "feat_adx",
-          "7"
+          "6"
         ],
         [
           "feat_atr_percent",
@@ -178,21 +178,21 @@
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/LTC_USDT_model.pkl",
       "brain_key": "LTCUSDT",
-      "train_score": 0.7015789473684211,
+      "train_score": 0.7017359284587059,
       "test_score": 0.6995798319327731,
-      "samples": 2376,
+      "samples": 2377,
       "tp_percent": 29.9,
       "top_features": [
         [
-          "feat_volume_ratio",
-          "6"
+          "feat_adx",
+          "7"
         ],
         [
           "feat_atr_percent",
-          "5"
+          "6"
         ],
         [
-          "feat_adx",
+          "feat_rsi",
           "4"
         ]
       ]
@@ -201,9 +201,9 @@
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/BCH_USDT_model.pkl",
       "brain_key": "BCHUSDT",
-      "train_score": 0.6830631637786473,
-      "test_score": 0.6696428571428571,
-      "samples": 2237,
+      "train_score": 0.6834451901565995,
+      "test_score": 0.6674107142857143,
+      "samples": 2236,
       "tp_percent": 32.0,
       "top_features": [
         [
@@ -215,8 +215,8 @@
           "5"
         ],
         [
-          "feat_rsi_momentum",
-          "5"
+          "feat_atr_percent",
+          "4"
         ]
       ]
     },
