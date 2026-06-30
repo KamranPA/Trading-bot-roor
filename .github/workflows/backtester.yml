@@ -62,85 +62,6 @@ jobs:
           print('✅ همه فایل‌ها آماده‌اند')
           "
 
-      - name: Check AI Model Status
-        run: |
-          python check_model.py
-
-      - name: Show current backtester.py ai_score lines (BEFORE)
-        run: |
-          echo "=== خطوط ai_score در فایل فعلی ریپو ==="
-          grep -n "ai_score" src/backtester.py | head -20
-          echo "=== نسخه فایل (اولین کامنت) ==="
-          head -10 src/backtester.py
-
-      - name: Patch backtester.py (robust)
-        run: |
-          python3 -c "
-          import re
-          path = 'src/backtester.py'
-          with open(path, 'r', encoding='utf-8') as f:
-              content = f.read()
-          original = content
-          patterns = [
-              (r'ai_score\s*=\s*0\.0', 'ai_score = 50.0'),
-          ]
-          changed = False
-          for pat, repl in patterns:
-              new_content, n = re.subn(pat, repl, content)
-              if n > 0:
-                  content = new_content
-                  changed = True
-                  print(f'✅ {n} مورد جایگزین شد با الگو: {pat}')
-          if changed:
-              with open(path, 'w', encoding='utf-8') as f:
-                  f.write(content)
-              print('✅ فایل ذخیره شد')
-          else:
-              print('⚠️ هیچ موردی پیدا نشد - فایل را بررسی کنید')
-          "
-
-      - name: Show backtester.py ai_score lines (AFTER)
-        run: |
-          echo "=== خطوط ai_score بعد از پچ ==="
-          grep -n "ai_score" src/backtester.py | head -20
-
-      - name: Verify Score Distribution
-        run: |
-          python -c "
-          import sys
-          sys.path.insert(0, '.')
-          import pandas as pd, config
-          from src.indicators import TechnicalIndicators
-
-          print('MIN_REQUIRED_SCORE:', config.MIN_REQUIRED_SCORE)
-          print('ADX_THRESHOLD:', config.ADX_THRESHOLD)
-          print('VOLUME_MULTIPLIER:', config.VOLUME_MULTIPLIER)
-
-          df = pd.read_csv('data/4h/BTCUSDT_history.csv')
-          df_norm = df.rename(columns={c: c.lower() for c in df.columns})
-          df_full, _ = TechnicalIndicators.calculate_all_features(df_norm, 'BTCUSDT')
-
-          scores = []
-          for i in range(200, 300):
-              c  = df_full.iloc[i]
-              th = config.ADX_THRESHOLD
-              adx = float(c.get('feat_adx', 0))
-              rsi = float(c.get('feat_rsi', 50))
-              mom = float(c.get('feat_rsi_momentum', 0))
-              dev = abs(float(c.get('feat_ema_deviation', 0)))
-              adx_s = min(100, 50+(adx-th)*2.5) if adx>=th else max(0,(adx/(th+1e-10))*50)
-              rsi_s = min(100,max(0,50+mom*5)) if rsi>50 else min(100,max(0,50+(-mom)*5))
-              ema_s = min(100,(dev/5.0)*100)
-              total = (adx_s*20 + rsi_s*20 + ema_s*20) / 60
-              scores.append(total)
-
-          above = sum(1 for s in scores if s >= config.MIN_REQUIRED_SCORE)
-          print(f'بالای threshold ({config.MIN_REQUIRED_SCORE}): {above}/{len(scores)} کندل')
-          print(f'میانگین score: {sum(scores)/len(scores):.1f}')
-          print(f'حداکثر score: {max(scores):.1f}')
-          print(f'حداقل score: {min(scores):.1f}')
-          "
-
       - name: Execute Pipeline and Force Commit Results
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -158,6 +79,9 @@ jobs:
           python src/train_model.py
           echo "✅ train_model تمام شد"
 
+          echo "=== ai_thresholds.json (per-symbol calibration) ==="
+          cat ai_thresholds.json || echo "فایل ai_thresholds.json ساخته نشد!"
+
           echo "▶️ optimizer..."
           python src/optimizer.py
           echo "✅ optimizer تمام شد"
@@ -168,6 +92,7 @@ jobs:
           git add -f best_params.json            || true
           git add -f data/trading_bot_backtest.db || true
           git add -f training_results.json       || true
+          git add -f ai_thresholds.json          || true
           git add -f src/models/                 || true
           git add .
           git status
@@ -184,3 +109,4 @@ jobs:
             best_params.json
             training_results.json
             data/trading_bot_backtest.db
+            ai_thresholds.json
