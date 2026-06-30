@@ -1,11 +1,10 @@
 """
-FILE PATH: src/train_model.py (v11.0 - Aligned with live pipeline)
-تغییرات نسبت به v10.0:
-  ✅ target واقعی: شبیه‌سازی SL/TP روی داده تاریخی (نه کندل بعدی)
-  ✅ feat_volume_ratio به FEAT_COLUMNS اضافه شد (8 فیچر)
-  ✅ فیلتر حجم قبل از training اعمال می‌شود (یکسان با لایو)
-  ✅ نام مدل با BTC/USDT ذخیره می‌شود (سازگار با brain.py)
-  ✅ shuffle=False برای داده‌های زمانی (بدون data leakage)
+FILE PATH: src/train_model.py (v12.0 - Per-symbol AI_THRESHOLD calibration)
+تغییرات نسبت به v11.0:
+  ✅ بعد از training هر مدل، روی X_test احتمال پیش‌بینی می‌شود
+  ✅ AI_THRESHOLD پیشنهادی per-symbol از روی percentile توزیع امتیازها محاسبه می‌شود
+  ✅ ai_thresholds.json در ریشه پروژه ذخیره می‌شود (کلید: برند symbol مثل BTC/USDT)
+  ✅ AI_THRESHOLD_PERCENTILE از config قابل تنظیم (پیش‌فرض 60)
 """
 
 import pandas as pd
@@ -56,7 +55,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-# ─── فیچرها: ۸ فیچر (+ feat_volume_ratio نسبت به v10) ───────────────────────
+# ─── فیچرها: ۸ فیچر ───────────────────────────────────────────────────────────
 FEAT_COLUMNS = [
     'feat_adx',
     'feat_atr_percent',
@@ -65,39 +64,30 @@ FEAT_COLUMNS = [
     'feat_ema_deviation',
     'feat_rsi_momentum',
     'feat_body_ratio',
-    'feat_volume_ratio',   # ✅ اضافه شد
+    'feat_volume_ratio',
 ]
 
 MIN_TRAINING_SAMPLES = 50
+TARGET_LOOKAHEAD = 20
 
-# ─── پارامترهای target ───────────────────────────────────────────────────────
-# چند کندل به جلو برای بررسی رسیدن به SL یا TP
-TARGET_LOOKAHEAD = 20   # 20 کندل ۴ ساعته = ۸۰ ساعت
+# ✅ صدکی که برای AI_THRESHOLD پیشنهادی استفاده می‌شود.
+# مثال: 60 یعنی فقط 40% بهترین امتیازهای مدل از فیلتر عبور می‌کنند.
+AI_THRESHOLD_PERCENTILE = float(getattr(config, 'AI_THRESHOLD_PERCENTILE', 60))
+
+# حد پایین/بالای منطقی برای جلوگیری از threshold های افراطی
+AI_THRESHOLD_MIN = float(getattr(config, 'AI_THRESHOLD_MIN', 20.0))
+AI_THRESHOLD_MAX = float(getattr(config, 'AI_THRESHOLD_MAX', 80.0))
+
+AI_THRESHOLDS_FILE = os.path.join(BASE_DIR, 'ai_thresholds.json')
 
 
-# ─── تابع اصلی target ────────────────────────────────────────────────────────
+# ─── تابع target (بدون تغییر نسبت به v11.0) ──────────────────────────────────
 
 def _build_target(df: pd.DataFrame, symbol: str) -> pd.Series:
-    """
-    شبیه‌سازی واقعی SL/TP روی داده تاریخی.
-
-    برای هر کندل که شرط شکست (breakout) برقرار است:
-      - SL  = entry - 1.5 * ATR * SL_RATIO
-      - TP2 = entry + 1.5 * ATR * TP_RATIO   (برای LONG)
-
-    اگر در TARGET_LOOKAHEAD کندل بعدی:
-      - قیمت به TP2 رسید → label = 1  (موفق)
-      - قیمت به SL رسید  → label = 0  (ناموفق)
-      - هیچ‌کدام        → label = 0  (timeout — محافظه‌کارانه)
-
-    فقط کندل‌هایی که شرط breakout دارند label می‌گیرند؛
-    بقیه NaN هستند و در training استفاده نمی‌شوند.
-    """
     sl_ratio = float(getattr(config, 'SL_RATIO',  1.0))
     tp_ratio = float(getattr(config, 'TP_RATIO',  2.0))
     max_sl   = float(getattr(config, 'MAX_SL_PERCENT', 0.05))
 
-    # ستون‌های مورد نیاز
     close  = df['close'].values
     high   = df['high'].values
     low    = df['low'].values
@@ -117,22 +107,19 @@ def _build_target(df: pd.DataFrame, symbol: str) -> pd.Series:
         if sl_dist <= 0:
             continue
 
-        # تعیین جهت بر اساس RSI (ساده‌سازی — swing در runtime تعریف می‌شود)
-        # اگر RSI > 50 → LONG، RSI < 50 → SHORT
         cur_rsi = float(rsi[i])
 
-        if cur_rsi > 52:           # LONG
+        if cur_rsi > 52:
             sl_price  = entry - sl_dist
             tp_price  = entry + sl_dist * tp_ratio
             direction = 'LONG'
-        elif cur_rsi < 48:         # SHORT
+        elif cur_rsi < 48:
             sl_price  = entry + sl_dist
             tp_price  = entry - sl_dist * tp_ratio
             direction = 'SHORT'
         else:
-            continue               # ناحیه خنثی — label نمی‌دهیم
+            continue
 
-        # بررسی کندل‌های بعدی
         hit_tp = False
         hit_sl = False
 
@@ -145,7 +132,7 @@ def _build_target(df: pd.DataFrame, symbol: str) -> pd.Series:
                     hit_sl = True; break
                 if h >= tp_price:
                     hit_tp = True; break
-            else:  # SHORT
+            else:
                 if h >= sl_price:
                     hit_sl = True; break
                 if l <= tp_price:
@@ -156,56 +143,39 @@ def _build_target(df: pd.DataFrame, symbol: str) -> pd.Series:
     result = pd.Series(target, index=df.index, name='target')
     tp_count = int((result == 1).sum())
     sl_count = int((result == 0).sum())
-    logger.info(
-        f"  target: TP={tp_count} ({tp_count/(tp_count+sl_count)*100:.1f}%) "
-        f"SL/timeout={sl_count} ({sl_count/(tp_count+sl_count)*100:.1f}%) "
-        f"(از {n} کندل)"
-    )
+    if tp_count + sl_count > 0:
+        logger.info(
+            f"  target: TP={tp_count} ({tp_count/(tp_count+sl_count)*100:.1f}%) "
+            f"SL/timeout={sl_count} ({sl_count/(tp_count+sl_count)*100:.1f}%) "
+            f"(از {n} کندل)"
+        )
     return result
 
 
-# ─── فیلتر حجم (یکسان با strategy.py و backtester.py) ───────────────────────
-
-# فیلتر حجم از ماژول مشترک src/volume_filter.py
-
-
 def _apply_volume_filter(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
-    """
-    فیلتر حجم پویا — یکسان با strategy.py و backtester.py.
-    volume >= Volume_SMA_20 * VOLUME_MULTIPLIER (0.5)
-    """
     if apply_volume_filter_df is not None:
         return apply_volume_filter_df(df, symbol)
     return df
 
 
-# ─── نام امن مدل (سازگار با brain.py) ───────────────────────────────────────
-
 def _model_key(symbol: str) -> str:
     """
-    کلیدی که brain.py برای جستجو استفاده می‌کند.
-
-    brain.py:
-        symbol = filename.stem.replace('_model', '').replace('_', '/')
-    پس اگر WATCHLIST=['BTCUSDT']:
-        safe_name = 'BTCUSDT'
-        filename  = 'BTCUSDT_model.pkl'
-        brain key = 'BTCUSDT_model'.replace('_model','')='BTCUSDT'
-                    .replace('_','/')='BTCUSDT'  ← بدون اسلش
-    اما _to_brain_symbol('BTCUSDT') = 'BTC/USDT'
-    → brain با 'BTC/USDT' جستجو می‌کند اما مدل با 'BTCUSDT' ذخیره شده → پیدا نمی‌شود!
-
-    راه‌حل: مدل را با کلید 'BTC_USDT' ذخیره کنیم تا brain.py
-             آن را با 'BTC/USDT' پیدا کند:
-             'BTC_USDT_model.pkl' → stem='BTC_USDT_model'
-             → replace('_model','')='BTC_USDT'
-             → replace('_','/')='BTC/USDT' ✅
+    BTCUSDT → BTC/USDT → BTC_USDT  (نام فایل مدل، سازگار با brain.py)
     """
-    # BTCUSDT → BTC/USDT → BTC_USDT
     if '/' not in symbol and 'USDT' in symbol:
         base   = symbol.replace('USDT', '')
         symbol = f"{base}/USDT"
     return symbol.replace('/', '_')
+
+
+def _brain_symbol(symbol: str) -> str:
+    """
+    BTCUSDT → BTC/USDT  (کلیدی که brain.py و backtester.py برای جستجو استفاده می‌کنند)
+    """
+    if '/' not in symbol and 'USDT' in symbol:
+        base = symbol.replace('USDT', '')
+        return f"{base}/USDT"
+    return symbol
 
 
 # ─── ModelTrainer ─────────────────────────────────────────────────────────────
@@ -215,6 +185,8 @@ class ModelTrainer:
     def __init__(self, model_dir: str = "./models"):
         self.model_dir = Path(model_dir)
         self.model_dir.mkdir(parents=True, exist_ok=True)
+        # نگاشت brain_symbol → ai_threshold پیشنهادی
+        self.ai_thresholds: Dict[str, Dict] = {}
 
     def train_multiple_symbols(
         self,
@@ -226,18 +198,20 @@ class ModelTrainer:
             'model_type': 'LightGBM',
             'features':   FEAT_COLUMNS,
             'target':     f'SL/TP simulation (lookahead={TARGET_LOOKAHEAD} candles)',
+            'ai_threshold_percentile': AI_THRESHOLD_PERCENTILE,
             'symbols':    {},
             'summary':    {'total': len(data_dict), 'successful': 0, 'failed': 0}
         }
 
         logger.info(f"شروع training برای {len(data_dict)} symbol")
         logger.info(f"فیچرها ({len(FEAT_COLUMNS)}): {FEAT_COLUMNS}")
+        logger.info(f"AI_THRESHOLD percentile: {AI_THRESHOLD_PERCENTILE}")
         logger.info("=" * 65)
 
         for symbol, df in data_dict.items():
             logger.info(f"\nپردازش: {symbol}")
 
-            # ── ۱. محاسبه اندیکاتورها ────────────────────────────────────────
+            # ── ۱. اندیکاتورها ────────────────────────────────────────────
             if HAS_INDICATORS:
                 df_feat, meta = TechnicalIndicators.calculate_all_features(
                     df, symbol=symbol, min_rows_required=100
@@ -250,13 +224,13 @@ class ModelTrainer:
             else:
                 df_feat = df.copy()
 
-            # ── ۲. فیلتر حجم (یکسان با لایو) ────────────────────────────────
+            # ── ۲. فیلتر حجم ─────────────────────────────────────────────
             df_feat = _apply_volume_filter(df_feat, symbol)
 
-            # ── ۳. ساختن target واقعی (SL/TP simulation) ────────────────────
+            # ── ۳. target ────────────────────────────────────────────────
             df_feat['target'] = _build_target(df_feat, symbol)
 
-            # ── ۴. بررسی فیچرها ──────────────────────────────────────────────
+            # ── ۴. بررسی فیچرها ──────────────────────────────────────────
             missing = [f for f in FEAT_COLUMNS if f not in df_feat.columns]
             if missing:
                 logger.error(f"  فیچرهای گمشده: {missing}")
@@ -264,12 +238,10 @@ class ModelTrainer:
                 results['summary']['failed'] += 1
                 continue
 
-            # ── ۵. آماده‌سازی X, y ───────────────────────────────────────────
             try:
                 X = df_feat[FEAT_COLUMNS].copy()
                 y = df_feat['target'].copy()
 
-                # حذف ردیف‌های NaN (کندل‌های بدون label)
                 valid = X.notna().all(axis=1) & y.notna()
                 X, y  = X[valid], y[valid]
 
@@ -279,12 +251,9 @@ class ModelTrainer:
                     results['summary']['failed'] += 1
                     continue
 
-                # توزیع کلاس‌ها
                 tp_pct = float((y == 1).mean() * 100)
                 logger.info(f"  {len(X)} نمونه | TP={tp_pct:.1f}% | SL={100-tp_pct:.1f}%")
 
-                # ── ۶. تقسیم زمانی (بدون shuffle) ───────────────────────────
-                # ✅ FIX: shuffle=False — داده زمانی باید ترتیب حفظ شود
                 split  = int(len(X) * 0.8)
                 X_train, X_test = X.iloc[:split], X.iloc[split:]
                 y_train, y_test = y.iloc[:split], y.iloc[split:]
@@ -297,8 +266,6 @@ class ModelTrainer:
                     results['summary']['failed'] += 1
                     continue
 
-                # ── ۷. آموزش مدل ─────────────────────────────────────────────
-                # scale_pos_weight برای جبران عدم تعادل کلاس‌ها
                 n_neg = int((y_train == 0).sum())
                 n_pos = int((y_train == 1).sum())
                 scale = n_neg / max(n_pos, 1)
@@ -309,7 +276,7 @@ class ModelTrainer:
                     learning_rate=0.03,
                     num_leaves=31,
                     min_child_samples=20,
-                    scale_pos_weight=scale,   # جبران عدم تعادل TP/SL
+                    scale_pos_weight=scale,
                     random_state=42,
                     n_jobs=-1,
                     verbose=-1,
@@ -328,30 +295,68 @@ class ModelTrainer:
                 test_score  = float(model.score(X_test,  y_test))
                 logger.info(f"  Train accuracy={train_score:.4f} | Test accuracy={test_score:.4f}")
 
-                # feature importance
                 importances = dict(zip(FEAT_COLUMNS, model.feature_importances_))
                 top = sorted(importances.items(), key=lambda x: -x[1])[:3]
                 logger.info(f"  Top features: {[(k, int(v)) for k,v in top]}")
 
-                # ── ۸. ذخیره مدل با نام سازگار با brain.py ──────────────────
-                # ✅ FIX: BTC_USDT_model.pkl → brain.py آن را با کلید 'BTC/USDT' پیدا می‌کند
+                # ── ✅ کالیبراسیون AI_THRESHOLD per-symbol ─────────────────
+                # روی X_test (داده‌ای که مدل آن را در training ندیده) احتمال می‌گیریم
+                # و یک صدک از توزیع را به‌عنوان threshold پیشنهادی انتخاب می‌کنیم.
+                proba_test = model.predict_proba(X_test)[:, 1] * 100.0  # 0..100
+
+                if len(proba_test) > 0:
+                    suggested_threshold = float(np.percentile(proba_test, AI_THRESHOLD_PERCENTILE))
+                    suggested_threshold = max(AI_THRESHOLD_MIN, min(AI_THRESHOLD_MAX, suggested_threshold))
+                else:
+                    suggested_threshold = float(getattr(config, 'AI_THRESHOLD', 65.0))
+
+                score_stats = {
+                    'min':    round(float(np.min(proba_test)), 2) if len(proba_test) else None,
+                    'p25':    round(float(np.percentile(proba_test, 25)), 2) if len(proba_test) else None,
+                    'median': round(float(np.median(proba_test)), 2) if len(proba_test) else None,
+                    'p75':    round(float(np.percentile(proba_test, 75)), 2) if len(proba_test) else None,
+                    'max':    round(float(np.max(proba_test)), 2) if len(proba_test) else None,
+                }
+
+                logger.info(
+                    f"  📊 توزیع امتیاز AI روی test: "
+                    f"min={score_stats['min']} p25={score_stats['p25']} "
+                    f"median={score_stats['median']} p75={score_stats['p75']} max={score_stats['max']}"
+                )
+                logger.info(
+                    f"  🎯 AI_THRESHOLD پیشنهادی (صدک {AI_THRESHOLD_PERCENTILE}): "
+                    f"{suggested_threshold:.2f}"
+                )
+
+                brain_sym = _brain_symbol(symbol)
+                self.ai_thresholds[brain_sym] = {
+                    'threshold':   round(suggested_threshold, 2),
+                    'percentile':  AI_THRESHOLD_PERCENTILE,
+                    'score_stats': score_stats,
+                    'test_samples': len(proba_test),
+                    'updated_at':  datetime.now().isoformat(),
+                }
+
+                # ── ذخیره مدل ────────────────────────────────────────────
                 safe_name  = _model_key(symbol)
                 model_path = self.model_dir / f"{safe_name}_model.pkl"
 
                 with open(model_path, 'wb') as f:
                     pickle.dump(model, f)
 
-                logger.info(f"  ✅ ذخیره شد: {model_path}  (brain key: '{symbol}')")
+                logger.info(f"  ✅ ذخیره شد: {model_path}  (brain key: '{brain_sym}')")
 
                 results['symbols'][symbol] = {
-                    'status':      'SUCCESS',
-                    'model_path':  str(model_path),
-                    'brain_key':   symbol,
-                    'train_score': train_score,
-                    'test_score':  test_score,
-                    'samples':     len(X),
-                    'tp_percent':  round(tp_pct, 1),
-                    'top_features': top,
+                    'status':           'SUCCESS',
+                    'model_path':       str(model_path),
+                    'brain_key':        brain_sym,
+                    'train_score':      train_score,
+                    'test_score':       test_score,
+                    'samples':          len(X),
+                    'tp_percent':       round(tp_pct, 1),
+                    'top_features':     top,
+                    'ai_threshold':     round(suggested_threshold, 2),
+                    'score_stats':      score_stats,
                 }
                 results['summary']['successful'] += 1
 
@@ -372,6 +377,34 @@ class ModelTrainer:
             json.dump(results, f, ensure_ascii=False, indent=2, default=str)
         logger.info(f"نتایج ذخیره شد: {path}")
 
+    def save_ai_thresholds(self, path: str = None):
+        """
+        ذخیره ai_thresholds.json — کلید: برند symbol (مثل 'BTC/USDT')
+        این فایل توسط backtester.py / optimizer.py / strategy.py (لایو) خوانده می‌شود
+        تا به‌جای config.AI_THRESHOLD ثابت، از مقدار per-symbol استفاده شود.
+        """
+        if path is None:
+            path = AI_THRESHOLDS_FILE
+
+        existing = {}
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    existing = json.load(f)
+            except Exception:
+                existing = {}
+
+        existing.update(self.ai_thresholds)
+        existing['_updated_at'] = datetime.now().isoformat()
+        existing['_percentile'] = AI_THRESHOLD_PERCENTILE
+
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(existing, f, ensure_ascii=False, indent=2, default=str)
+
+        logger.info(f"✅ ai_thresholds.json ذخیره شد: {path}")
+        for sym, info in self.ai_thresholds.items():
+            logger.info(f"   {sym}: threshold={info['threshold']}")
+
 
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
 
@@ -381,7 +414,7 @@ if __name__ == "__main__":
     parser.add_argument('--monthly', action='store_true')
     args = parser.parse_args()
 
-    logger.info("شروع pipeline آموزش LightGBM v11.0")
+    logger.info("شروع pipeline آموزش LightGBM v12.0 (با کالیبراسیون per-symbol)")
     logger.info(f"فیچرها: {FEAT_COLUMNS}")
 
     data_dir = os.path.join(BASE_DIR, "data", "4h")
@@ -398,7 +431,6 @@ if __name__ == "__main__":
         try:
             df = pd.read_csv(filepath)
 
-            # نرمال‌سازی نام ستون‌ها
             col_map = {
                 'Timestamp': 'timestamp', 'Open':  'open',
                 'High':      'high',      'Low':   'low',
@@ -424,6 +456,7 @@ if __name__ == "__main__":
     results   = trainer.train_multiple_symbols(data_dict)
 
     trainer.save_results(results, os.path.join(BASE_DIR, "training_results.json"))
+    trainer.save_ai_thresholds()   # ✅ ذخیره ai_thresholds.json
 
     if results['summary']['successful'] == 0:
         logger.error("هیچ مدلی ذخیره نشد!")
