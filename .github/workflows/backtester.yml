@@ -62,6 +62,10 @@ jobs:
           print('✅ همه فایل‌ها آماده‌اند')
           "
 
+      - name: Check AI Model Status
+        run: |
+          python check_model.py
+
       - name: Show current backtester.py ai_score lines (BEFORE)
         run: |
           echo "=== خطوط ai_score در فایل فعلی ریپو ==="
