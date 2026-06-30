@@ -10,7 +10,7 @@
       "max": 37.31
     },
     "test_samples": 487,
-    "updated_at": "2026-06-30T09:32:32.192973"
+    "updated_at": "2026-06-30T10:13:58.992350"
   },
   "ETH/USDT": {
     "threshold": 36.15,
@@ -23,7 +23,7 @@
       "max": 42.88
     },
     "test_samples": 518,
-    "updated_at": "2026-06-30T09:32:32.254018"
+    "updated_at": "2026-06-30T10:13:59.054964"
   },
   "SOL/USDT": {
     "threshold": 35.18,
@@ -36,7 +36,7 @@
       "max": 36.48
     },
     "test_samples": 468,
-    "updated_at": "2026-06-30T09:32:32.311863"
+    "updated_at": "2026-06-30T10:13:59.114451"
   },
   "DOT/USDT": {
     "threshold": 40.03,
@@ -49,7 +49,7 @@
       "max": 41.43
     },
     "test_samples": 470,
-    "updated_at": "2026-06-30T09:32:32.364983"
+    "updated_at": "2026-06-30T10:13:59.169320"
   },
   "LINK/USDT": {
     "threshold": 39.31,
@@ -62,7 +62,7 @@
       "max": 40.57
     },
     "test_samples": 471,
-    "updated_at": "2026-06-30T09:32:32.419326"
+    "updated_at": "2026-06-30T10:13:59.228160"
   },
   "AVAX/USDT": {
     "threshold": 39.97,
@@ -75,7 +75,7 @@
       "max": 41.21
     },
     "test_samples": 472,
-    "updated_at": "2026-06-30T09:32:32.471463"
+    "updated_at": "2026-06-30T10:13:59.282552"
   },
   "XRP/USDT": {
     "threshold": 38.7,
@@ -88,7 +88,7 @@
       "max": 40.62
     },
     "test_samples": 449,
-    "updated_at": "2026-06-30T09:32:32.524323"
+    "updated_at": "2026-06-30T10:13:59.337133"
   },
   "LTC/USDT": {
     "threshold": 30.44,
@@ -101,7 +101,7 @@
       "max": 31.74
     },
     "test_samples": 476,
-    "updated_at": "2026-06-30T09:32:32.581186"
+    "updated_at": "2026-06-30T10:13:59.396778"
   },
   "BCH/USDT": {
     "threshold": 32.23,
@@ -114,7 +114,7 @@
       "max": 33.53
     },
     "test_samples": 448,
-    "updated_at": "2026-06-30T09:32:32.638432"
+    "updated_at": "2026-06-30T10:13:59.455712"
   },
   "ATOM/USDT": {
     "threshold": 38.7,
@@ -127,8 +127,8 @@
       "max": 40.12
     },
     "test_samples": 481,
-    "updated_at": "2026-06-30T09:32:32.690042"
+    "updated_at": "2026-06-30T10:13:59.510692"
   },
-  "_updated_at": "2026-06-30T09:32:32.692211",
+  "_updated_at": "2026-06-30T10:13:59.513117",
   "_percentile": 60.0
 }
