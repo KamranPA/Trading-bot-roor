@@ -1,44 +1,44 @@
 {
     "BTCUSDT": {
         "ADX_THRESHOLD": 15,
-        "SWING_WINDOW": 3,
-        "TP_RATIO": 1.5,
+        "SWING_WINDOW": 7,
+        "TP_RATIO": 2.5,
         "SL_RATIO": 1.0
     },
     "ETHUSDT": {
         "ADX_THRESHOLD": 15,
-        "SWING_WINDOW": 3,
-        "TP_RATIO": 1.5,
+        "SWING_WINDOW": 7,
+        "TP_RATIO": 2.0,
         "SL_RATIO": 1.0
     },
     "SOLUSDT": {
         "ADX_THRESHOLD": 15,
-        "SWING_WINDOW": 3,
+        "SWING_WINDOW": 7,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "DOTUSDT": {
-        "ADX_THRESHOLD": 15,
-        "SWING_WINDOW": 3,
-        "TP_RATIO": 1.5,
+        "ADX_THRESHOLD": 20,
+        "SWING_WINDOW": 5,
+        "TP_RATIO": 2.0,
         "SL_RATIO": 1.0
     },
     "LINKUSDT": {
-        "ADX_THRESHOLD": 15,
+        "ADX_THRESHOLD": 25,
         "SWING_WINDOW": 3,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "AVAXUSDT": {
-        "ADX_THRESHOLD": 15,
-        "SWING_WINDOW": 3,
+        "ADX_THRESHOLD": 25,
+        "SWING_WINDOW": 7,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "XRPUSDT": {
         "ADX_THRESHOLD": 15,
         "SWING_WINDOW": 3,
-        "TP_RATIO": 1.5,
+        "TP_RATIO": 2.5,
         "SL_RATIO": 1.0
     },
     "LTCUSDT": {
@@ -54,10 +54,10 @@
         "SL_RATIO": 1.0
     },
     "ATOMUSDT": {
-        "ADX_THRESHOLD": 15,
-        "SWING_WINDOW": 3,
-        "TP_RATIO": 1.5,
+        "ADX_THRESHOLD": 20,
+        "SWING_WINDOW": 5,
+        "TP_RATIO": 2.0,
         "SL_RATIO": 1.0
     },
-    "_updated_at": "2026-06-30T08:55:58.900593"
+    "_updated_at": "2026-06-30T09:09:10.566849"
 }

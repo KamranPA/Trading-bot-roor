@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-06-30T08:49:57.436544",
+  "timestamp": "2026-06-30T09:00:40.933354",
   "model_type": "LightGBM",
   "features": [
     "feat_adx",
@@ -63,14 +63,14 @@
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/SOL_USDT_model.pkl",
       "brain_key": "SOLUSDT",
-      "train_score": 0.6536402569593148,
+      "train_score": 0.6532905296950241,
       "test_score": 0.7029914529914529,
-      "samples": 2336,
-      "tp_percent": 33.6,
+      "samples": 2337,
+      "tp_percent": 33.7,
       "top_features": [
         [
           "feat_adx",
-          "6"
+          "7"
         ],
         [
           "feat_atr_percent",
@@ -133,8 +133,8 @@
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/AVAX_USDT_model.pkl",
       "brain_key": "AVAXUSDT",
       "train_score": 0.6035031847133758,
-      "test_score": 0.6751592356687898,
-      "samples": 2355,
+      "test_score": 0.6758474576271186,
+      "samples": 2356,
       "tp_percent": 38.2,
       "top_features": [
         [
