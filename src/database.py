@@ -1,10 +1,9 @@
 # ---------------------------------------------------------------------------
-# FILE PATH: src/database.py  (v3.1 - SSL Fix for Supabase)
-# تغییرات نسبت به v3.0:
-#   - اضافه شدن sslmode=require به اتصال psycopg2
-#     (Supabase از GitHub Actions بدون SSL رد می‌کند)
-#   - اگر DATABASE_URL قبلاً sslmode دارد: تغییر نمی‌دهیم
-#   - اگر ندارد: ?sslmode=require اضافه می‌شود
+# FILE PATH: src/database.py  (v3.2 - bot_meta table + get_meta/set_meta)
+# تغییرات نسبت به v3.1:
+#   ✅ جدول bot_meta اضافه شد (key/value برای ذخیره metadata ربات)
+#   ✅ get_meta() / set_meta() اضافه شدند
+#   ✅ برای ذخیره last_optimization_milestone بین اجراهای GitHub Actions cron
 # ---------------------------------------------------------------------------
 import os
 import logging
@@ -25,7 +24,6 @@ def _get_database_url() -> str:
     url = os.environ.get("DATABASE_URL")
     if not url:
         raise EnvironmentError("متغیر محیطی DATABASE_URL تنظیم نشده است.")
-    # Supabase از GitHub Actions نیاز به SSL دارد
     if "sslmode" not in url:
         url = url + ("&" if "?" in url else "?") + "sslmode=require"
     return url
@@ -110,6 +108,13 @@ CREATE TABLE IF NOT EXISTS scan_log (
 
 CREATE INDEX IF NOT EXISTS idx_scan_log_pair ON scan_log (pair);
 CREATE INDEX IF NOT EXISTS idx_scan_log_at   ON scan_log (scanned_at DESC);
+
+-- ✅ جدول metadata ربات (key/value) — برای ذخیره milestone و تنظیمات بین اجراها
+CREATE TABLE IF NOT EXISTS bot_meta (
+    key         VARCHAR(100) PRIMARY KEY,
+    value       TEXT         NOT NULL,
+    updated_at  TIMESTAMPTZ  DEFAULT NOW()
+);
 """
 
 _MIGRATION_SQL = """
@@ -148,6 +153,49 @@ def init_db() -> None:
 
 
 # ---------------------------------------------------------------------------
+# bot_meta — ذخیره و خواندن metadata ربات بین اجراها
+# ---------------------------------------------------------------------------
+
+def get_meta(key: str) -> str | None:
+    """
+    خواندن یک مقدار از جدول bot_meta.
+    برمی‌گرداند: مقدار (str) یا None اگر وجود نداشته باشد.
+    """
+    try:
+        with _db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM bot_meta WHERE key = %s", (key,))
+                row = cur.fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        logger.error("get_meta خطا key=%s: %s", key, e)
+        return None
+
+
+def set_meta(key: str, value: str) -> bool:
+    """
+    ذخیره یا آپدیت یک مقدار در جدول bot_meta (UPSERT).
+    برمی‌گرداند: True اگر موفق، False اگر خطا.
+    """
+    sql = """
+        INSERT INTO bot_meta (key, value, updated_at)
+        VALUES (%s, %s, NOW())
+        ON CONFLICT (key) DO UPDATE
+            SET value = EXCLUDED.value,
+                updated_at = NOW()
+    """
+    try:
+        with _db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (key, value))
+        logger.debug("set_meta: key=%s value=%s", key, value)
+        return True
+    except Exception as e:
+        logger.error("set_meta خطا key=%s: %s", key, e)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # ذخیره سیگنال
 # ---------------------------------------------------------------------------
 
@@ -165,7 +213,6 @@ def save_signal_advanced(pair: str, **kwargs) -> int | None:
         logger.warning("direction نامعتبر '%s' برای %s — ذخیره لغو شد", direction, pair)
         return None
 
-    # یکسان سازی نام کلیدها برای اطمینان از ذخیره قیمت‌ها
     mapped_kwargs = kwargs.copy()
     if 'entry' in mapped_kwargs and 'entry_price' not in mapped_kwargs:
         mapped_kwargs['entry_price'] = mapped_kwargs.pop('entry')
