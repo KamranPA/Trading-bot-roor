@@ -1,8 +1,8 @@
 {
     "BTCUSDT": {
         "ADX_THRESHOLD": 15,
-        "SWING_WINDOW": 7,
-        "TP_RATIO": 2.5,
+        "SWING_WINDOW": 3,
+        "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "ETHUSDT": {
@@ -18,9 +18,9 @@
         "SL_RATIO": 1.0
     },
     "DOTUSDT": {
-        "ADX_THRESHOLD": 25,
+        "ADX_THRESHOLD": 15,
         "SWING_WINDOW": 3,
-        "TP_RATIO": 1.5,
+        "TP_RATIO": 2.0,
         "SL_RATIO": 1.0
     },
     "LINKUSDT": {
@@ -30,34 +30,34 @@
         "SL_RATIO": 1.0
     },
     "AVAXUSDT": {
-        "ADX_THRESHOLD": 25,
+        "ADX_THRESHOLD": 15,
         "SWING_WINDOW": 7,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "XRPUSDT": {
-        "ADX_THRESHOLD": 15,
+        "ADX_THRESHOLD": 20,
         "SWING_WINDOW": 3,
         "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "LTCUSDT": {
         "ADX_THRESHOLD": 25,
-        "SWING_WINDOW": 5,
-        "TP_RATIO": 2.5,
+        "SWING_WINDOW": 3,
+        "TP_RATIO": 1.5,
         "SL_RATIO": 1.0
     },
     "BCHUSDT": {
-        "ADX_THRESHOLD": 15,
-        "SWING_WINDOW": 3,
-        "TP_RATIO": 2.5,
+        "ADX_THRESHOLD": 25,
+        "SWING_WINDOW": 7,
+        "TP_RATIO": 2.0,
         "SL_RATIO": 1.0
     },
     "ATOMUSDT": {
-        "ADX_THRESHOLD": 15,
+        "ADX_THRESHOLD": 20,
         "SWING_WINDOW": 5,
         "TP_RATIO": 2.0,
         "SL_RATIO": 1.0
     },
-    "_updated_at": "2026-07-01T04:20:00.489041"
+    "_updated_at": "2026-07-01T09:51:13.026501"
 }
