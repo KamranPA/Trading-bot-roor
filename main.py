@@ -1,8 +1,10 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (v2.2 - Fixed score columns saved to DB)
-# تغییرات نسبت به v2.1:
-#   - score ها (total_score, ai_score, ...) دیگر از signal حذف نمی‌شوند
-#   - در نتیجه در دیتابیس ذخیره می‌شوند
+# FILE PATH: main.py (v2.3 - Auto train_model + ai_threshold sync)
+# تغییرات نسبت به v2.2:
+#   ✅ run_auto_optimization: train_model هم اجرا می‌شود (نه فقط optimizer)
+#   ✅ ai_thresholds.json در لایو هم آپدیت می‌شود
+#   ✅ check_exits: هم 'Close' و هم 'close' پشتیبانی می‌شود
+#   ✅ get_symbol_params: از ai_thresholds.json هم لود می‌کند (برای لاگ)
 # ---------------------------------------------------------
 import os
 import sys
@@ -20,6 +22,7 @@ try:
     import config
     from src import database, coinex_client, strategy, telegram_bot, indicators, optimizer
     from src.brain import TradingBrain
+    from src.ai_threshold import get_ai_threshold, get_threshold_info
 except ImportError as e:
     print(f"CRITICAL IMPORT ERROR: {e}")
     sys.exit(1)
@@ -54,7 +57,15 @@ def get_symbol_params(symbol: str) -> dict:
         with open(params_file, 'r') as f:
             all_params = json.load(f)
         if symbol in all_params:
-            return {**default_params, **all_params[symbol]}
+            merged = {**default_params, **all_params[symbol]}
+            # لاگ AI_THRESHOLD کالیبره‌شده برای این symbol
+            info = get_threshold_info(symbol)
+            if info:
+                logger.debug(
+                    f"{symbol}: AI_THRESHOLD کالیبره‌شده = {info['threshold']} "
+                    f"(percentile={info['percentile']})"
+                )
+            return merged
     except Exception as e:
         logger.error("خطا در خواندن best_params.json برای %s: %s", symbol, e)
     return default_params
@@ -105,9 +116,17 @@ def check_exits():
                 logger.warning(f"دریافت قیمت برای {symbol} ناموفق بود")
                 continue
 
-            current_price = float(df.iloc[-1]['Close'])
-            close_price   = None
-            reason        = None
+            # ✅ FIX: پشتیبانی از هر دو 'Close' و 'close'
+            last_row = df.iloc[-1]
+            current_price = float(
+                last_row.get('Close', last_row.get('close', 0))
+            )
+            if current_price == 0:
+                logger.warning(f"قیمت فعلی {symbol} صفر است - SKIP")
+                continue
+
+            close_price = None
+            reason      = None
 
             if direction == "LONG":
                 if current_price <= sl:
@@ -189,7 +208,6 @@ def process_pair(pair: str, open_positions_count: int):
 
         with db_lock:
             if res.get('direction') is not None:
-                # FIX: فقط pair و symbol حذف می‌شوند — score ها حفظ می‌شوند
                 signal = {
                     k: v for k, v in res.items()
                     if k not in ('pair', 'symbol')
@@ -225,13 +243,75 @@ def process_pair(pair: str, open_positions_count: int):
 # ---------------------------------------------------------------------------
 
 def run_auto_optimization():
+    """
+    خودارتقایی خودکار — هر 50 معامله بسته‌شده یک‌بار اجرا می‌شود.
+
+    ترتیب اجرا (یکسان با workflow GitHub Actions):
+      1. optimizer  → best_params.json
+      2. train_model → مدل‌ها + ai_thresholds.json
+      3. reload BRAIN تا از مدل‌های جدید استفاده شود
+    """
     try:
         total_closed = database.get_total_closed_positions_count()
-        if total_closed > 0 and total_closed % 50 == 0:
-            logger.info(f"اجرای خودارتقایی (معاملات بسته: {total_closed})...")
+        if total_closed <= 0 or total_closed % 50 != 0:
+            return
+
+        logger.info(f"🔄 شروع خودارتقایی (معاملات بسته: {total_closed})...")
+
+        # ── مرحله ۱: optimizer ────────────────────────────────────────────
+        logger.info("🔧 مرحله ۱: بهینه‌سازی پارامترهای استراتژی...")
+        try:
             optimizer.optimize_all(mode="live")
+            logger.info("✅ optimizer تمام شد → best_params.json آپدیت شد")
+        except Exception as e:
+            logger.error(f"❌ خطا در optimizer: {e}", exc_info=True)
+            # ادامه می‌دهیم — train_model می‌تواند با best_params قدیمی هم کار کند
+
+        # ── مرحله ۲: train_model ──────────────────────────────────────────
+        logger.info("🧠 مرحله ۲: بازآموزی مدل AI + کالیبراسیون AI_THRESHOLD...")
+        try:
+            import subprocess
+            result = subprocess.run(
+                [sys.executable, os.path.join(BASE_DIR, 'src', 'train_model.py')],
+                capture_output=True, text=True, timeout=600
+            )
+            if result.returncode == 0:
+                logger.info("✅ train_model تمام شد → مدل‌ها + ai_thresholds.json آپدیت شد")
+            else:
+                logger.error(f"❌ train_model خطا داشت:\n{result.stderr[-500:]}")
+        except subprocess.TimeoutExpired:
+            logger.error("❌ train_model timeout (بیش از 10 دقیقه)")
+        except Exception as e:
+            logger.error(f"❌ خطا در اجرای train_model: {e}", exc_info=True)
+
+        # ── مرحله ۳: reload BRAIN ─────────────────────────────────────────
+        # ai_threshold cache رو پاک می‌کنیم تا فایل جدید خونده بشه
+        try:
+            import src.ai_threshold as _at_module
+            _at_module._cache = None
+            _at_module._cache_mtime = None
+            logger.info("✅ ai_threshold cache پاک شد — threshold های جدید لود می‌شوند")
+        except Exception as e:
+            logger.warning(f"⚠️ پاک‌کردن ai_threshold cache ناموفق: {e}")
+
+        # reload مدل‌ها در BRAIN
+        try:
+            models_dir = os.path.join(BASE_DIR, "src", "models")
+            if hasattr(BRAIN, 'load_models'):
+                BRAIN.load_models(models_dir)
+                logger.info("✅ مدل‌های جدید در BRAIN لود شدند")
+            elif hasattr(BRAIN, '_load_models'):
+                BRAIN._load_models()
+                logger.info("✅ مدل‌های جدید در BRAIN لود شدند")
+            else:
+                logger.warning("⚠️ متد reload در BRAIN پیدا نشد — ربات باید ریستارت شود")
+        except Exception as e:
+            logger.error(f"❌ خطا در reload BRAIN: {e}")
+
+        logger.info(f"✅ خودارتقایی کامل شد (معاملات بسته: {total_closed})")
+
     except Exception as e:
-        logger.error(f"خطا در خودارتقایی: {e}")
+        logger.error(f"خطا در run_auto_optimization: {e}", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
