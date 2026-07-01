@@ -12,6 +12,7 @@ import logging
 import threading
 import datetime
 import json
+import glob
 from concurrent.futures import ThreadPoolExecutor
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -249,12 +250,32 @@ def run_auto_optimization():
     ترتیب اجرا (یکسان با workflow GitHub Actions):
       1. optimizer  → best_params.json
       2. train_model → مدل‌ها + ai_thresholds.json
-      3. reload BRAIN تا از مدل‌های جدید استفاده شود
+
+    نکته: چون ربات با cron اجرا می‌شه، از یه فایل lock استفاده می‌کنیم
+    تا در یه milestone (مثلاً 100 معامله) فقط یه‌بار اجرا بشه، نه هر ۳۰ دقیقه.
     """
     try:
         total_closed = database.get_total_closed_positions_count()
         if total_closed <= 0 or total_closed % 50 != 0:
             return
+
+        # ── جلوگیری از اجرای مکرر برای همون milestone ──────────────────
+        lock_file = os.path.join(BASE_DIR, f'.optimization_lock_{total_closed}')
+        if os.path.exists(lock_file):
+            logger.info(f"⏭️ خودارتقایی برای milestone {total_closed} قبلاً انجام شده — skip")
+            return
+        # قبل از شروع lock ایجاد کن
+        try:
+            with open(lock_file, 'w') as f:
+                f.write(datetime.datetime.utcnow().isoformat())
+            # lock های قدیمی رو پاک کن (فقط آخرین milestone رو نگه دار)
+            old_locks = glob.glob(os.path.join(BASE_DIR, '.optimization_lock_*'))
+            for lf in old_locks:
+                if lf != lock_file:
+                    try: os.remove(lf)
+                    except: pass
+        except Exception as e:
+            logger.warning(f"⚠️ خطا در ساخت lock file: {e}")
 
         logger.info(f"🔄 شروع خودارتقایی (معاملات بسته: {total_closed})...")
 
@@ -284,30 +305,11 @@ def run_auto_optimization():
         except Exception as e:
             logger.error(f"❌ خطا در اجرای train_model: {e}", exc_info=True)
 
-        # ── مرحله ۳: reload BRAIN ─────────────────────────────────────────
-        # ai_threshold cache رو پاک می‌کنیم تا فایل جدید خونده بشه
-        try:
-            import src.ai_threshold as _at_module
-            _at_module._cache = None
-            _at_module._cache_mtime = None
-            logger.info("✅ ai_threshold cache پاک شد — threshold های جدید لود می‌شوند")
-        except Exception as e:
-            logger.warning(f"⚠️ پاک‌کردن ai_threshold cache ناموفق: {e}")
-
-        # reload مدل‌ها در BRAIN
-        try:
-            models_dir = os.path.join(BASE_DIR, "src", "models")
-            if hasattr(BRAIN, 'load_models'):
-                BRAIN.load_models(models_dir)
-                logger.info("✅ مدل‌های جدید در BRAIN لود شدند")
-            elif hasattr(BRAIN, '_load_models'):
-                BRAIN._load_models()
-                logger.info("✅ مدل‌های جدید در BRAIN لود شدند")
-            else:
-                logger.warning("⚠️ متد reload در BRAIN پیدا نشد — ربات باید ریستارت شود")
-        except Exception as e:
-            logger.error(f"❌ خطا در reload BRAIN: {e}")
-
+        # ── مرحله ۳: لاگ نهایی ───────────────────────────────────────────
+        # چون ربات با cron اجرا می‌شه و هر بار از صفر شروع می‌کنه،
+        # reload لازم نیست — دفعه‌ی بعد cron، BRAIN مدل‌های جدید رو
+        # خودش از src/models/ لود می‌کنه و ai_thresholds.json تازه رو
+        # از طریق get_ai_threshold() می‌خونه.
         logger.info(f"✅ خودارتقایی کامل شد (معاملات بسته: {total_closed})")
 
     except Exception as e:
