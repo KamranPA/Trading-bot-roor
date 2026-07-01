@@ -83,10 +83,23 @@ AI_THRESHOLDS_FILE = os.path.join(BASE_DIR, 'ai_thresholds.json')
 
 # ─── تابع target (بدون تغییر نسبت به v11.0) ──────────────────────────────────
 
-def _build_target(df: pd.DataFrame, symbol: str) -> pd.Series:
-    sl_ratio = float(getattr(config, 'SL_RATIO',  1.0))
-    tp_ratio = float(getattr(config, 'TP_RATIO',  2.0))
-    max_sl   = float(getattr(config, 'MAX_SL_PERCENT', 0.05))
+def _build_target(
+    df: pd.DataFrame,
+    symbol: str,
+    tp_ratio: Optional[float] = None,
+    sl_ratio: Optional[float] = None,
+) -> pd.Series:
+    """
+    ✅ tp_ratio/sl_ratio اگر پاس داده نشوند، از config ثابت خوانده می‌شوند.
+    توصیه می‌شود از _get_symbol_tp_sl() مقدار اختصاصی هر symbol
+    (از best_params.json) پاس داده شود تا target با پارامترهای واقعی
+    معامله‌ی همان ارز هماهنگ باشد — نه یک TP_RATIO ثابت سراسری.
+    """
+    if sl_ratio is None:
+        sl_ratio = float(getattr(config, 'SL_RATIO',  1.0))
+    if tp_ratio is None:
+        tp_ratio = float(getattr(config, 'TP_RATIO',  2.0))
+    max_sl = float(getattr(config, 'MAX_SL_PERCENT', 0.05))
 
     close  = df['close'].values
     high   = df['high'].values
@@ -158,6 +171,35 @@ def _apply_volume_filter(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
     return df
 
 
+def _load_best_params() -> Dict:
+    """
+    خواندن best_params.json (خروجی optimizer.py).
+    اگر فایل موجود نباشد یا خراب باشد، dict خالی برمی‌گرداند (fallback به config).
+    """
+    path = os.path.join(BASE_DIR, 'best_params.json')
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning(f"⚠️ خطا در خواندن best_params.json: {e}")
+        return {}
+
+
+def _get_symbol_tp_sl(symbol: str, best_params: Dict) -> Tuple[float, float]:
+    """
+    خواندن TP_RATIO/SL_RATIO اختصاصی هر ارز از best_params.json (خروجی optimizer.py).
+    اولویت: best_params[symbol] > config ثابت.
+    این تضمین می‌کند هدف training (target) با همان نسبت TP/SL که در بکتست/لایو
+    برای این ارز استفاده می‌شود هماهنگ باشد — نه یک TP_RATIO ثابت سراسری.
+    """
+    entry = best_params.get(symbol, {})
+    tp_ratio = float(entry.get('TP_RATIO', getattr(config, 'TP_RATIO', 2.0)))
+    sl_ratio = float(entry.get('SL_RATIO', getattr(config, 'SL_RATIO', 1.0)))
+    return tp_ratio, sl_ratio
+
+
 def _model_key(symbol: str) -> str:
     """
     BTCUSDT → BTC/USDT → BTC_USDT  (نام فایل مدل، سازگار با brain.py)
@@ -208,6 +250,14 @@ class ModelTrainer:
         logger.info(f"AI_THRESHOLD percentile: {AI_THRESHOLD_PERCENTILE}")
         logger.info("=" * 65)
 
+        # ✅ خواندن best_params.json یک‌بار (خروجی optimizer.py)
+        # تا target هر symbol با TP_RATIO/SL_RATIO اختصاصی همان ارز ساخته شود
+        best_params = _load_best_params()
+        if best_params:
+            logger.info(f"✅ best_params.json یافت شد — {len([k for k in best_params if not k.startswith('_')])} ارز کالیبره‌شده")
+        else:
+            logger.info("ℹ️ best_params.json یافت نشد — از config.TP_RATIO/SL_RATIO ثابت استفاده می‌شود")
+
         for symbol, df in data_dict.items():
             logger.info(f"\nپردازش: {symbol}")
 
@@ -227,8 +277,14 @@ class ModelTrainer:
             # ── ۲. فیلتر حجم ─────────────────────────────────────────────
             df_feat = _apply_volume_filter(df_feat, symbol)
 
-            # ── ۳. target ────────────────────────────────────────────────
-            df_feat['target'] = _build_target(df_feat, symbol)
+            # ── ۳. target (با TP_RATIO/SL_RATIO اختصاصی این symbol) ───────
+            sym_tp_ratio, sym_sl_ratio = _get_symbol_tp_sl(symbol, best_params)
+            logger.info(f"  TP_RATIO={sym_tp_ratio} SL_RATIO={sym_sl_ratio} (برای ساخت target)")
+            df_feat['target'] = _build_target(
+                df_feat, symbol,
+                tp_ratio=sym_tp_ratio,
+                sl_ratio=sym_sl_ratio,
+            )
 
             # ── ۴. بررسی فیچرها ──────────────────────────────────────────
             missing = [f for f in FEAT_COLUMNS if f not in df_feat.columns]
@@ -357,6 +413,10 @@ class ModelTrainer:
                     'top_features':     top,
                     'ai_threshold':     round(suggested_threshold, 2),
                     'score_stats':      score_stats,
+                    # ✅ ثبت پارامترهایی که برای ساخت target استفاده شدند —
+                    # برای شفافیت/دیباگ که target با کدام TP_RATIO/SL_RATIO هماهنگ شده
+                    'target_tp_ratio':  sym_tp_ratio,
+                    'target_sl_ratio':  sym_sl_ratio,
                 }
                 results['summary']['successful'] += 1
 
