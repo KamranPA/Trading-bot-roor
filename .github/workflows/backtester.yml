@@ -68,23 +68,33 @@ jobs:
         run: |
           rm -f data/backtest_trades.csv
 
-          echo "▶️ backtester..."
-          python src/backtester.py
-          echo "✅ backtester تمام شد"
+          # ✅ ترتیب جدید: optimizer → train_model → backtester
+          # تا هر مرحله از خروجی تازه‌ی مرحله‌ی قبل استفاده کند، نه یک نسل عقب‌تر:
+          #   1) optimizer بهترین TP_RATIO/SL_RATIO/... را پیدا می‌کند → best_params.json
+          #   2) train_model با همان TP_RATIO/SL_RATIO هر ارز، target را می‌سازد
+          #      و AI_THRESHOLD کالیبره‌شده را تولید می‌کند → ai_thresholds.json
+          #   3) backtester با هر دو فایل تازه، نتیجه‌ی نهایی واقعی را گزارش می‌دهد
 
-          echo "=== backtest_table_summary.csv ==="
-          cat backtest_table_summary.csv || echo "فایل وجود ندارد!"
+          echo "▶️ optimizer (مرحله ۱: بهینه‌سازی پارامترهای استراتژی)..."
+          python src/optimizer.py
+          echo "✅ optimizer تمام شد"
 
-          echo "▶️ train_model..."
+          echo "=== best_params.json ==="
+          cat best_params.json || echo "فایل وجود ندارد!"
+
+          echo "▶️ train_model (مرحله ۲: آموزش مدل + کالیبراسیون AI_THRESHOLD)..."
           python src/train_model.py
           echo "✅ train_model تمام شد"
 
           echo "=== ai_thresholds.json (per-symbol calibration) ==="
           cat ai_thresholds.json || echo "فایل ai_thresholds.json ساخته نشد!"
 
-          echo "▶️ optimizer..."
-          python src/optimizer.py
-          echo "✅ optimizer تمام شد"
+          echo "▶️ backtester (مرحله ۳: گزارش نهایی با پارامترهای تازه)..."
+          python src/backtester.py
+          echo "✅ backtester تمام شد"
+
+          echo "=== backtest_table_summary.csv ==="
+          cat backtest_table_summary.csv || echo "فایل وجود ندارد!"
 
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
