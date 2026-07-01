@@ -12,7 +12,6 @@ import logging
 import threading
 import datetime
 import json
-import glob
 from concurrent.futures import ThreadPoolExecutor
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -251,8 +250,9 @@ def run_auto_optimization():
       1. optimizer  → best_params.json
       2. train_model → مدل‌ها + ai_thresholds.json
 
-    نکته: چون ربات با cron اجرا می‌شه، از یه فایل lock استفاده می‌کنیم
-    تا در یه milestone (مثلاً 100 معامله) فقط یه‌بار اجرا بشه، نه هر ۳۰ دقیقه.
+    نکته: چون ربات با GitHub Actions cron اجرا می‌شه و workspace هر بار
+    از صفر شروع می‌شه، milestone آخر اجرا رو در دیتابیس ذخیره می‌کنیم
+    (دیتابیس PostgreSQL بین اجراها persist می‌شه).
     """
     try:
         total_closed = database.get_total_closed_positions_count()
@@ -260,22 +260,17 @@ def run_auto_optimization():
             return
 
         # ── جلوگیری از اجرای مکرر برای همون milestone ──────────────────
-        lock_file = os.path.join(BASE_DIR, f'.optimization_lock_{total_closed}')
-        if os.path.exists(lock_file):
-            logger.info(f"⏭️ خودارتقایی برای milestone {total_closed} قبلاً انجام شده — skip")
-            return
-        # قبل از شروع lock ایجاد کن
+        # workspace هر بار از صفر شروع می‌شه، پس از دیتابیس استفاده می‌کنیم
         try:
-            with open(lock_file, 'w') as f:
-                f.write(datetime.datetime.utcnow().isoformat())
-            # lock های قدیمی رو پاک کن (فقط آخرین milestone رو نگه دار)
-            old_locks = glob.glob(os.path.join(BASE_DIR, '.optimization_lock_*'))
-            for lf in old_locks:
-                if lf != lock_file:
-                    try: os.remove(lf)
-                    except: pass
+            last_milestone = database.get_meta('last_optimization_milestone')
+            if last_milestone and int(last_milestone) >= total_closed:
+                logger.info(
+                    f"⏭️ خودارتقایی برای milestone {total_closed} قبلاً انجام شده "
+                    f"(آخرین: {last_milestone}) — skip"
+                )
+                return
         except Exception as e:
-            logger.warning(f"⚠️ خطا در ساخت lock file: {e}")
+            logger.warning(f"⚠️ خطا در خواندن milestone از دیتابیس: {e} — ادامه می‌دیم")
 
         logger.info(f"🔄 شروع خودارتقایی (معاملات بسته: {total_closed})...")
 
@@ -310,6 +305,13 @@ def run_auto_optimization():
         # reload لازم نیست — دفعه‌ی بعد cron، BRAIN مدل‌های جدید رو
         # خودش از src/models/ لود می‌کنه و ai_thresholds.json تازه رو
         # از طریق get_ai_threshold() می‌خونه.
+        # ── ذخیره milestone در دیتابیس ─────────────────────────────────
+        try:
+            database.set_meta('last_optimization_milestone', str(total_closed))
+            logger.info(f"✅ milestone {total_closed} در دیتابیس ذخیره شد")
+        except Exception as e:
+            logger.warning(f"⚠️ خطا در ذخیره milestone: {e}")
+
         logger.info(f"✅ خودارتقایی کامل شد (معاملات بسته: {total_closed})")
 
     except Exception as e:
