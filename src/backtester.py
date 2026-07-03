@@ -1,10 +1,11 @@
 """
-FILE PATH: src/backtester.py (v3.4 - Aligned with strategy.py)
-تغییرات نسبت به v3.3:
-  - ai_score پیش‌فرض = 50.0 (یکسان با strategy.py لایو)
-  - w_ai_eff = 0.0 وقتی مدل نداره (یکسان با strategy.py)
-  - ai_approved همیشه True وقتی مدل نداره (یکسان با strategy.py)
-  - debug counters باقی مانده
+FILE PATH: src/backtester.py (v3.5 - TP1 formula unified with strategy.py)
+تغییرات نسبت به v3.4:
+  ✅ FIX: فرمول tp1 با strategy.py یکسان شد (RR=1:1 نسبت به SL)،
+     نه sl_dist*tp_ratio/2. این روی آمار نهایی بک‌تست اثر ندارد
+     (چون فقط TP2/SL تعیین‌کننده‌ی خروج هستند) اما باعث می‌شود
+     tp1 گزارش‌شده در نتایج بک‌تست با تارگت اولی که در تلگرام
+     دیده می‌شود یکی باشد.
 """
 
 import os
@@ -134,7 +135,6 @@ def run_backtest(
 
     logger.info(f"✅ {meta['valid_rows']} ردیف معتبر")
 
-    # debug: ستون‌های volume
     vol_cols = [c for c in df_full.columns if 'vol' in c.lower()]
     logger.info(f"📋 {pair}: ستون‌های volume: {vol_cols}")
     for c in ('Volume_SMA', 'volume_sma', 'volume_sma20'):
@@ -151,8 +151,7 @@ def run_backtest(
     adx_thresh   = float(params.get('ADX_THRESHOLD', config.ADX_THRESHOLD))
     tp_ratio     = float(params.get('TP_RATIO',       config.TP_RATIO))
     sl_ratio     = float(params.get('SL_RATIO',       config.SL_RATIO))
-    # ✅ AI_THRESHOLD per-symbol (کالیبره‌شده توسط train_model.py)
-    # اولویت: params (از optimizer) > ai_thresholds.json (کالیبره‌شده) > config ثابت
+    # ✅ AI_THRESHOLD per-symbol (کالیبره‌شده توسط train_model.py) — یکسان با strategy.py
     _default_ai_th = float(getattr(config, 'AI_THRESHOLD', 65.0))
     if 'AI_THRESHOLD' in params:
         ai_threshold = float(params['AI_THRESHOLD'])
@@ -231,10 +230,9 @@ def run_backtest(
         current_rsi = float(candle.get('feat_rsi', candle.get('RSI', 50)))
 
         # ── AI score — یکسان با strategy.py ─────────────────────────────────
-        # وقتی مدل نداره: ai_score=50.0, w_ai_eff=0.0, ai_approved=True
-        ai_score    = 50.0   # ← پیش‌فرض یکسان با strategy.py
+        ai_score    = 50.0
         ai_approved = True
-        w_ai_eff    = 0.0    # ← وقتی مدل نداره وزن صفره
+        w_ai_eff    = 0.0
 
         model_active = (
             model is not None
@@ -250,7 +248,7 @@ def run_backtest(
                     if raw is not None:
                         ai_score    = float(raw) * 100.0 if float(raw) <= 1.0 else float(raw)
                         ai_approved = ai_score >= ai_threshold
-                        w_ai_eff    = WEIGHT_AI   # ← فقط وقتی مدل داره وزن می‌گیره
+                        w_ai_eff    = WEIGHT_AI
                 else:
                     ai_approved = False
             except Exception as e:
@@ -290,6 +288,7 @@ def run_backtest(
 
         trade_id = f"{pair}_{i}"
 
+        # ✅ FIX: tp1 با strategy.py یکسان شد (RR=1:1 نسبت به SL)
         if high_price > swing_high and current_rsi > 50:
             sl_dist = min(1.5 * atr_val * sl_ratio, current_price * MAX_SL_PERCENT)
             if sl_dist <= 0:
@@ -298,8 +297,8 @@ def run_backtest(
                 'id': trade_id, 'pair': pair, 'direction': 'LONG',
                 'entry_price': round(current_price, 6),
                 'stop_loss':   round(current_price - sl_dist, 6),
-                'tp1':         round(current_price + sl_dist * tp_ratio / 2, 6),
-                'tp2':         round(current_price + sl_dist * tp_ratio,     6),
+                'tp1':         round(current_price + sl_dist, 6),
+                'tp2':         round(current_price + sl_dist * tp_ratio, 6),
                 'entry_time':  str(i), 'status': 'OPEN',
                 'total_score': round(total_score, 2),
                 'ai_score':    round(ai_score,    2),
@@ -318,8 +317,8 @@ def run_backtest(
                 'id': trade_id, 'pair': pair, 'direction': 'SHORT',
                 'entry_price': round(current_price, 6),
                 'stop_loss':   round(current_price + sl_dist, 6),
-                'tp1':         round(current_price - sl_dist * tp_ratio / 2, 6),
-                'tp2':         round(current_price - sl_dist * tp_ratio,     6),
+                'tp1':         round(current_price - sl_dist, 6),
+                'tp2':         round(current_price - sl_dist * tp_ratio, 6),
                 'entry_time':  str(i), 'status': 'OPEN',
                 'total_score': round(total_score, 2),
                 'ai_score':    round(ai_score,    2),
@@ -339,7 +338,6 @@ def run_backtest(
         f"signals={signals_generated}"
     )
 
-    # ── بستن معاملات باقی‌مانده ─────────────────────────────────────────────
     last_price = float(df_full.iloc[-1]['close'])
     for trade in open_trades:
         entry     = trade['entry_price']

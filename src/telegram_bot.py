@@ -1,4 +1,13 @@
-# FILE PATH: src/telegram_bot.py (v8.2 - Fixed pair/RR/ADX)
+# FILE PATH: src/telegram_bot.py (v8.3 - retry + ADX-zero fix)
+# تغییرات نسبت به v8.2:
+#   ✅ FIX: send_telegram_message حالا تا ۳ بار با backoff تلاش می‌کند.
+#      قبلاً یک قطعی موقت شبکه یعنی سیگنال برای همیشه از دست می‌رفت،
+#      چون این ربات فقط سیگنال می‌دهد (بدون معامله‌ی خودکار) و تلگرام
+#      تنها مسیر رسیدن سیگنال به کاربر است.
+#   ✅ FIX: adx_val دیگر با `or 0` جایگزین نمی‌شود — چون ADX=0 یک مقدار
+#      معتبر آماری است و `0 or X` در پایتون همیشه X را برمی‌گرداند
+#      (باعث می‌شد adx_score به‌جای ADX خام نمایش داده شود).
+import time
 import requests
 import config
 import os
@@ -11,37 +20,41 @@ def get_proxy():
     return getattr(config, 'PROXY', None)
 
 
-def send_telegram_message(text):
+def send_telegram_message(text, max_retries: int = 3):
     token   = os.environ.get("TELEGRAM_BOT_TOKEN") or getattr(config, 'TELEGRAM_BOT_TOKEN', None)
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")   or getattr(config, 'TELEGRAM_CHAT_ID',   None)
-
     if not token or not chat_id:
         logging.warning("توکن یا Chat ID تلگرام تنظیم نشده است.")
-        return
+        return False
 
     url     = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    proxy   = get_proxy()
 
-    try:
-        proxy    = get_proxy()
-        response = session.post(url, json=payload, timeout=15,
-                                proxies={"https": proxy} if proxy else None)
-        response.raise_for_status()
-    except Exception as e:
-        logging.error(f"خطای شبکه در ارسال به تلگرام: {e}")
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = session.post(
+                url, json=payload, timeout=15,
+                proxies={"https": proxy} if proxy else None,
+            )
+            response.raise_for_status()
+            return True
+        except Exception as e:
+            logging.warning(f"تلاش {attempt}/{max_retries} ارسال تلگرام ناموفق: {e}")
+            if attempt < max_retries:
+                time.sleep(2 * attempt)
+
+    logging.error("❌ ارسال پیام تلگرام بعد از تمام تلاش‌ها ناموفق بود — سیگنال ممکن است گم شود.")
+    return False
 
 
 def format_and_send_signal(signal_data):
-    """ارسال سیگنال هوشمند سیستم v8.2"""
+    """ارسال سیگنال هوشمند سیستم v8.3"""
     d = signal_data
-
     icon       = "🟢 #LONG" if d.get('direction') == "LONG" else "🔴 #SHORT"
-
-    # FIX 1: هر دو کلید pair و pair_display رو چک می‌کنیم
     raw_pair   = d.get('pair') or d.get('pair_display') or 'UNKNOWN'
     clean_pair = str(raw_pair).replace('_', '/')
 
-    # FIX 2: R:R همیشه مثبت — برای LONG و SHORT هر دو درست
     try:
         sl_dist  = abs(float(d['entry_price']) - float(d['stop_loss']))
         tp_dist  = abs(float(d['tp2'])         - float(d['entry_price']))
@@ -49,8 +62,9 @@ def format_and_send_signal(signal_data):
     except Exception:
         rr_ratio = 0
 
-    # FIX 3: ADX از feat_adx یا adx_score
-    adx_val = d.get('feat_adx') or d.get('adx_score') or 0
+    # ✅ FIX: ADX=0 یک مقدار معتبر است — دیگر با adx_score جایگزین نمی‌شود
+    _adx_raw = d.get('feat_adx')
+    adx_val  = _adx_raw if _adx_raw is not None else d.get('adx_score', 0)
 
     message = (
         f"<b>{icon} سیگنال سیستم v8.0</b>\n"
@@ -64,14 +78,17 @@ def format_and_send_signal(signal_data):
         f"⚖️ <b>حجم پوزیشن:</b> <code>{d.get('position_size', 0)} USDT</code>\n"
         f"📊 <b>نسبت R:R:</b> <code>{rr_ratio}</code>\n"
         f"📈 <b>قدرت روند (ADX):</b> <code>{round(float(adx_val), 1)}</code>\n"
-        f"🧠 <i>وضعیت: تایید شده توسط مدل اختصاصی {clean_pair}</i>"
+        f"🧠 <i>وضعیت: تایید شده توسط مدل اختصاصی {clean_pair}</i>\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"⚠️ <i>این یک سیگنال است، نه یک معامله‌ی اجراشده. ربات به‌صورت "
+        f"خودکار سفارشی در صرافی ثبت نمی‌کند.</i>"
     )
     send_telegram_message(message)
 
 
 def send_heartbeat_report(watchlist_count, model_count):
     message = (
-        f"🤖 <b>Status: System Online</b>\n"
+        f"🤖 <b>Status: System Online (Signal-Only Mode)</b>\n"
         f"━━━━━━━━━━━━━━━\n"
         f"🌐 <b>واچ‌لیست فعال:</b> <code>{watchlist_count} ارز</code>\n"
         f"🧠 <b>مدل‌های هوش مصنوعی فعال:</b> <code>{model_count}</code>\n"

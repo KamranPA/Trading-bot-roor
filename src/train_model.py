@@ -1,10 +1,16 @@
 """
-FILE PATH: src/train_model.py (v12.0 - Per-symbol AI_THRESHOLD calibration)
-تغییرات نسبت به v11.0:
-  ✅ بعد از training هر مدل، روی X_test احتمال پیش‌بینی می‌شود
-  ✅ AI_THRESHOLD پیشنهادی per-symbol از روی percentile توزیع امتیازها محاسبه می‌شود
-  ✅ ai_thresholds.json در ریشه پروژه ذخیره می‌شود (کلید: برند symbol مثل BTC/USDT)
-  ✅ AI_THRESHOLD_PERCENTILE از config قابل تنظیم (پیش‌فرض 60)
+FILE PATH: src/train_model.py (v12.1 - Fix target/volume-filter ordering)
+تغییرات نسبت به v12.0:
+  ✅ FIX: ترتیب عملیات اصلاح شد — target حالا روی سری کامل و پیوسته‌ی
+     کندل‌ها ساخته می‌شود (قبل از فیلتر حجم)، نه بعد از آن. قبلاً فیلتر
+     حجم ردیف‌ها را فیزیکی حذف می‌کرد و بعد _build_target با فرض این‌که
+     iloc[i+1] کندل بلافاصله بعدی (۴ ساعت بعد) است شبیه‌سازی TP/SL انجام
+     می‌داد — که بعد از حذف ردیف‌ها دیگر درست نبود و برچسب‌های آموزشی
+     را اعوجاج‌دار می‌کرد. حالا فیلتر حجم فقط بعد از ساخت target اعمال
+     می‌شود و صرفاً تعیین می‌کند کدام ردیف‌ها برای training استفاده شوند.
+  ✅ FIX: کالیبراسیون AI_THRESHOLD per-symbol فقط وقتی انجام می‌شود که
+     X_test حداقل MIN_TEST_SAMPLES_FOR_CALIBRATION نمونه داشته باشد؛
+     در غیر این صورت fallback امن به AI_THRESHOLD سراسری (config).
 """
 
 import pandas as pd
@@ -70,18 +76,21 @@ FEAT_COLUMNS = [
 MIN_TRAINING_SAMPLES = 50
 TARGET_LOOKAHEAD = 20
 
-# ✅ صدکی که برای AI_THRESHOLD پیشنهادی استفاده می‌شود.
-# مثال: 60 یعنی فقط 40% بهترین امتیازهای مدل از فیلتر عبور می‌کنند.
+# ✅ FIX: حداقل تعداد نمونه در X_test تا کالیبراسیون per-symbol آماری
+# معنادار باشد. اگر test set کوچک‌تر از این باشد، از AI_THRESHOLD
+# سراسری (config) استفاده می‌شود به‌جای یک صدک محاسبه‌شده روی چند نمونه.
+MIN_TEST_SAMPLES_FOR_CALIBRATION = 30
+
+# صدکی که برای AI_THRESHOLD پیشنهادی استفاده می‌شود.
 AI_THRESHOLD_PERCENTILE = float(getattr(config, 'AI_THRESHOLD_PERCENTILE', 60))
 
-# حد پایین/بالای منطقی برای جلوگیری از threshold های افراطی
 AI_THRESHOLD_MIN = float(getattr(config, 'AI_THRESHOLD_MIN', 20.0))
 AI_THRESHOLD_MAX = float(getattr(config, 'AI_THRESHOLD_MAX', 80.0))
 
 AI_THRESHOLDS_FILE = os.path.join(BASE_DIR, 'ai_thresholds.json')
 
 
-# ─── تابع target (بدون تغییر نسبت به v11.0) ──────────────────────────────────
+# ─── تابع target (بدون تغییر منطق — فقط جای صدا زدنش عوض شد) ────────────────
 
 def _build_target(
     df: pd.DataFrame,
@@ -90,7 +99,12 @@ def _build_target(
     sl_ratio: Optional[float] = None,
 ) -> pd.Series:
     """
-    ✅ tp_ratio/sl_ratio اگر پاس داده نشوند، از config ثابت خوانده می‌شوند.
+    ⚠️ این تابع باید روی دیتافریمی صدا زده شود که هنوز فیلتر حجم رویش
+    اعمال نشده — یعنی توالی زمانی کندل‌ها پیوسته و بدون شکاف باشد.
+    (به همین دلیل در train_multiple_symbols حالا قبل از فیلتر حجم
+    فراخوانی می‌شود.)
+
+    tp_ratio/sl_ratio اگر پاس داده نشوند، از config ثابت خوانده می‌شوند.
     توصیه می‌شود از _get_symbol_tp_sl() مقدار اختصاصی هر symbol
     (از best_params.json) پاس داده شود تا target با پارامترهای واقعی
     معامله‌ی همان ارز هماهنگ باشد — نه یک TP_RATIO ثابت سراسری.
@@ -136,6 +150,8 @@ def _build_target(
         hit_tp = False
         hit_sl = False
 
+        # ✅ چون این حالا روی سری پیوسته (قبل از فیلتر حجم) اجرا می‌شود،
+        # j واقعاً i+1 ... i+TARGET_LOOKAHEAD کندل ۴ساعته‌ی بعدی است.
         for j in range(i + 1, min(i + TARGET_LOOKAHEAD + 1, n)):
             h = float(high[j])
             l = float(low[j])
@@ -250,8 +266,6 @@ class ModelTrainer:
         logger.info(f"AI_THRESHOLD percentile: {AI_THRESHOLD_PERCENTILE}")
         logger.info("=" * 65)
 
-        # ✅ خواندن best_params.json یک‌بار (خروجی optimizer.py)
-        # تا target هر symbol با TP_RATIO/SL_RATIO اختصاصی همان ارز ساخته شود
         best_params = _load_best_params()
         if best_params:
             logger.info(f"✅ best_params.json یافت شد — {len([k for k in best_params if not k.startswith('_')])} ارز کالیبره‌شده")
@@ -274,10 +288,9 @@ class ModelTrainer:
             else:
                 df_feat = df.copy()
 
-            # ── ۲. فیلتر حجم ─────────────────────────────────────────────
-            df_feat = _apply_volume_filter(df_feat, symbol)
-
-            # ── ۳. target (با TP_RATIO/SL_RATIO اختصاصی این symbol) ───────
+            # ── ۲. target (روی سری کامل و پیوسته، با TP_RATIO/SL_RATIO
+            #      اختصاصی این symbol) — ✅ FIX: این حالا قبل از فیلتر
+            #      حجم اجرا می‌شود تا توالی زمانی کندل‌ها دست‌نخورده بماند.
             sym_tp_ratio, sym_sl_ratio = _get_symbol_tp_sl(symbol, best_params)
             logger.info(f"  TP_RATIO={sym_tp_ratio} SL_RATIO={sym_sl_ratio} (برای ساخت target)")
             df_feat['target'] = _build_target(
@@ -285,6 +298,12 @@ class ModelTrainer:
                 tp_ratio=sym_tp_ratio,
                 sl_ratio=sym_sl_ratio,
             )
+
+            # ── ۳. فیلتر حجم (بعد از target) — فقط تعیین می‌کند کدام
+            #      ردیف‌ها به‌عنوان نمونه‌ی training استفاده شوند؛ چون
+            #      ستون target از قبل محاسبه شده، حذف فیزیکی ردیف در
+            #      این مرحله دیگر برچسب‌ها را اعوجاج‌دار نمی‌کند.
+            df_feat = _apply_volume_filter(df_feat, symbol)
 
             # ── ۴. بررسی فیچرها ──────────────────────────────────────────
             missing = [f for f in FEAT_COLUMNS if f not in df_feat.columns]
@@ -356,15 +375,22 @@ class ModelTrainer:
                 logger.info(f"  Top features: {[(k, int(v)) for k,v in top]}")
 
                 # ── ✅ کالیبراسیون AI_THRESHOLD per-symbol ─────────────────
-                # روی X_test (داده‌ای که مدل آن را در training ندیده) احتمال می‌گیریم
-                # و یک صدک از توزیع را به‌عنوان threshold پیشنهادی انتخاب می‌کنیم.
                 proba_test = model.predict_proba(X_test)[:, 1] * 100.0  # 0..100
 
-                if len(proba_test) > 0:
+                # ✅ FIX: فقط اگر test set به اندازه‌ی کافی بزرگ باشد،
+                # صدک per-symbol محاسبه می‌شود؛ در غیر این صورت fallback
+                # امن به AI_THRESHOLD سراسری (config).
+                if len(proba_test) >= MIN_TEST_SAMPLES_FOR_CALIBRATION:
                     suggested_threshold = float(np.percentile(proba_test, AI_THRESHOLD_PERCENTILE))
                     suggested_threshold = max(AI_THRESHOLD_MIN, min(AI_THRESHOLD_MAX, suggested_threshold))
+                    calibration_note = f"per-symbol (n={len(proba_test)})"
                 else:
                     suggested_threshold = float(getattr(config, 'AI_THRESHOLD', 65.0))
+                    calibration_note = (
+                        f"⚠️ fallback به AI_THRESHOLD سراسری — "
+                        f"test set خیلی کوچک (n={len(proba_test)} < {MIN_TEST_SAMPLES_FOR_CALIBRATION})"
+                    )
+                    logger.warning(f"  {calibration_note}")
 
                 score_stats = {
                     'min':    round(float(np.min(proba_test)), 2) if len(proba_test) else None,
@@ -381,7 +407,7 @@ class ModelTrainer:
                 )
                 logger.info(
                     f"  🎯 AI_THRESHOLD پیشنهادی (صدک {AI_THRESHOLD_PERCENTILE}): "
-                    f"{suggested_threshold:.2f}"
+                    f"{suggested_threshold:.2f} [{calibration_note}]"
                 )
 
                 brain_sym = _brain_symbol(symbol)
@@ -390,6 +416,7 @@ class ModelTrainer:
                     'percentile':  AI_THRESHOLD_PERCENTILE,
                     'score_stats': score_stats,
                     'test_samples': len(proba_test),
+                    'calibration': calibration_note,
                     'updated_at':  datetime.now().isoformat(),
                 }
 
@@ -413,8 +440,6 @@ class ModelTrainer:
                     'top_features':     top,
                     'ai_threshold':     round(suggested_threshold, 2),
                     'score_stats':      score_stats,
-                    # ✅ ثبت پارامترهایی که برای ساخت target استفاده شدند —
-                    # برای شفافیت/دیباگ که target با کدام TP_RATIO/SL_RATIO هماهنگ شده
                     'target_tp_ratio':  sym_tp_ratio,
                     'target_sl_ratio':  sym_sl_ratio,
                 }
@@ -474,7 +499,7 @@ if __name__ == "__main__":
     parser.add_argument('--monthly', action='store_true')
     args = parser.parse_args()
 
-    logger.info("شروع pipeline آموزش LightGBM v12.0 (با کالیبراسیون per-symbol)")
+    logger.info("شروع pipeline آموزش LightGBM v12.1 (با کالیبراسیون per-symbol و ترتیب اصلاح‌شده)")
     logger.info(f"فیچرها: {FEAT_COLUMNS}")
 
     data_dir = os.path.join(BASE_DIR, "data", "4h")
@@ -516,7 +541,7 @@ if __name__ == "__main__":
     results   = trainer.train_multiple_symbols(data_dict)
 
     trainer.save_results(results, os.path.join(BASE_DIR, "training_results.json"))
-    trainer.save_ai_thresholds()   # ✅ ذخیره ai_thresholds.json
+    trainer.save_ai_thresholds()
 
     if results['summary']['successful'] == 0:
         logger.error("هیچ مدلی ذخیره نشد!")

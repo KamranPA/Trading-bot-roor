@@ -1,10 +1,13 @@
 """
-FILE PATH: src/strategy.py (v10.2 - Fix Zero Score in scan_log)
-تغییرات نسبت به v10.1:
-  - ترتیب عملیات اصلاح شد:
-    1. ابتدا همیشه score محاسبه می‌شود
-    2. سپس فیلترها اعمال می‌شوند
-    → scan_log همیشه score واقعی دارد، حتی برای NOSIGNAL
+FILE PATH: src/strategy.py (v10.3 - Unified AI_THRESHOLD with backtester/optimizer)
+تغییرات نسبت به v10.2:
+  ✅ FIX: ai_threshold دیگر همیشه از config.AI_THRESHOLD ثابت خوانده نمی‌شود؛
+     از src.ai_threshold.get_ai_threshold() استفاده می‌شود — دقیقاً همان
+     منبعی که backtester.py و optimizer.py از قبل استفاده می‌کردند.
+     این باعث می‌شود سیگنال زنده و بک‌تست/بهینه‌سازی از یک آستانه‌ی
+     per-symbol کالیبره‌شده (خروجی train_model.py) استفاده کنند.
+  ✅ نکته: فرمول TP1 (خط پایین) به‌عنوان مرجع نگه‌داشته شد (RR=1:1)؛
+     backtester.py برای هماهنگی با همین‌جا اصلاح شد.
 """
 
 import pandas as pd
@@ -16,6 +19,7 @@ import config
 from src.indicators import TechnicalIndicators
 from src import strategy_utils
 from src.volume_filter import passes_volume_filter, VOLUME_MULTIPLIER
+from src.ai_threshold import get_ai_threshold
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +77,14 @@ def generate_signal(
     w_adx     = float(getattr(config, 'WEIGHT_ADX', 20))
     w_rsi     = float(getattr(config, 'WEIGHT_RSI', 20))
     w_ema     = float(getattr(config, 'WEIGHT_EMA', 20))
-    ai_threshold = float(getattr(config, 'AI_THRESHOLD', 65.0))
+
+    # ✅ FIX: آستانه‌ی AI per-symbol — یکسان با backtester.py/optimizer.py
+    # اولویت: params (اگر صراحتاً پاس داده شده) > ai_thresholds.json کالیبره‌شده > config ثابت
+    _default_ai_th = float(getattr(config, 'AI_THRESHOLD', 65.0))
+    if 'AI_THRESHOLD' in params:
+        ai_threshold = float(params['AI_THRESHOLD'])
+    else:
+        ai_threshold = get_ai_threshold(symbol, default=_default_ai_th)
 
     # ── بررسی اولیه df ───────────────────────────────────────────────────────
     if df is None or df.empty:
@@ -194,6 +205,9 @@ def generate_signal(
         return result
 
     # ── ۶. محاسبه SL و TP ────────────────────────────────────────────────────
+    # TP1 = فاصله‌ی برابر با SL (RR=1:1) — تارگت محافظه‌کارانه برای بستن جزئی.
+    # TP2 = فاصله‌ی کامل با نسبت tp_ratio.
+    # backtester.py برای هماهنگی دقیق با همین فرمول اصلاح شده است.
     sl_dist = min(1.5 * atr_val * sl_ratio, close_price * max_sl)
     if sl_dist <= 0:
         return result
@@ -217,7 +231,7 @@ def generate_signal(
 
     logger.info(
         f"✅ سیگنال {symbol}: {direction} | "
-        f"score={total_score:.1f} | entry={close_price:.4f}"
+        f"score={total_score:.1f} | AI_TH={ai_threshold:.1f} | entry={close_price:.4f}"
     )
     return result
 

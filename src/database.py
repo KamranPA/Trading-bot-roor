@@ -1,19 +1,30 @@
 # ---------------------------------------------------------------------------
-# FILE PATH: src/database.py  (v3.2 - bot_meta table + get_meta/set_meta)
-# تغییرات نسبت به v3.1:
-#   ✅ جدول bot_meta اضافه شد (key/value برای ذخیره metadata ربات)
-#   ✅ get_meta() / set_meta() اضافه شدند
-#   ✅ برای ذخیره last_optimization_milestone بین اجراهای GitHub Actions cron
+# FILE PATH: src/database.py  (v3.3 - Connection pooling for internal calls)
+# تغییرات نسبت به v3.2:
+#   ✅ FIX: توابع داخلی این فایل (از طریق context manager _db) حالا از یک
+#      ThreadedConnectionPool مشترک استفاده می‌کنند، نه این‌که هر فراخوانی
+#      یک اتصال جدید psycopg2 باز/بسته کند. با ThreadPoolExecutor(12) در
+#      main.py که هم‌زمان روی چند ارز کار می‌کند، این از فشار زیاد روی
+#      سقف اتصالات همزمان دیتابیس (خصوصاً پلن‌های رایگان Postgres/Supabase)
+#      جلوگیری می‌کند.
+#   ⚠️ get_connection() عمداً pool نشده باقی مانده — چون ممکن است اسکریپت‌های
+#      بیرونی (مثل test_db.py) مستقیم از آن استفاده کنند و خودشان conn.close()
+#      را صدا بزنند؛ اگر آن را هم pool می‌کردیم، close() به‌جای برگرداندن
+#      اتصال به pool، آن را واقعاً می‌بست و اتصال را از pool حذف می‌کرد.
+#      اگر test_db.py یا اسکریپت دیگری زیاد صدا زده می‌شود، بهتر است آن را
+#      هم به‌صراحت به همین pool مهاجرت دهی (با putconn به‌جای close).
 # ---------------------------------------------------------------------------
 import os
 import logging
 import datetime
+import threading
 from contextlib import contextmanager
 
 try:
     import psycopg2
     import psycopg2.extras
     from psycopg2 import OperationalError
+    from psycopg2 import pool as _pg_pool
 except ImportError:
     raise ImportError("psycopg2 نصب نشده است. اجرا کنید: pip install psycopg2-binary")
 
@@ -30,6 +41,8 @@ def _get_database_url() -> str:
 
 
 def _get_connection():
+    """اتصال مستقیم و غیر Pool شده — برای استفاده‌ی توابع داخلی همین ماژول
+    (از طریق _get_pool) یا برای فراخوانی مستقیم بیرونی (get_connection)."""
     try:
         conn = psycopg2.connect(_get_database_url(), connect_timeout=15)
         conn.autocommit = False
@@ -40,12 +53,36 @@ def _get_connection():
 
 
 def get_connection():
+    """
+    اتصال مستقل (غیر Pool شده) — برای استفاده‌ی مستقیم بیرون از این ماژول
+    (مثل test_db.py). فراخوان مسئول conn.close() خودش است.
+    """
     return _get_connection()
+
+
+# ---------------------------------------------------------------------------
+# ✅ FIX: Connection Pool داخلی — فقط برای توابع همین فایل (از طریق _db())
+# ---------------------------------------------------------------------------
+
+_POOL = None
+_POOL_LOCK = threading.Lock()
+
+
+def _get_pool():
+    global _POOL
+    if _POOL is None:
+        with _POOL_LOCK:
+            if _POOL is None:
+                _POOL = _pg_pool.ThreadedConnectionPool(
+                    minconn=1, maxconn=15, dsn=_get_database_url(), connect_timeout=15
+                )
+    return _POOL
 
 
 @contextmanager
 def _db():
-    conn = _get_connection()
+    conn = _get_pool().getconn()
+    conn.autocommit = False
     try:
         yield conn
         conn.commit()
@@ -54,7 +91,7 @@ def _db():
         logger.error("تراکنش برگشت خورد: %s", e)
         raise
     finally:
-        conn.close()
+        _get_pool().putconn(conn)
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +112,7 @@ CREATE TABLE IF NOT EXISTS signals (
     pnl_percent     NUMERIC(10, 4),
     close_price     NUMERIC(20, 8),
     feat_adx            NUMERIC(10, 4),
-    feat_rsi            NUMERIC(10, 4),
+    feat_rsi             NUMERIC(10, 4),
     feat_rsi_momentum   NUMERIC(10, 4),
     feat_ema_deviation  NUMERIC(10, 4),
     feat_atr_percent    NUMERIC(10, 4),
@@ -109,7 +146,7 @@ CREATE TABLE IF NOT EXISTS scan_log (
 CREATE INDEX IF NOT EXISTS idx_scan_log_pair ON scan_log (pair);
 CREATE INDEX IF NOT EXISTS idx_scan_log_at   ON scan_log (scanned_at DESC);
 
--- ✅ جدول metadata ربات (key/value) — برای ذخیره milestone و تنظیمات بین اجراها
+-- جدول metadata ربات (key/value) — برای ذخیره milestone و تنظیمات بین اجراها
 CREATE TABLE IF NOT EXISTS bot_meta (
     key         VARCHAR(100) PRIMARY KEY,
     value       TEXT         NOT NULL,
@@ -157,10 +194,6 @@ def init_db() -> None:
 # ---------------------------------------------------------------------------
 
 def get_meta(key: str) -> str | None:
-    """
-    خواندن یک مقدار از جدول bot_meta.
-    برمی‌گرداند: مقدار (str) یا None اگر وجود نداشته باشد.
-    """
     try:
         with _db() as conn:
             with conn.cursor() as cur:
@@ -173,10 +206,6 @@ def get_meta(key: str) -> str | None:
 
 
 def set_meta(key: str, value: str) -> bool:
-    """
-    ذخیره یا آپدیت یک مقدار در جدول bot_meta (UPSERT).
-    برمی‌گرداند: True اگر موفق، False اگر خطا.
-    """
     sql = """
         INSERT INTO bot_meta (key, value, updated_at)
         VALUES (%s, %s, NOW())
