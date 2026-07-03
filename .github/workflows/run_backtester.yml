@@ -1,10 +1,8 @@
 name: Run Backtester and Optimizer
 on:
   workflow_dispatch:
-
 permissions:
   contents: write
-
 jobs:
   backtest:
     runs-on: ubuntu-latest
@@ -40,14 +38,10 @@ jobs:
         run: |
           python -c "
           import os, sys, glob
-
-          data_dir = os.path.join(os.path.dirname(os.path.abspath('.')), 'data', '4h')
           data_dir = os.path.join(os.getcwd(), 'data', '4h')
-
           print(f'بررسی پوشه: {data_dir}')
           all_csv = glob.glob(os.path.join(data_dir, '*.csv'))
-          print(f'فایل‌های CSV یافت شده: {[os.path.basename(f) for f in all_csv]}')
-
+          print(f'فایل‌های CSV: {[os.path.basename(f) for f in all_csv]}')
           watchlist = [
               'BTCUSDT','ETHUSDT','SOLUSDT','DOTUSDT','LINKUSDT',
               'AVAXUSDT','XRPUSDT','LTCUSDT','BCHUSDT','ATOMUSDT',
@@ -61,7 +55,7 @@ jobs:
               else:
                   import pandas as pd
                   df = pd.read_csv(path)
-                  print(f'✅ {sym}: {len(df)} ردیف | ستون‌ها: {list(df.columns)}')
+                  print(f'✅ {sym}: {len(df)} ردیف')
           if missing:
               print(f'ناموفق: {missing}')
               sys.exit(1)
@@ -74,17 +68,33 @@ jobs:
         run: |
           rm -f data/backtest_trades.csv
 
-          echo "▶️ backtester..."
-          python src/backtester.py
-          echo "✅ backtester تمام شد"
+          # ترتیب: optimizer → train_model → backtester
+          #   1) optimizer بهترین TP_RATIO/SL_RATIO/... را پیدا می‌کند → best_params.json
+          #      (mode پیش‌فرض "backtest" است → grid کامل، شامل SL_RATIO)
+          #   2) train_model با همان TP_RATIO/SL_RATIO هر ارز، target را می‌سازد
+          #      و AI_THRESHOLD کالیبره‌شده را تولید می‌کند → ai_thresholds.json
+          #   3) backtester با هر دو فایل تازه، نتیجه‌ی نهایی واقعی را گزارش می‌دهد
 
-          echo "▶️ train_model..."
+          echo "▶️ optimizer (مرحله ۱: بهینه‌سازی پارامترهای استراتژی)..."
+          python src/optimizer.py
+          echo "✅ optimizer تمام شد"
+
+          echo "=== best_params.json ==="
+          cat best_params.json || echo "فایل وجود ندارد!"
+
+          echo "▶️ train_model (مرحله ۲: آموزش مدل + کالیبراسیون AI_THRESHOLD)..."
           python src/train_model.py
           echo "✅ train_model تمام شد"
 
-          echo "▶️ optimizer..."
-          python src/optimizer.py
-          echo "✅ optimizer تمام شد"
+          echo "=== ai_thresholds.json (per-symbol calibration) ==="
+          cat ai_thresholds.json || echo "فایل ai_thresholds.json ساخته نشد!"
+
+          echo "▶️ backtester (مرحله ۳: گزارش نهایی با پارامترهای تازه)..."
+          python src/backtester.py
+          echo "✅ backtester تمام شد"
+
+          echo "=== backtest_table_summary.csv ==="
+          cat backtest_table_summary.csv || echo "فایل وجود ندارد!"
 
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
@@ -92,10 +102,16 @@ jobs:
           git add -f best_params.json            || true
           git add -f data/trading_bot_backtest.db || true
           git add -f training_results.json       || true
+          git add -f ai_thresholds.json          || true
           git add -f src/models/                 || true
           git add .
+          git status
           git commit -m "Auto-update: Backtest + Train + Optimize $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes"
-          git push origin HEAD:${{ github.ref_name }} --force
+          # ✅ FIX: force-with-lease به‌جای force — اگر بین checkout و push
+          # (مثلاً توسط trade.yml که هر ۳۰ دقیقه اجرا می‌شود) commit دیگری
+          # روی همین برنچ اضافه شده باشد، force-with-lease از rewrite بی‌صدای
+          # آن جلوگیری می‌کند و job را با خطا متوقف می‌کند (به‌جای حذف بی‌صدا).
+          git push origin HEAD:${{ github.ref_name }} --force-with-lease
 
       - name: Upload Artifacts
         if: always()
@@ -107,3 +123,4 @@ jobs:
             best_params.json
             training_results.json
             data/trading_bot_backtest.db
+            ai_thresholds.json
