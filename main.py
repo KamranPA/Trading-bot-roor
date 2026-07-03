@@ -1,10 +1,15 @@
 # ---------------------------------------------------------
-# FILE PATH: main.py (v2.3 - Auto train_model + ai_threshold sync)
-# تغییرات نسبت به v2.2:
-#   ✅ run_auto_optimization: train_model هم اجرا می‌شود (نه فقط optimizer)
-#   ✅ ai_thresholds.json در لایو هم آپدیت می‌شود
-#   ✅ check_exits: هم 'Close' و هم 'close' پشتیبانی می‌شود
-#   ✅ get_symbol_params: از ai_thresholds.json هم لود می‌کند (برای لاگ)
+# FILE PATH: main.py (v2.4 - Unified fix pass)
+# ⚠️ این ربات فقط سیگنال تولید و به تلگرام ارسال می‌کند.
+#    هیچ سفارش واقعی در صرافی ثبت نمی‌شود (بدون اجرای خودکار معامله).
+#
+# تغییرات نسبت به v2.3:
+#   ✅ FIX: شمارنده‌ی open_positions_count دیگر یک عدد ثابتِ خوانده‌شده
+#      قبل از اسکن نیست — بلکه یک شمارنده‌ی thread-safe است که بلافاصله
+#      بعد از ذخیره‌ی هر سیگنال جدید افزایش پیدا می‌کند. این از نقض
+#      MAX_OPEN_POSITIONS در اثر race condition بین تردهای موازی جلوگیری می‌کند.
+#   ✅ FIX: heartbeat فقط یک‌بار در روز (ساعت 22:00-22:29 UTC) ارسال می‌شود،
+#      نه دوبار (چون trade.yml هر ۳۰ دقیقه اجرا می‌شود).
 # ---------------------------------------------------------
 import os
 import sys
@@ -33,8 +38,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BRAIN   = TradingBrain()
+BRAIN = TradingBrain()
+
+# قفل نوشتن دیتابیس (مثل قبل)
 db_lock = threading.Lock()
+
+# ✅ FIX: شمارنده‌ی thread-safe پوزیشن‌های باز — در طول یک دور اسکن به‌روز می‌شود
+position_lock = threading.Lock()
+_position_state = {'count': 0}
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +69,6 @@ def get_symbol_params(symbol: str) -> dict:
             all_params = json.load(f)
         if symbol in all_params:
             merged = {**default_params, **all_params[symbol]}
-            # لاگ AI_THRESHOLD کالیبره‌شده برای این symbol
             info = get_threshold_info(symbol)
             if info:
                 logger.debug(
@@ -72,7 +82,7 @@ def get_symbol_params(symbol: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# بررسی و بستن پوزیشن‌های باز
+# بررسی و بستن پوزیشن‌های باز (فقط ثبت در دیتابیس — بدون سفارش واقعی صرافی)
 # ---------------------------------------------------------------------------
 
 def check_exits():
@@ -116,7 +126,6 @@ def check_exits():
                 logger.warning(f"دریافت قیمت برای {symbol} ناموفق بود")
                 continue
 
-            # ✅ FIX: پشتیبانی از هر دو 'Close' و 'close'
             last_row = df.iloc[-1]
             current_price = float(
                 last_row.get('Close', last_row.get('close', 0))
@@ -154,7 +163,7 @@ def check_exits():
 
 
 # ---------------------------------------------------------------------------
-# Heartbeat
+# Heartbeat — فقط یک‌بار در روز
 # ---------------------------------------------------------------------------
 
 def heartbeat_job():
@@ -175,7 +184,13 @@ def heartbeat_job():
 # پردازش هر ارز
 # ---------------------------------------------------------------------------
 
-def process_pair(pair: str, open_positions_count: int):
+def process_pair(pair: str):
+    """
+    ✅ FIX: دیگر open_positions_count به‌عنوان پارامتر ثابت گرفته نمی‌شود.
+    مقدار لحظه‌ای شمارنده‌ی مشترک (thread-safe) در همین‌جا خوانده می‌شود،
+    تا اگر ترد دیگری همین الان یک سیگنال ذخیره کرده باشد، این تابع از آن
+    مطلع باشد و سقف MAX_OPEN_POSITIONS واقعاً رعایت شود.
+    """
     try:
         df = coinex_client.get_coinex_candles(pair)
         if df is None or df.empty:
@@ -190,11 +205,14 @@ def process_pair(pair: str, open_positions_count: int):
 
         sym_params = get_symbol_params(pair)
 
+        with position_lock:
+            current_open_count = _position_state['count']
+
         res = strategy.generate_signal(
             df, pair,
             model=BRAIN,
             params=sym_params,
-            open_positions_count=open_positions_count,
+            open_positions_count=current_open_count,
         )
 
         if not isinstance(res, dict):
@@ -216,6 +234,9 @@ def process_pair(pair: str, open_positions_count: int):
                 signal_id = database.save_signal_advanced(pair=pair, **signal)
                 if signal_id:
                     logger.info(f"سیگنال {pair} با ID {signal_id} ذخیره شد")
+                    # ✅ FIX: بلافاصله بعد از ذخیره‌ی موفق، شمارنده افزایش پیدا می‌کند
+                    with position_lock:
+                        _position_state['count'] += 1
                 else:
                     logger.error(f"ذخیره سیگنال {pair} ناموفق بود")
 
@@ -253,14 +274,18 @@ def run_auto_optimization():
     نکته: چون ربات با GitHub Actions cron اجرا می‌شه و workspace هر بار
     از صفر شروع می‌شه، milestone آخر اجرا رو در دیتابیس ذخیره می‌کنیم
     (دیتابیس PostgreSQL بین اجراها persist می‌شه).
+
+    ⚠️ نکته‌ی مهم: این مرحله به داده‌ی تازه در data/4h/ نیاز دارد.
+    workflow (trade.yml) قبل از اجرای main.py باید fetcher.py را
+    اجرا کرده باشد، وگرنه optimizer/train_model روی داده خالی/قدیمی
+    کار می‌کنند. optimizer.py خودش هم یک لایه‌ی دفاعی دارد که در
+    نبود داده، best_params.json موجود را دست‌نخورده نگه می‌دارد.
     """
     try:
         total_closed = database.get_total_closed_positions_count()
         if total_closed <= 0 or total_closed % 50 != 0:
             return
 
-        # ── جلوگیری از اجرای مکرر برای همون milestone ──────────────────
-        # workspace هر بار از صفر شروع می‌شه، پس از دیتابیس استفاده می‌کنیم
         try:
             last_milestone = database.get_meta('last_optimization_milestone')
             if last_milestone and int(last_milestone) >= total_closed:
@@ -274,16 +299,13 @@ def run_auto_optimization():
 
         logger.info(f"🔄 شروع خودارتقایی (معاملات بسته: {total_closed})...")
 
-        # ── مرحله ۱: optimizer ────────────────────────────────────────────
         logger.info("🔧 مرحله ۱: بهینه‌سازی پارامترهای استراتژی...")
         try:
             optimizer.optimize_all(mode="live")
-            logger.info("✅ optimizer تمام شد → best_params.json آپدیت شد")
+            logger.info("✅ optimizer تمام شد → best_params.json آپدیت شد (یا دست‌نخورده ماند)")
         except Exception as e:
             logger.error(f"❌ خطا در optimizer: {e}", exc_info=True)
-            # ادامه می‌دهیم — train_model می‌تواند با best_params قدیمی هم کار کند
 
-        # ── مرحله ۲: train_model ──────────────────────────────────────────
         logger.info("🧠 مرحله ۲: بازآموزی مدل AI + کالیبراسیون AI_THRESHOLD...")
         try:
             import subprocess
@@ -300,12 +322,6 @@ def run_auto_optimization():
         except Exception as e:
             logger.error(f"❌ خطا در اجرای train_model: {e}", exc_info=True)
 
-        # ── مرحله ۳: لاگ نهایی ───────────────────────────────────────────
-        # چون ربات با cron اجرا می‌شه و هر بار از صفر شروع می‌کنه،
-        # reload لازم نیست — دفعه‌ی بعد cron، BRAIN مدل‌های جدید رو
-        # خودش از src/models/ لود می‌کنه و ai_thresholds.json تازه رو
-        # از طریق get_ai_threshold() می‌خونه.
-        # ── ذخیره milestone در دیتابیس ─────────────────────────────────
         try:
             database.set_meta('last_optimization_milestone', str(total_closed))
             logger.info(f"✅ milestone {total_closed} در دیتابیس ذخیره شد")
@@ -323,7 +339,7 @@ def run_auto_optimization():
 # ---------------------------------------------------------------------------
 
 def run_bot():
-    logger.info("اسکنر هوشمند فعال شد.")
+    logger.info("اسکنر هوشمند فعال شد. (سیستم سیگنال‌دهی — بدون اجرای خودکار معامله)")
 
     try:
         database.init_db()
@@ -342,26 +358,30 @@ def run_bot():
     except Exception as e:
         logger.error(f"خطا در auto_optimization: {e}")
 
+    # ✅ FIX: مقدار اولیه‌ی شمارنده‌ی thread-safe درست قبل از اسکن خوانده می‌شود
     try:
-        open_positions_count = database.get_open_positions_count()
+        _position_state['count'] = database.get_open_positions_count()
     except Exception as e:
         logger.error(f"خطا در خواندن تعداد پوزیشن‌ها: {e} — مقدار ۰ فرض می‌شود")
-        open_positions_count = 0
+        _position_state['count'] = 0
 
     watchlist = getattr(config, 'WATCHLIST', [])
-    logger.info(f"اسکن {len(watchlist)} ارز | پوزیشن‌های باز: {open_positions_count}")
+    logger.info(f"اسکن {len(watchlist)} ارز | پوزیشن‌های باز: {_position_state['count']}")
 
     if not watchlist:
         logger.warning("WATCHLIST خالی است!")
         return
 
     with ThreadPoolExecutor(max_workers=12) as executor:
-        executor.map(lambda p: process_pair(p, open_positions_count), watchlist)
+        executor.map(process_pair, watchlist)
 
     logger.info("دور اسکن کامل شد.")
 
 
 if __name__ == "__main__":
-    if datetime.datetime.now(datetime.timezone.utc).hour == 22:
+    # ✅ FIX: heartbeat فقط یک‌بار در بازه‌ی 22:00-22:29 UTC ارسال می‌شود،
+    # نه در هر دو اجرای 22:00 و 22:30 (چون trade.yml هر ۳۰ دقیقه اجرا می‌شود)
+    _now = datetime.datetime.now(datetime.timezone.utc)
+    if _now.hour == 22 and _now.minute < 30:
         heartbeat_job()
     run_bot()
