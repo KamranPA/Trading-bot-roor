@@ -1,134 +1,144 @@
 {
   "BTC/USDT": {
-    "threshold": 45.27,
+    "threshold": 41.62,
     "percentile": 60.0,
     "score_stats": {
-      "min": 34.17,
-      "p25": 43.4,
-      "median": 44.88,
-      "p75": 46.02,
-      "max": 50.57
+      "min": 34.27,
+      "p25": 40.74,
+      "median": 41.62,
+      "p75": 41.62,
+      "max": 47.67
     },
-    "test_samples": 487,
-    "updated_at": "2026-07-01T09:51:14.267956"
+    "test_samples": 489,
+    "calibration": "per-symbol (n=489)",
+    "updated_at": "2026-07-03T08:45:18.317714"
   },
   "ETH/USDT": {
-    "threshold": 30.11,
+    "threshold": 21.37,
     "percentile": 60.0,
     "score_stats": {
-      "min": 23.94,
-      "p25": 28.71,
-      "median": 29.08,
-      "p75": 31.32,
-      "max": 35.06
+      "min": 19.87,
+      "p25": 20.43,
+      "median": 21.37,
+      "p75": 21.87,
+      "max": 22.52
     },
-    "test_samples": 519,
-    "updated_at": "2026-07-01T09:51:14.334128"
+    "test_samples": 520,
+    "calibration": "per-symbol (n=520)",
+    "updated_at": "2026-07-03T08:45:18.390755"
   },
   "SOL/USDT": {
-    "threshold": 35.3,
+    "threshold": 32.39,
     "percentile": 60.0,
     "score_stats": {
-      "min": 34.32,
-      "p25": 34.67,
-      "median": 35.17,
-      "p75": 35.81,
-      "max": 36.61
+      "min": 31.03,
+      "p25": 31.7,
+      "median": 32.39,
+      "p75": 32.81,
+      "max": 33.37
     },
-    "test_samples": 468,
-    "updated_at": "2026-07-01T09:51:14.395623"
+    "test_samples": 470,
+    "calibration": "per-symbol (n=470)",
+    "updated_at": "2026-07-03T08:45:18.460147"
   },
   "DOT/USDT": {
-    "threshold": 40.02,
+    "threshold": 38.08,
     "percentile": 60.0,
     "score_stats": {
-      "min": 39.26,
-      "p25": 40.02,
-      "median": 40.02,
-      "p75": 40.31,
-      "max": 41.62
+      "min": 37.44,
+      "p25": 37.89,
+      "median": 37.89,
+      "p75": 38.08,
+      "max": 39.47
     },
-    "test_samples": 471,
-    "updated_at": "2026-07-01T09:51:14.454058"
+    "test_samples": 473,
+    "calibration": "per-symbol (n=473)",
+    "updated_at": "2026-07-03T08:45:18.520791"
   },
   "LINK/USDT": {
-    "threshold": 43.8,
+    "threshold": 37.66,
     "percentile": 60.0,
     "score_stats": {
-      "min": 42.92,
-      "p25": 43.8,
-      "median": 43.8,
-      "p75": 44.2,
-      "max": 45.13
+      "min": 36.48,
+      "p25": 37.4,
+      "median": 37.66,
+      "p75": 37.89,
+      "max": 38.84
     },
-    "test_samples": 471,
-    "updated_at": "2026-07-01T09:51:14.511727"
+    "test_samples": 473,
+    "calibration": "per-symbol (n=473)",
+    "updated_at": "2026-07-03T08:45:18.582211"
   },
   "AVAX/USDT": {
-    "threshold": 45.54,
+    "threshold": 38.37,
     "percentile": 60.0,
     "score_stats": {
-      "min": 44.27,
-      "p25": 45.49,
-      "median": 45.49,
-      "p75": 45.7,
-      "max": 46.23
+      "min": 36.94,
+      "p25": 37.86,
+      "median": 38.18,
+      "p75": 38.85,
+      "max": 39.41
     },
-    "test_samples": 472,
-    "updated_at": "2026-07-01T09:51:14.567737"
+    "test_samples": 473,
+    "calibration": "per-symbol (n=473)",
+    "updated_at": "2026-07-03T08:45:18.645188"
   },
   "XRP/USDT": {
-    "threshold": 43.66,
+    "threshold": 38.24,
     "percentile": 60.0,
     "score_stats": {
-      "min": 42.48,
-      "p25": 43.29,
-      "median": 43.65,
-      "p75": 43.82,
-      "max": 44.91
+      "min": 31.0,
+      "p25": 36.96,
+      "median": 38.01,
+      "p75": 38.8,
+      "max": 42.87
     },
-    "test_samples": 449,
-    "updated_at": "2026-07-01T09:51:14.625114"
+    "test_samples": 451,
+    "calibration": "per-symbol (n=451)",
+    "updated_at": "2026-07-03T08:45:18.710049"
   },
   "LTC/USDT": {
-    "threshold": 38.35,
+    "threshold": 27.57,
     "percentile": 60.0,
     "score_stats": {
-      "min": 37.16,
-      "p25": 38.1,
-      "median": 38.1,
-      "p75": 38.43,
-      "max": 39.04
+      "min": 26.18,
+      "p25": 27.39,
+      "median": 27.41,
+      "p75": 28.01,
+      "max": 28.87
     },
-    "test_samples": 476,
-    "updated_at": "2026-07-01T09:51:14.684354"
+    "test_samples": 478,
+    "calibration": "per-symbol (n=478)",
+    "updated_at": "2026-07-03T08:45:18.778605"
   },
   "BCH/USDT": {
-    "threshold": 32.3,
+    "threshold": 20.0,
     "percentile": 60.0,
     "score_stats": {
-      "min": 30.86,
-      "p25": 32.28,
-      "median": 32.3,
-      "p75": 32.67,
-      "max": 33.68
+      "min": 17.47,
+      "p25": 18.49,
+      "median": 19.31,
+      "p75": 19.36,
+      "max": 20.08
     },
-    "test_samples": 448,
-    "updated_at": "2026-07-01T09:51:14.745518"
+    "test_samples": 449,
+    "calibration": "per-symbol (n=449)",
+    "updated_at": "2026-07-03T08:45:18.852679"
   },
   "ATOM/USDT": {
-    "threshold": 40.08,
+    "threshold": 36.63,
     "percentile": 60.0,
     "score_stats": {
-      "min": 34.63,
-      "p25": 39.35,
-      "median": 40.08,
-      "p75": 40.08,
-      "max": 46.61
+      "min": 35.48,
+      "p25": 36.43,
+      "median": 36.63,
+      "p75": 36.63,
+      "max": 38.1
     },
-    "test_samples": 481,
-    "updated_at": "2026-07-01T09:51:14.802685"
+    "test_samples": 484,
+    "calibration": "per-symbol (n=484)",
+    "updated_at": "2026-07-03T08:45:18.912435"
   },
-  "_updated_at": "2026-07-01T09:51:14.804962",
+  "_updated_at": "2026-07-03T08:45:18.914946",
   "_percentile": 60.0
 }
