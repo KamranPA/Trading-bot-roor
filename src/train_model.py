@@ -358,9 +358,9 @@ class ModelTrainer:
                 split_train = int(n * TRAIN_FRAC)
                 split_valid = int(n * (TRAIN_FRAC + VALID_FRAC))
 
-                X_train, y_train = X.iloc[:split_train],            y.iloc[:split_train]
+                X_train, y_train = X.iloc[:split_train],        y.iloc[:split_train]
                 X_valid, y_valid = X.iloc[split_train:split_valid], y.iloc[split_train:split_valid]
-                X_test,  y_test  = X.iloc[split_valid:],            y.iloc[split_valid:]
+                X_test,  y_test  = X.iloc[split_valid:],        y.iloc[split_valid:]
 
                 logger.info(f"  train={len(X_train)} | valid={len(X_valid)} | test={len(X_test)}")
 
