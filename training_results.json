@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-07-04T06:03:47.819467",
+  "timestamp": "2026-07-04T07:35:36.708431",
   "model_type": "LightGBM",
   "features": [
     "feat_adx",
@@ -18,38 +18,38 @@
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/BTC_USDT_model.pkl",
       "brain_key": "BTC/USDT",
-      "train_score": 0.7917139614074915,
-      "valid_score": 0.8095238095238095,
-      "test_score": 0.8677248677248677,
-      "test_auc": 0.6745121951219513,
-      "test_logloss": 0.418118664933818,
-      "best_iteration": 6,
+      "train_score": 0.6634506242905789,
+      "valid_score": 0.6455026455026455,
+      "test_score": 0.6931216931216931,
+      "test_auc": 0.5710055277704659,
+      "test_logloss": 0.6176186569875749,
+      "best_iteration": 8,
       "samples": 2518,
-      "tp_percent": 19.4,
+      "tp_percent": 33.5,
       "top_features": [
         [
-          "feat_atr_percent",
-          "33"
-        ],
-        [
           "feat_adx",
-          "31"
+          "57"
         ],
         [
           "feat_ema_deviation",
-          "20"
+          "42"
+        ],
+        [
+          "feat_atr_percent",
+          "39"
         ]
       ],
-      "ai_threshold": 24.5,
+      "ai_threshold": 38.59,
       "score_stats": {
-        "min": 17.31,
-        "p25": 22.74,
-        "median": 24.41,
-        "p75": 25.44,
-        "max": 32.73
+        "min": 26.3,
+        "p25": 34.9,
+        "median": 38.0,
+        "p75": 39.65,
+        "max": 46.13
       },
-      "target_tp_ratio": 2.5,
-      "target_sl_ratio": 1.2
+      "target_tp_ratio": 2.0,
+      "target_sl_ratio": 0.8
     },
     "ETHUSDT": {
       "status": "SUCCESS",
@@ -59,7 +59,7 @@
       "valid_score": 0.7885572139303483,
       "test_score": 0.8208955223880597,
       "test_auc": 0.6152356902356902,
-      "test_logloss": 0.47080843163984415,
+      "test_logloss": 0.4708084316398442,
       "best_iteration": 1,
       "samples": 2679,
       "tp_percent": 19.8,
@@ -96,7 +96,7 @@
       "valid_score": 0.6722689075630253,
       "test_score": 0.7625698324022346,
       "test_auc": 0.59823313940961,
-      "test_logloss": 0.5611766607381584,
+      "test_logloss": 0.5611766607381583,
       "best_iteration": 2,
       "samples": 2383,
       "tp_percent": 29.7,
@@ -133,7 +133,7 @@
       "valid_score": 0.6850828729281768,
       "test_score": 0.6823204419889503,
       "test_auc": 0.442809364548495,
-      "test_logloss": 0.6344094696920414,
+      "test_logloss": 0.6344094696920415,
       "best_iteration": 1,
       "samples": 2412,
       "tp_percent": 35.8,
@@ -314,38 +314,38 @@
       "status": "SUCCESS",
       "model_path": "/home/runner/work/Trading-bot-roor/Trading-bot-roor/src/models/BCH_USDT_model.pkl",
       "brain_key": "BCH/USDT",
-      "train_score": 0.7277743715511956,
-      "valid_score": 0.7535816618911175,
-      "test_score": 0.6857142857142857,
-      "test_auc": 0.5270833333333333,
-      "test_logloss": 0.6213051427653526,
-      "best_iteration": 8,
+      "train_score": 0.8375229920294298,
+      "valid_score": 0.8825214899713467,
+      "test_score": 0.76,
+      "test_auc": 0.430093089867526,
+      "test_logloss": 0.5689552298790691,
+      "best_iteration": 1,
       "samples": 2330,
-      "tp_percent": 27.5,
+      "tp_percent": 16.7,
       "top_features": [
         [
-          "feat_ema_deviation",
-          "50"
+          "feat_adx",
+          "7"
+        ],
+        [
+          "feat_rsi",
+          "6"
         ],
         [
           "feat_atr_percent",
-          "47"
-        ],
-        [
-          "feat_adx",
-          "44"
+          "5"
         ]
       ],
-      "ai_threshold": 31.9,
+      "ai_threshold": 20.0,
       "score_stats": {
-        "min": 24.13,
-        "p25": 26.3,
-        "median": 29.73,
-        "p75": 33.18,
-        "max": 39.93
+        "min": 15.77,
+        "p25": 16.48,
+        "median": 17.26,
+        "p75": 17.69,
+        "max": 18.67
       },
-      "target_tp_ratio": 2.0,
-      "target_sl_ratio": 1.0
+      "target_tp_ratio": 2.5,
+      "target_sl_ratio": 1.2
     },
     "ATOMUSDT": {
       "status": "SUCCESS",

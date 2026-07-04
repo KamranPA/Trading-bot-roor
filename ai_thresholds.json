@@ -1,20 +1,20 @@
 {
   "BTC/USDT": {
-    "threshold": 24.5,
+    "threshold": 38.59,
     "percentile": 60.0,
     "score_stats": {
-      "min": 17.31,
-      "p25": 22.74,
-      "median": 24.41,
-      "p75": 25.44,
-      "max": 32.73
+      "min": 26.3,
+      "p25": 34.9,
+      "median": 38.0,
+      "p75": 39.65,
+      "max": 46.13
     },
     "test_samples": 378,
     "calibration": "per-symbol (n=378)",
-    "test_auc": 0.6745,
-    "test_logloss": 0.4181,
-    "best_iteration": 6,
-    "updated_at": "2026-07-04T06:03:47.880361"
+    "test_auc": 0.571,
+    "test_logloss": 0.6176,
+    "best_iteration": 8,
+    "updated_at": "2026-07-04T07:35:36.785111"
   },
   "ETH/USDT": {
     "threshold": 21.04,
@@ -31,7 +31,7 @@
     "test_auc": 0.6152,
     "test_logloss": 0.4708,
     "best_iteration": 1,
-    "updated_at": "2026-07-04T06:03:47.940532"
+    "updated_at": "2026-07-04T07:35:36.863662"
   },
   "SOL/USDT": {
     "threshold": 31.66,
@@ -48,7 +48,7 @@
     "test_auc": 0.5982,
     "test_logloss": 0.5612,
     "best_iteration": 2,
-    "updated_at": "2026-07-04T06:03:47.995992"
+    "updated_at": "2026-07-04T07:35:36.937914"
   },
   "DOT/USDT": {
     "threshold": 38.02,
@@ -65,7 +65,7 @@
     "test_auc": 0.4428,
     "test_logloss": 0.6344,
     "best_iteration": 1,
-    "updated_at": "2026-07-04T06:03:48.044752"
+    "updated_at": "2026-07-04T07:35:37.004198"
   },
   "LINK/USDT": {
     "threshold": 38.02,
@@ -82,7 +82,7 @@
     "test_auc": 0.4454,
     "test_logloss": 0.639,
     "best_iteration": 1,
-    "updated_at": "2026-07-04T06:03:48.094525"
+    "updated_at": "2026-07-04T07:35:37.071318"
   },
   "AVAX/USDT": {
     "threshold": 37.96,
@@ -99,7 +99,7 @@
     "test_auc": 0.4396,
     "test_logloss": 0.6185,
     "best_iteration": 1,
-    "updated_at": "2026-07-04T06:03:48.143220"
+    "updated_at": "2026-07-04T07:35:37.138667"
   },
   "XRP/USDT": {
     "threshold": 37.78,
@@ -116,7 +116,7 @@
     "test_auc": 0.4718,
     "test_logloss": 0.6363,
     "best_iteration": 4,
-    "updated_at": "2026-07-04T06:03:48.193159"
+    "updated_at": "2026-07-04T07:35:37.209032"
   },
   "LTC/USDT": {
     "threshold": 26.65,
@@ -133,24 +133,24 @@
     "test_auc": 0.4577,
     "test_logloss": 0.5784,
     "best_iteration": 1,
-    "updated_at": "2026-07-04T06:03:48.249096"
+    "updated_at": "2026-07-04T07:35:37.282570"
   },
   "BCH/USDT": {
-    "threshold": 31.9,
+    "threshold": 20.0,
     "percentile": 60.0,
     "score_stats": {
-      "min": 24.13,
-      "p25": 26.3,
-      "median": 29.73,
-      "p75": 33.18,
-      "max": 39.93
+      "min": 15.77,
+      "p25": 16.48,
+      "median": 17.26,
+      "p75": 17.69,
+      "max": 18.67
     },
     "test_samples": 350,
     "calibration": "per-symbol (n=350)",
-    "test_auc": 0.5271,
-    "test_logloss": 0.6213,
-    "best_iteration": 8,
-    "updated_at": "2026-07-04T06:03:48.306517"
+    "test_auc": 0.4301,
+    "test_logloss": 0.569,
+    "best_iteration": 1,
+    "updated_at": "2026-07-04T07:35:37.363574"
   },
   "ATOM/USDT": {
     "threshold": 35.93,
@@ -167,8 +167,8 @@
     "test_auc": 0.4975,
     "test_logloss": 0.6701,
     "best_iteration": 1,
-    "updated_at": "2026-07-04T06:03:48.352171"
+    "updated_at": "2026-07-04T07:35:37.431564"
   },
-  "_updated_at": "2026-07-04T06:03:48.353749",
+  "_updated_at": "2026-07-04T07:35:37.433946",
   "_percentile": 60.0
 }
