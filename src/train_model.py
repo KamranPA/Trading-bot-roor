@@ -1,16 +1,29 @@
 """
-FILE PATH: src/train_model.py (v12.1 - Fix target/volume-filter ordering)
-تغییرات نسبت به v12.0:
-  ✅ FIX: ترتیب عملیات اصلاح شد — target حالا روی سری کامل و پیوسته‌ی
-     کندل‌ها ساخته می‌شود (قبل از فیلتر حجم)، نه بعد از آن. قبلاً فیلتر
-     حجم ردیف‌ها را فیزیکی حذف می‌کرد و بعد _build_target با فرض این‌که
-     iloc[i+1] کندل بلافاصله بعدی (۴ ساعت بعد) است شبیه‌سازی TP/SL انجام
-     می‌داد — که بعد از حذف ردیف‌ها دیگر درست نبود و برچسب‌های آموزشی
-     را اعوجاج‌دار می‌کرد. حالا فیلتر حجم فقط بعد از ساخت target اعمال
-     می‌شود و صرفاً تعیین می‌کند کدام ردیف‌ها برای training استفاده شوند.
-  ✅ FIX: کالیبراسیون AI_THRESHOLD per-symbol فقط وقتی انجام می‌شود که
-     X_test حداقل MIN_TEST_SAMPLES_FOR_CALIBRATION نمونه داشته باشد؛
-     در غیر این صورت fallback امن به AI_THRESHOLD سراسری (config).
+FILE PATH: src/train_model.py (v13.0 - Root-cause fix for weak/flat model output)
+تغییرات نسبت به v12.1:
+
+  🔴 ریشه‌ی اصلی ضعف مدل (بازه‌ی احتمال خروجی فقط ۲-۳ واحد روی صدها نمونه):
+     eval_set برای early_stopping دقیقاً همان X_test/y_test بود که بعداً هم
+     برای گزارش test_score و هم برای کالیبراسیون AI_THRESHOLD استفاده می‌شد.
+     چون برچسب TP/SL روی این افق (۲۰ کندل ۴ساعته) نویزی است، loss روی این
+     validation تقریباً بلافاصله ثابت می‌ماند و early_stopping خیلی زود
+     (شاید ۵-۱۵ درخت از ۳۰۰ درخت مجاز) فعال می‌شود → مدل فرصت نمی‌کند فضای
+     احتمال را باز کند → خروجی تقریباً ثابت برای همه‌ی کندل‌ها.
+
+  ✅ FIX 1: حالا سه‌بخشی (train/valid/test) — early stopping روی valid
+     انجام می‌شود، نه روی test. test فقط برای گزارش نهایی و کالیبراسیون
+     استفاده می‌شود و در تصمیم "چند درخت بساز" هیچ نقشی ندارد.
+  ✅ FIX 2: warm-up ۲۰۰ ردیفی هماهنگ با backtester.py — قبل از این تعداد
+     ردیف، ema_200/Trend_line هنوز converge نشده و فیچر feat_trend_line
+     نامعتبر است؛ این ردیف‌ها دیگر وارد training نمی‌شوند.
+  ✅ FIX 3: آستانه‌ی RSI برای ساخت target از (>52 / <48) به (>50 / <50)
+     تغییر کرد — دقیقاً همان آستانه‌ای که strategy.py برای تعیین جهت
+     استفاده می‌کند. قبلاً مدل هرگز روی کندل‌های RSI∈[48,52] آموزش
+     نمی‌دید، ولی در لایو دقیقاً روی همان کندل‌ها هم پرسیده می‌شد.
+  ✅ FIX 4: لاگ تشخیصی جدید — best_iteration_ (چند درخت واقعاً ساخته شد)،
+     AUC و logloss دستی (بدون وابستگی به scikit-learn) روی test واقعی.
+     این اعداد مشخص می‌کنند که آیا فیکس‌های بالا مشکل را حل کردند یا
+     سیگنال قابل‌یادگیری در این فیچرها/برچسب اصلاً کم است (AUC≈0.5).
 """
 
 import pandas as pd
@@ -73,24 +86,55 @@ FEAT_COLUMNS = [
     'feat_volume_ratio',
 ]
 
-MIN_TRAINING_SAMPLES = 50
 TARGET_LOOKAHEAD = 20
 
-# ✅ FIX: حداقل تعداد نمونه در X_test تا کالیبراسیون per-symbol آماری
-# معنادار باشد. اگر test set کوچک‌تر از این باشد، از AI_THRESHOLD
-# سراسری (config) استفاده می‌شود به‌جای یک صدک محاسبه‌شده روی چند نمونه.
+# ✅ FIX 2: هماهنگ با backtester.py — قبل از این تعداد ردیف، ema_200/Trend_line
+# هنوز converge نشده. این ردیف‌ها بعد از ساخت target (که به آن‌ها نیاز ندارد)
+# ولی قبل از تشکیل X/y حذف می‌شوند.
+WARMUP_ROWS = 200
+
+# ✅ FIX 1: نسبت‌های تقسیم سه‌بخشی — زمانی/بدون shuffle (walk-forward)
+TRAIN_FRAC = 0.70
+VALID_FRAC = 0.15
+# باقی‌مانده (~۰.۱۵) = test
+
+MIN_TRAINING_SAMPLES = 150
+MIN_VALID_SAMPLES    = 30
+MIN_TEST_SAMPLES     = 30
+
 MIN_TEST_SAMPLES_FOR_CALIBRATION = 30
 
-# صدکی که برای AI_THRESHOLD پیشنهادی استفاده می‌شود.
 AI_THRESHOLD_PERCENTILE = float(getattr(config, 'AI_THRESHOLD_PERCENTILE', 60))
-
 AI_THRESHOLD_MIN = float(getattr(config, 'AI_THRESHOLD_MIN', 20.0))
 AI_THRESHOLD_MAX = float(getattr(config, 'AI_THRESHOLD_MAX', 80.0))
 
 AI_THRESHOLDS_FILE = os.path.join(BASE_DIR, 'ai_thresholds.json')
 
 
-# ─── تابع target (بدون تغییر منطق — فقط جای صدا زدنش عوض شد) ────────────────
+# ─── معیارهای تشخیصی دستی (بدون وابستگی به scikit-learn) ────────────────────
+
+def _manual_log_loss(y_true: np.ndarray, y_prob: np.ndarray, eps: float = 1e-12) -> float:
+    y_prob = np.clip(y_prob, eps, 1 - eps)
+    return float(-np.mean(y_true * np.log(y_prob) + (1 - y_true) * np.log(1 - y_prob)))
+
+
+def _manual_auc(y_true: np.ndarray, y_score: np.ndarray) -> Optional[float]:
+    """AUC از طریق روش رتبه‌ای Mann-Whitney U — بدون نیاز به scikit-learn."""
+    y_true = np.asarray(y_true)
+    y_score = np.asarray(y_score)
+    n_pos = int((y_true == 1).sum())
+    n_neg = int((y_true == 0).sum())
+    if n_pos == 0 or n_neg == 0:
+        return None
+    order = np.argsort(y_score, kind='mergesort')
+    ranks = np.empty(len(y_score), dtype=float)
+    ranks[order] = np.arange(1, len(y_score) + 1)
+    sum_ranks_pos = ranks[y_true == 1].sum()
+    auc = (sum_ranks_pos - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg)
+    return float(auc)
+
+
+# ─── تابع target ──────────────────────────────────────────────────────────────
 
 def _build_target(
     df: pd.DataFrame,
@@ -99,15 +143,11 @@ def _build_target(
     sl_ratio: Optional[float] = None,
 ) -> pd.Series:
     """
-    ⚠️ این تابع باید روی دیتافریمی صدا زده شود که هنوز فیلتر حجم رویش
-    اعمال نشده — یعنی توالی زمانی کندل‌ها پیوسته و بدون شکاف باشد.
-    (به همین دلیل در train_multiple_symbols حالا قبل از فیلتر حجم
-    فراخوانی می‌شود.)
+    ⚠️ باید روی دیتافریمی صدا زده شود که هنوز فیلتر حجم رویش اعمال نشده
+    (توالی زمانی پیوسته لازم است).
 
-    tp_ratio/sl_ratio اگر پاس داده نشوند، از config ثابت خوانده می‌شوند.
-    توصیه می‌شود از _get_symbol_tp_sl() مقدار اختصاصی هر symbol
-    (از best_params.json) پاس داده شود تا target با پارامترهای واقعی
-    معامله‌ی همان ارز هماهنگ باشد — نه یک TP_RATIO ثابت سراسری.
+    ✅ FIX 3: آستانه‌ی جهت‌گیری از (RSI>52 / RSI<48) به (RSI>50 / RSI<50)
+    تغییر کرد تا با شرط جهت در strategy.py دقیقاً یکی باشد.
     """
     if sl_ratio is None:
         sl_ratio = float(getattr(config, 'SL_RATIO',  1.0))
@@ -136,11 +176,12 @@ def _build_target(
 
         cur_rsi = float(rsi[i])
 
-        if cur_rsi > 52:
+        # ✅ FIX 3: آستانه‌ی 50 — یکسان با strategy.py
+        if cur_rsi > 50:
             sl_price  = entry - sl_dist
             tp_price  = entry + sl_dist * tp_ratio
             direction = 'LONG'
-        elif cur_rsi < 48:
+        elif cur_rsi < 50:
             sl_price  = entry + sl_dist
             tp_price  = entry - sl_dist * tp_ratio
             direction = 'SHORT'
@@ -150,8 +191,6 @@ def _build_target(
         hit_tp = False
         hit_sl = False
 
-        # ✅ چون این حالا روی سری پیوسته (قبل از فیلتر حجم) اجرا می‌شود،
-        # j واقعاً i+1 ... i+TARGET_LOOKAHEAD کندل ۴ساعته‌ی بعدی است.
         for j in range(i + 1, min(i + TARGET_LOOKAHEAD + 1, n)):
             h = float(high[j])
             l = float(low[j])
@@ -188,10 +227,6 @@ def _apply_volume_filter(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
 
 
 def _load_best_params() -> Dict:
-    """
-    خواندن best_params.json (خروجی optimizer.py).
-    اگر فایل موجود نباشد یا خراب باشد، dict خالی برمی‌گرداند (fallback به config).
-    """
     path = os.path.join(BASE_DIR, 'best_params.json')
     if not os.path.exists(path):
         return {}
@@ -204,12 +239,6 @@ def _load_best_params() -> Dict:
 
 
 def _get_symbol_tp_sl(symbol: str, best_params: Dict) -> Tuple[float, float]:
-    """
-    خواندن TP_RATIO/SL_RATIO اختصاصی هر ارز از best_params.json (خروجی optimizer.py).
-    اولویت: best_params[symbol] > config ثابت.
-    این تضمین می‌کند هدف training (target) با همان نسبت TP/SL که در بکتست/لایو
-    برای این ارز استفاده می‌شود هماهنگ باشد — نه یک TP_RATIO ثابت سراسری.
-    """
     entry = best_params.get(symbol, {})
     tp_ratio = float(entry.get('TP_RATIO', getattr(config, 'TP_RATIO', 2.0)))
     sl_ratio = float(entry.get('SL_RATIO', getattr(config, 'SL_RATIO', 1.0)))
@@ -217,9 +246,6 @@ def _get_symbol_tp_sl(symbol: str, best_params: Dict) -> Tuple[float, float]:
 
 
 def _model_key(symbol: str) -> str:
-    """
-    BTCUSDT → BTC/USDT → BTC_USDT  (نام فایل مدل، سازگار با brain.py)
-    """
     if '/' not in symbol and 'USDT' in symbol:
         base   = symbol.replace('USDT', '')
         symbol = f"{base}/USDT"
@@ -227,9 +253,6 @@ def _model_key(symbol: str) -> str:
 
 
 def _brain_symbol(symbol: str) -> str:
-    """
-    BTCUSDT → BTC/USDT  (کلیدی که brain.py و backtester.py برای جستجو استفاده می‌کنند)
-    """
     if '/' not in symbol and 'USDT' in symbol:
         base = symbol.replace('USDT', '')
         return f"{base}/USDT"
@@ -243,7 +266,6 @@ class ModelTrainer:
     def __init__(self, model_dir: str = "./models"):
         self.model_dir = Path(model_dir)
         self.model_dir.mkdir(parents=True, exist_ok=True)
-        # نگاشت brain_symbol → ai_threshold پیشنهادی
         self.ai_thresholds: Dict[str, Dict] = {}
 
     def train_multiple_symbols(
@@ -264,6 +286,9 @@ class ModelTrainer:
         logger.info(f"شروع training برای {len(data_dict)} symbol")
         logger.info(f"فیچرها ({len(FEAT_COLUMNS)}): {FEAT_COLUMNS}")
         logger.info(f"AI_THRESHOLD percentile: {AI_THRESHOLD_PERCENTILE}")
+        logger.info(f"تقسیم داده: train={TRAIN_FRAC:.0%} / valid={VALID_FRAC:.0%} / "
+                    f"test={1-TRAIN_FRAC-VALID_FRAC:.0%} (زمانی، بدون shuffle)")
+        logger.info(f"warm-up: {WARMUP_ROWS} ردیف اول حذف می‌شود (هماهنگ با backtester.py)")
         logger.info("=" * 65)
 
         best_params = _load_best_params()
@@ -275,7 +300,6 @@ class ModelTrainer:
         for symbol, df in data_dict.items():
             logger.info(f"\nپردازش: {symbol}")
 
-            # ── ۱. اندیکاتورها ────────────────────────────────────────────
             if HAS_INDICATORS:
                 df_feat, meta = TechnicalIndicators.calculate_all_features(
                     df, symbol=symbol, min_rows_required=100
@@ -288,9 +312,6 @@ class ModelTrainer:
             else:
                 df_feat = df.copy()
 
-            # ── ۲. target (روی سری کامل و پیوسته، با TP_RATIO/SL_RATIO
-            #      اختصاصی این symbol) — ✅ FIX: این حالا قبل از فیلتر
-            #      حجم اجرا می‌شود تا توالی زمانی کندل‌ها دست‌نخورده بماند.
             sym_tp_ratio, sym_sl_ratio = _get_symbol_tp_sl(symbol, best_params)
             logger.info(f"  TP_RATIO={sym_tp_ratio} SL_RATIO={sym_sl_ratio} (برای ساخت target)")
             df_feat['target'] = _build_target(
@@ -299,13 +320,17 @@ class ModelTrainer:
                 sl_ratio=sym_sl_ratio,
             )
 
-            # ── ۳. فیلتر حجم (بعد از target) — فقط تعیین می‌کند کدام
-            #      ردیف‌ها به‌عنوان نمونه‌ی training استفاده شوند؛ چون
-            #      ستون target از قبل محاسبه شده، حذف فیزیکی ردیف در
-            #      این مرحله دیگر برچسب‌ها را اعوجاج‌دار نمی‌کند.
+            # ✅ FIX 2: warm-up
+            if len(df_feat) > WARMUP_ROWS:
+                df_feat = df_feat.iloc[WARMUP_ROWS:].reset_index(drop=True)
+            else:
+                logger.warning(
+                    f"  ⚠️ {symbol}: طول داده ({len(df_feat)}) کمتر از warm-up "
+                    f"({WARMUP_ROWS}) است — warm-up رد شد"
+                )
+
             df_feat = _apply_volume_filter(df_feat, symbol)
 
-            # ── ۴. بررسی فیچرها ──────────────────────────────────────────
             missing = [f for f in FEAT_COLUMNS if f not in df_feat.columns]
             if missing:
                 logger.error(f"  فیچرهای گمشده: {missing}")
@@ -317,8 +342,8 @@ class ModelTrainer:
                 X = df_feat[FEAT_COLUMNS].copy()
                 y = df_feat['target'].copy()
 
-                valid = X.notna().all(axis=1) & y.notna()
-                X, y  = X[valid], y[valid]
+                valid_mask = X.notna().all(axis=1) & y.notna()
+                X, y = X[valid_mask], y[valid_mask]
 
                 if len(X) < MIN_TRAINING_SAMPLES:
                     logger.error(f"  نمونه ناکافی: {len(X)} < {MIN_TRAINING_SAMPLES}")
@@ -327,13 +352,26 @@ class ModelTrainer:
                     continue
 
                 tp_pct = float((y == 1).mean() * 100)
-                logger.info(f"  {len(X)} نمونه | TP={tp_pct:.1f}% | SL={100-tp_pct:.1f}%")
+                logger.info(f"  {len(X)} نمونه (بعد از warm-up/فیلتر) | TP={tp_pct:.1f}% | SL={100-tp_pct:.1f}%")
 
-                split  = int(len(X) * 0.8)
-                X_train, X_test = X.iloc[:split], X.iloc[split:]
-                y_train, y_test = y.iloc[:split], y.iloc[split:]
+                n = len(X)
+                split_train = int(n * TRAIN_FRAC)
+                split_valid = int(n * (TRAIN_FRAC + VALID_FRAC))
 
-                logger.info(f"  train={len(X_train)} | test={len(X_test)}")
+                X_train, y_train = X.iloc[:split_train],            y.iloc[:split_train]
+                X_valid, y_valid = X.iloc[split_train:split_valid], y.iloc[split_train:split_valid]
+                X_test,  y_test  = X.iloc[split_valid:],            y.iloc[split_valid:]
+
+                logger.info(f"  train={len(X_train)} | valid={len(X_valid)} | test={len(X_test)}")
+
+                if len(X_valid) < MIN_VALID_SAMPLES or len(X_test) < MIN_TEST_SAMPLES:
+                    logger.error(
+                        f"  ❌ valid/test خیلی کوچک (valid={len(X_valid)}, test={len(X_test)}) "
+                        f"— حداقل لازم: valid≥{MIN_VALID_SAMPLES}, test≥{MIN_TEST_SAMPLES}"
+                    )
+                    results['symbols'][symbol] = {'status': 'FAILED', 'reason': 'valid/test too small after 3-way split'}
+                    results['summary']['failed'] += 1
+                    continue
 
                 if not HAS_LIGHTGBM:
                     logger.error("  LightGBM نصب نیست!")
@@ -357,29 +395,43 @@ class ModelTrainer:
                     verbose=-1,
                 )
 
+                # ✅ FIX 1: early stopping روی VALID، نه روی TEST
                 model.fit(
                     X_train, y_train,
-                    eval_set=[(X_test, y_test)],
+                    eval_set=[(X_valid, y_valid)],
                     callbacks=[
                         lgb.early_stopping(30, verbose=False),
                         lgb.log_evaluation(0),
                     ]
                 )
 
+                best_iter = getattr(model, 'best_iteration_', None) or model.n_estimators
                 train_score = float(model.score(X_train, y_train))
+                valid_score = float(model.score(X_valid, y_valid))
                 test_score  = float(model.score(X_test,  y_test))
-                logger.info(f"  Train accuracy={train_score:.4f} | Test accuracy={test_score:.4f}")
+
+                logger.info(
+                    f"  🌲 best_iteration_={best_iter}/300 | "
+                    f"Train acc={train_score:.4f} | Valid acc={valid_score:.4f} | Test acc={test_score:.4f}"
+                )
+                if best_iter < 20:
+                    logger.warning(
+                        f"  ⚠️ {symbol}: مدل خیلی زود متوقف شد ({best_iter} درخت) — "
+                        f"احتمالاً سیگنال قابل‌یادگیری در این برچسب/فیچرها کم است"
+                    )
 
                 importances = dict(zip(FEAT_COLUMNS, model.feature_importances_))
                 top = sorted(importances.items(), key=lambda x: -x[1])[:3]
                 logger.info(f"  Top features: {[(k, int(v)) for k,v in top]}")
 
-                # ── ✅ کالیبراسیون AI_THRESHOLD per-symbol ─────────────────
-                proba_test = model.predict_proba(X_test)[:, 1] * 100.0  # 0..100
+                proba_test = model.predict_proba(X_test)[:, 1] * 100.0
+                y_test_arr = y_test.to_numpy()
+                test_auc     = _manual_auc(y_test_arr, proba_test / 100.0)
+                test_logloss = _manual_log_loss(y_test_arr, proba_test / 100.0)
+                auc_str = f"{test_auc:.3f}" if test_auc is not None else "N/A"
+                logger.info(f"  📐 Test AUC={auc_str} | Test LogLoss={test_logloss:.4f} "
+                            f"(AUC≈0.5 یعنی مدل عملاً تصادفی است)")
 
-                # ✅ FIX: فقط اگر test set به اندازه‌ی کافی بزرگ باشد،
-                # صدک per-symbol محاسبه می‌شود؛ در غیر این صورت fallback
-                # امن به AI_THRESHOLD سراسری (config).
                 if len(proba_test) >= MIN_TEST_SAMPLES_FOR_CALIBRATION:
                     suggested_threshold = float(np.percentile(proba_test, AI_THRESHOLD_PERCENTILE))
                     suggested_threshold = max(AI_THRESHOLD_MIN, min(AI_THRESHOLD_MAX, suggested_threshold))
@@ -412,15 +464,17 @@ class ModelTrainer:
 
                 brain_sym = _brain_symbol(symbol)
                 self.ai_thresholds[brain_sym] = {
-                    'threshold':   round(suggested_threshold, 2),
-                    'percentile':  AI_THRESHOLD_PERCENTILE,
-                    'score_stats': score_stats,
+                    'threshold':    round(suggested_threshold, 2),
+                    'percentile':   AI_THRESHOLD_PERCENTILE,
+                    'score_stats':  score_stats,
                     'test_samples': len(proba_test),
-                    'calibration': calibration_note,
-                    'updated_at':  datetime.now().isoformat(),
+                    'calibration':  calibration_note,
+                    'test_auc':     round(test_auc, 4) if test_auc is not None else None,
+                    'test_logloss': round(test_logloss, 4),
+                    'best_iteration': int(best_iter),
+                    'updated_at':   datetime.now().isoformat(),
                 }
 
-                # ── ذخیره مدل ────────────────────────────────────────────
                 safe_name  = _model_key(symbol)
                 model_path = self.model_dir / f"{safe_name}_model.pkl"
 
@@ -434,7 +488,11 @@ class ModelTrainer:
                     'model_path':       str(model_path),
                     'brain_key':        brain_sym,
                     'train_score':      train_score,
+                    'valid_score':      valid_score,
                     'test_score':       test_score,
+                    'test_auc':         test_auc,
+                    'test_logloss':     test_logloss,
+                    'best_iteration':   int(best_iter),
                     'samples':          len(X),
                     'tp_percent':       round(tp_pct, 1),
                     'top_features':     top,
@@ -455,6 +513,18 @@ class ModelTrainer:
             f"نتیجه نهایی: {results['summary']['successful']} موفق, "
             f"{results['summary']['failed']} ناموفق"
         )
+
+        aucs = [
+            v.get('test_auc') for v in results['symbols'].values()
+            if isinstance(v, dict) and v.get('status') == 'SUCCESS' and v.get('test_auc') is not None
+        ]
+        if aucs:
+            logger.info(
+                f"📐 AUC میانگین روی همه‌ی نمادها: {np.mean(aucs):.3f} "
+                f"(min={min(aucs):.3f}, max={max(aucs):.3f}) — "
+                f"هرچه به 0.5 نزدیک‌تر، سیگنال قابل‌یادگیری کمتر"
+            )
+
         return results
 
     def save_results(self, results: Dict, path: str = "training_results.json"):
@@ -463,11 +533,6 @@ class ModelTrainer:
         logger.info(f"نتایج ذخیره شد: {path}")
 
     def save_ai_thresholds(self, path: str = None):
-        """
-        ذخیره ai_thresholds.json — کلید: برند symbol (مثل 'BTC/USDT')
-        این فایل توسط backtester.py / optimizer.py / strategy.py (لایو) خوانده می‌شود
-        تا به‌جای config.AI_THRESHOLD ثابت، از مقدار per-symbol استفاده شود.
-        """
         if path is None:
             path = AI_THRESHOLDS_FILE
 
@@ -488,7 +553,7 @@ class ModelTrainer:
 
         logger.info(f"✅ ai_thresholds.json ذخیره شد: {path}")
         for sym, info in self.ai_thresholds.items():
-            logger.info(f"   {sym}: threshold={info['threshold']}")
+            logger.info(f"   {sym}: threshold={info['threshold']} | AUC={info.get('test_auc')}")
 
 
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
@@ -499,7 +564,7 @@ if __name__ == "__main__":
     parser.add_argument('--monthly', action='store_true')
     args = parser.parse_args()
 
-    logger.info("شروع pipeline آموزش LightGBM v12.1 (با کالیبراسیون per-symbol و ترتیب اصلاح‌شده)")
+    logger.info("شروع pipeline آموزش LightGBM v13.0 (رفع ریشه‌ای leakage در early stopping)")
     logger.info(f"فیچرها: {FEAT_COLUMNS}")
 
     data_dir = os.path.join(BASE_DIR, "data", "4h")
