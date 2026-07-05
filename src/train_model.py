@@ -24,6 +24,11 @@ FILE PATH: src/train_model.py (v13.0 - Root-cause fix for weak/flat model output
      AUC و logloss دستی (بدون وابستگی به scikit-learn) روی test واقعی.
      این اعداد مشخص می‌کنند که آیا فیکس‌های بالا مشکل را حل کردند یا
      سیگنال قابل‌یادگیری در این فیچرها/برچسب اصلاً کم است (AUC≈0.5).
+  ✅ FIX 5 (v13.1): patience از 30 به 75 افزایش یافت. با اجرای اول این
+     نسخه دیده شد best_iteration_ بین ۱ تا ۸ بود — یعنی روی validation
+     کوچک (~۱۵٪ داده)، نویز لاگ‌لاس باعث توقف خیلی زودهنگام می‌شد، حتی
+     در حالی‌که AUC واقعی روی test (۰.۵۷-۰.۶۲) نشان می‌داد سیگنال ضعیف
+     ولی واقعی وجود دارد. patience بالاتر فرصت بیشتری برای همگرایی می‌دهد.
 """
 
 import pandas as pd
@@ -74,7 +79,6 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-# ─── فیچرها: ۸ فیچر ───────────────────────────────────────────────────────────
 FEAT_COLUMNS = [
     'feat_adx',
     'feat_atr_percent',
@@ -87,21 +91,14 @@ FEAT_COLUMNS = [
 ]
 
 TARGET_LOOKAHEAD = 20
-
-# ✅ FIX 2: هماهنگ با backtester.py — قبل از این تعداد ردیف، ema_200/Trend_line
-# هنوز converge نشده. این ردیف‌ها بعد از ساخت target (که به آن‌ها نیاز ندارد)
-# ولی قبل از تشکیل X/y حذف می‌شوند.
 WARMUP_ROWS = 200
 
-# ✅ FIX 1: نسبت‌های تقسیم سه‌بخشی — زمانی/بدون shuffle (walk-forward)
 TRAIN_FRAC = 0.70
 VALID_FRAC = 0.15
-# باقی‌مانده (~۰.۱۵) = test
 
 MIN_TRAINING_SAMPLES = 150
 MIN_VALID_SAMPLES    = 30
 MIN_TEST_SAMPLES     = 30
-
 MIN_TEST_SAMPLES_FOR_CALIBRATION = 30
 
 AI_THRESHOLD_PERCENTILE = float(getattr(config, 'AI_THRESHOLD_PERCENTILE', 60))
@@ -111,15 +108,12 @@ AI_THRESHOLD_MAX = float(getattr(config, 'AI_THRESHOLD_MAX', 80.0))
 AI_THRESHOLDS_FILE = os.path.join(BASE_DIR, 'ai_thresholds.json')
 
 
-# ─── معیارهای تشخیصی دستی (بدون وابستگی به scikit-learn) ────────────────────
-
-def _manual_log_loss(y_true: np.ndarray, y_prob: np.ndarray, eps: float = 1e-12) -> float:
+def _manual_log_loss(y_true, y_prob, eps: float = 1e-12) -> float:
     y_prob = np.clip(y_prob, eps, 1 - eps)
     return float(-np.mean(y_true * np.log(y_prob) + (1 - y_true) * np.log(1 - y_prob)))
 
 
-def _manual_auc(y_true: np.ndarray, y_score: np.ndarray) -> Optional[float]:
-    """AUC از طریق روش رتبه‌ای Mann-Whitney U — بدون نیاز به scikit-learn."""
+def _manual_auc(y_true, y_score) -> Optional[float]:
     y_true = np.asarray(y_true)
     y_score = np.asarray(y_score)
     n_pos = int((y_true == 1).sum())
@@ -134,77 +128,53 @@ def _manual_auc(y_true: np.ndarray, y_score: np.ndarray) -> Optional[float]:
     return float(auc)
 
 
-# ─── تابع target ──────────────────────────────────────────────────────────────
-
-def _build_target(
-    df: pd.DataFrame,
-    symbol: str,
-    tp_ratio: Optional[float] = None,
-    sl_ratio: Optional[float] = None,
-) -> pd.Series:
-    """
-    ⚠️ باید روی دیتافریمی صدا زده شود که هنوز فیلتر حجم رویش اعمال نشده
-    (توالی زمانی پیوسته لازم است).
-
-    ✅ FIX 3: آستانه‌ی جهت‌گیری از (RSI>52 / RSI<48) به (RSI>50 / RSI<50)
-    تغییر کرد تا با شرط جهت در strategy.py دقیقاً یکی باشد.
-    """
+def _build_target(df, symbol, tp_ratio=None, sl_ratio=None):
     if sl_ratio is None:
-        sl_ratio = float(getattr(config, 'SL_RATIO',  1.0))
+        sl_ratio = float(getattr(config, 'SL_RATIO', 1.0))
     if tp_ratio is None:
-        tp_ratio = float(getattr(config, 'TP_RATIO',  2.0))
+        tp_ratio = float(getattr(config, 'TP_RATIO', 2.0))
     max_sl = float(getattr(config, 'MAX_SL_PERCENT', 0.05))
 
-    close  = df['close'].values
-    high   = df['high'].values
-    low    = df['low'].values
-    atr    = df['atr'].values if 'atr' in df.columns else df.get('ATR', pd.Series(np.zeros(len(df)))).values
-    rsi    = df['feat_rsi'].values if 'feat_rsi' in df.columns else np.full(len(df), 50.0)
+    close = df['close'].values
+    high  = df['high'].values
+    low   = df['low'].values
+    atr   = df['atr'].values if 'atr' in df.columns else df.get('ATR', pd.Series(np.zeros(len(df)))).values
+    rsi   = df['feat_rsi'].values if 'feat_rsi' in df.columns else np.full(len(df), 50.0)
 
-    n      = len(df)
+    n = len(df)
     target = np.full(n, np.nan)
 
     for i in range(n - TARGET_LOOKAHEAD):
         entry = close[i]
         if entry == 0:
             continue
-
         atr_val = float(atr[i]) if atr[i] > 1.0 else entry * 0.01
         sl_dist = min(1.5 * atr_val * sl_ratio, entry * max_sl)
         if sl_dist <= 0:
             continue
-
         cur_rsi = float(rsi[i])
 
-        # ✅ FIX 3: آستانه‌ی 50 — یکسان با strategy.py
         if cur_rsi > 50:
-            sl_price  = entry - sl_dist
-            tp_price  = entry + sl_dist * tp_ratio
+            sl_price = entry - sl_dist
+            tp_price = entry + sl_dist * tp_ratio
             direction = 'LONG'
         elif cur_rsi < 50:
-            sl_price  = entry + sl_dist
-            tp_price  = entry - sl_dist * tp_ratio
+            sl_price = entry + sl_dist
+            tp_price = entry - sl_dist * tp_ratio
             direction = 'SHORT'
         else:
             continue
 
         hit_tp = False
         hit_sl = False
-
         for j in range(i + 1, min(i + TARGET_LOOKAHEAD + 1, n)):
-            h = float(high[j])
-            l = float(low[j])
-
+            h = float(high[j]); l = float(low[j])
             if direction == 'LONG':
-                if l <= sl_price:
-                    hit_sl = True; break
-                if h >= tp_price:
-                    hit_tp = True; break
+                if l <= sl_price: hit_sl = True; break
+                if h >= tp_price: hit_tp = True; break
             else:
-                if h >= sl_price:
-                    hit_sl = True; break
-                if l <= tp_price:
-                    hit_tp = True; break
+                if h >= sl_price: hit_sl = True; break
+                if l <= tp_price: hit_tp = True; break
 
         target[i] = 1 if hit_tp else 0
 
@@ -212,21 +182,18 @@ def _build_target(
     tp_count = int((result == 1).sum())
     sl_count = int((result == 0).sum())
     if tp_count + sl_count > 0:
-        logger.info(
-            f"  target: TP={tp_count} ({tp_count/(tp_count+sl_count)*100:.1f}%) "
-            f"SL/timeout={sl_count} ({sl_count/(tp_count+sl_count)*100:.1f}%) "
-            f"(از {n} کندل)"
-        )
+        logger.info(f"  target: TP={tp_count} ({tp_count/(tp_count+sl_count)*100:.1f}%) "
+                    f"SL/timeout={sl_count} ({sl_count/(tp_count+sl_count)*100:.1f}%) (از {n} کندل)")
     return result
 
 
-def _apply_volume_filter(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+def _apply_volume_filter(df, symbol):
     if apply_volume_filter_df is not None:
         return apply_volume_filter_df(df, symbol)
     return df
 
 
-def _load_best_params() -> Dict:
+def _load_best_params():
     path = os.path.join(BASE_DIR, 'best_params.json')
     if not os.path.exists(path):
         return {}
@@ -238,28 +205,26 @@ def _load_best_params() -> Dict:
         return {}
 
 
-def _get_symbol_tp_sl(symbol: str, best_params: Dict) -> Tuple[float, float]:
+def _get_symbol_tp_sl(symbol, best_params):
     entry = best_params.get(symbol, {})
     tp_ratio = float(entry.get('TP_RATIO', getattr(config, 'TP_RATIO', 2.0)))
     sl_ratio = float(entry.get('SL_RATIO', getattr(config, 'SL_RATIO', 1.0)))
     return tp_ratio, sl_ratio
 
 
-def _model_key(symbol: str) -> str:
+def _model_key(symbol):
     if '/' not in symbol and 'USDT' in symbol:
-        base   = symbol.replace('USDT', '')
+        base = symbol.replace('USDT', '')
         symbol = f"{base}/USDT"
     return symbol.replace('/', '_')
 
 
-def _brain_symbol(symbol: str) -> str:
+def _brain_symbol(symbol):
     if '/' not in symbol and 'USDT' in symbol:
         base = symbol.replace('USDT', '')
         return f"{base}/USDT"
     return symbol
 
-
-# ─── ModelTrainer ─────────────────────────────────────────────────────────────
 
 class ModelTrainer:
 
@@ -268,11 +233,7 @@ class ModelTrainer:
         self.model_dir.mkdir(parents=True, exist_ok=True)
         self.ai_thresholds: Dict[str, Dict] = {}
 
-    def train_multiple_symbols(
-        self,
-        data_dict: Dict[str, pd.DataFrame],
-    ) -> Dict:
-
+    def train_multiple_symbols(self, data_dict):
         results = {
             'timestamp':  datetime.now().isoformat(),
             'model_type': 'LightGBM',
@@ -285,7 +246,6 @@ class ModelTrainer:
 
         logger.info(f"شروع training برای {len(data_dict)} symbol")
         logger.info(f"فیچرها ({len(FEAT_COLUMNS)}): {FEAT_COLUMNS}")
-        logger.info(f"AI_THRESHOLD percentile: {AI_THRESHOLD_PERCENTILE}")
         logger.info(f"تقسیم داده: train={TRAIN_FRAC:.0%} / valid={VALID_FRAC:.0%} / "
                     f"test={1-TRAIN_FRAC-VALID_FRAC:.0%} (زمانی، بدون shuffle)")
         logger.info(f"warm-up: {WARMUP_ROWS} ردیف اول حذف می‌شود (هماهنگ با backtester.py)")
@@ -301,9 +261,7 @@ class ModelTrainer:
             logger.info(f"\nپردازش: {symbol}")
 
             if HAS_INDICATORS:
-                df_feat, meta = TechnicalIndicators.calculate_all_features(
-                    df, symbol=symbol, min_rows_required=100
-                )
+                df_feat, meta = TechnicalIndicators.calculate_all_features(df, symbol=symbol, min_rows_required=100)
                 if not meta.get('success', False):
                     logger.error(f"  اندیکاتورها ناموفق: {meta.get('missing_features')}")
                     results['symbols'][symbol] = {'status': 'FAILED', 'reason': 'indicators failed'}
@@ -314,20 +272,12 @@ class ModelTrainer:
 
             sym_tp_ratio, sym_sl_ratio = _get_symbol_tp_sl(symbol, best_params)
             logger.info(f"  TP_RATIO={sym_tp_ratio} SL_RATIO={sym_sl_ratio} (برای ساخت target)")
-            df_feat['target'] = _build_target(
-                df_feat, symbol,
-                tp_ratio=sym_tp_ratio,
-                sl_ratio=sym_sl_ratio,
-            )
+            df_feat['target'] = _build_target(df_feat, symbol, tp_ratio=sym_tp_ratio, sl_ratio=sym_sl_ratio)
 
-            # ✅ FIX 2: warm-up
             if len(df_feat) > WARMUP_ROWS:
                 df_feat = df_feat.iloc[WARMUP_ROWS:].reset_index(drop=True)
             else:
-                logger.warning(
-                    f"  ⚠️ {symbol}: طول داده ({len(df_feat)}) کمتر از warm-up "
-                    f"({WARMUP_ROWS}) است — warm-up رد شد"
-                )
+                logger.warning(f"  ⚠️ {symbol}: طول داده ({len(df_feat)}) کمتر از warm-up ({WARMUP_ROWS}) — رد شد")
 
             df_feat = _apply_volume_filter(df_feat, symbol)
 
@@ -341,7 +291,6 @@ class ModelTrainer:
             try:
                 X = df_feat[FEAT_COLUMNS].copy()
                 y = df_feat['target'].copy()
-
                 valid_mask = X.notna().all(axis=1) & y.notna()
                 X, y = X[valid_mask], y[valid_mask]
 
@@ -357,18 +306,14 @@ class ModelTrainer:
                 n = len(X)
                 split_train = int(n * TRAIN_FRAC)
                 split_valid = int(n * (TRAIN_FRAC + VALID_FRAC))
-
-                X_train, y_train = X.iloc[:split_train],        y.iloc[:split_train]
+                X_train, y_train = X.iloc[:split_train], y.iloc[:split_train]
                 X_valid, y_valid = X.iloc[split_train:split_valid], y.iloc[split_train:split_valid]
-                X_test,  y_test  = X.iloc[split_valid:],        y.iloc[split_valid:]
+                X_test,  y_test  = X.iloc[split_valid:], y.iloc[split_valid:]
 
                 logger.info(f"  train={len(X_train)} | valid={len(X_valid)} | test={len(X_test)}")
 
                 if len(X_valid) < MIN_VALID_SAMPLES or len(X_test) < MIN_TEST_SAMPLES:
-                    logger.error(
-                        f"  ❌ valid/test خیلی کوچک (valid={len(X_valid)}, test={len(X_test)}) "
-                        f"— حداقل لازم: valid≥{MIN_VALID_SAMPLES}, test≥{MIN_TEST_SAMPLES}"
-                    )
+                    logger.error(f"  ❌ valid/test خیلی کوچک (valid={len(X_valid)}, test={len(X_test)})")
                     results['symbols'][symbol] = {'status': 'FAILED', 'reason': 'valid/test too small after 3-way split'}
                     results['summary']['failed'] += 1
                     continue
@@ -384,41 +329,32 @@ class ModelTrainer:
                 scale = n_neg / max(n_pos, 1)
 
                 model = lgb.LGBMClassifier(
-                    n_estimators=300,
-                    max_depth=6,
-                    learning_rate=0.03,
-                    num_leaves=31,
-                    min_child_samples=20,
-                    scale_pos_weight=scale,
-                    random_state=42,
-                    n_jobs=-1,
-                    verbose=-1,
+                    n_estimators=300, max_depth=6, learning_rate=0.03, num_leaves=31,
+                    min_child_samples=20, scale_pos_weight=scale, random_state=42,
+                    n_jobs=-1, verbose=-1,
                 )
 
-                # ✅ FIX 1: early stopping روی VALID، نه روی TEST
+                # ✅ FIX 5: patience از 30 به 75 افزایش یافت. با valid کوچک (~15%
+                # داده)، لاگ‌لاس نویز زیادی دارد و patience=30 باعث می‌شد مدل
+                # بعد از فقط ۱-۸ درخت (به‌جای واقعاً همگرا شدن) به‌اشتباه متوقف
+                # شود — نه چون سیگنالی نبود، بلکه چون نویز validation کوچک آن
+                # را پنهان می‌کرد.
                 model.fit(
                     X_train, y_train,
                     eval_set=[(X_valid, y_valid)],
-                    callbacks=[
-                        lgb.early_stopping(30, verbose=False),
-                        lgb.log_evaluation(0),
-                    ]
+                    callbacks=[lgb.early_stopping(75, verbose=False), lgb.log_evaluation(0)]
                 )
 
                 best_iter = getattr(model, 'best_iteration_', None) or model.n_estimators
                 train_score = float(model.score(X_train, y_train))
                 valid_score = float(model.score(X_valid, y_valid))
-                test_score  = float(model.score(X_test,  y_test))
+                test_score  = float(model.score(X_test, y_test))
 
-                logger.info(
-                    f"  🌲 best_iteration_={best_iter}/300 | "
-                    f"Train acc={train_score:.4f} | Valid acc={valid_score:.4f} | Test acc={test_score:.4f}"
-                )
+                logger.info(f"  🌲 best_iteration_={best_iter}/300 | "
+                            f"Train acc={train_score:.4f} | Valid acc={valid_score:.4f} | Test acc={test_score:.4f}")
                 if best_iter < 20:
-                    logger.warning(
-                        f"  ⚠️ {symbol}: مدل خیلی زود متوقف شد ({best_iter} درخت) — "
-                        f"احتمالاً سیگنال قابل‌یادگیری در این برچسب/فیچرها کم است"
-                    )
+                    logger.warning(f"  ⚠️ {symbol}: مدل خیلی زود متوقف شد ({best_iter} درخت) — "
+                                   f"احتمالاً سیگنال قابل‌یادگیری کم است")
 
                 importances = dict(zip(FEAT_COLUMNS, model.feature_importances_))
                 top = sorted(importances.items(), key=lambda x: -x[1])[:3]
@@ -426,11 +362,10 @@ class ModelTrainer:
 
                 proba_test = model.predict_proba(X_test)[:, 1] * 100.0
                 y_test_arr = y_test.to_numpy()
-                test_auc     = _manual_auc(y_test_arr, proba_test / 100.0)
+                test_auc = _manual_auc(y_test_arr, proba_test / 100.0)
                 test_logloss = _manual_log_loss(y_test_arr, proba_test / 100.0)
                 auc_str = f"{test_auc:.3f}" if test_auc is not None else "N/A"
-                logger.info(f"  📐 Test AUC={auc_str} | Test LogLoss={test_logloss:.4f} "
-                            f"(AUC≈0.5 یعنی مدل عملاً تصادفی است)")
+                logger.info(f"  📐 Test AUC={auc_str} | Test LogLoss={test_logloss:.4f}")
 
                 if len(proba_test) >= MIN_TEST_SAMPLES_FOR_CALIBRATION:
                     suggested_threshold = float(np.percentile(proba_test, AI_THRESHOLD_PERCENTILE))
@@ -438,10 +373,7 @@ class ModelTrainer:
                     calibration_note = f"per-symbol (n={len(proba_test)})"
                 else:
                     suggested_threshold = float(getattr(config, 'AI_THRESHOLD', 65.0))
-                    calibration_note = (
-                        f"⚠️ fallback به AI_THRESHOLD سراسری — "
-                        f"test set خیلی کوچک (n={len(proba_test)} < {MIN_TEST_SAMPLES_FOR_CALIBRATION})"
-                    )
+                    calibration_note = f"⚠️ fallback سراسری — n={len(proba_test)}"
                     logger.warning(f"  {calibration_note}")
 
                 score_stats = {
@@ -451,55 +383,33 @@ class ModelTrainer:
                     'p75':    round(float(np.percentile(proba_test, 75)), 2) if len(proba_test) else None,
                     'max':    round(float(np.max(proba_test)), 2) if len(proba_test) else None,
                 }
-
-                logger.info(
-                    f"  📊 توزیع امتیاز AI روی test: "
-                    f"min={score_stats['min']} p25={score_stats['p25']} "
-                    f"median={score_stats['median']} p75={score_stats['p75']} max={score_stats['max']}"
-                )
-                logger.info(
-                    f"  🎯 AI_THRESHOLD پیشنهادی (صدک {AI_THRESHOLD_PERCENTILE}): "
-                    f"{suggested_threshold:.2f} [{calibration_note}]"
-                )
+                logger.info(f"  📊 توزیع: min={score_stats['min']} p25={score_stats['p25']} "
+                            f"median={score_stats['median']} p75={score_stats['p75']} max={score_stats['max']}")
+                logger.info(f"  🎯 AI_THRESHOLD: {suggested_threshold:.2f} [{calibration_note}]")
 
                 brain_sym = _brain_symbol(symbol)
                 self.ai_thresholds[brain_sym] = {
-                    'threshold':    round(suggested_threshold, 2),
-                    'percentile':   AI_THRESHOLD_PERCENTILE,
-                    'score_stats':  score_stats,
-                    'test_samples': len(proba_test),
-                    'calibration':  calibration_note,
-                    'test_auc':     round(test_auc, 4) if test_auc is not None else None,
-                    'test_logloss': round(test_logloss, 4),
-                    'best_iteration': int(best_iter),
-                    'updated_at':   datetime.now().isoformat(),
+                    'threshold': round(suggested_threshold, 2), 'percentile': AI_THRESHOLD_PERCENTILE,
+                    'score_stats': score_stats, 'test_samples': len(proba_test),
+                    'calibration': calibration_note,
+                    'test_auc': round(test_auc, 4) if test_auc is not None else None,
+                    'test_logloss': round(test_logloss, 4), 'best_iteration': int(best_iter),
+                    'updated_at': datetime.now().isoformat(),
                 }
 
-                safe_name  = _model_key(symbol)
+                safe_name = _model_key(symbol)
                 model_path = self.model_dir / f"{safe_name}_model.pkl"
-
                 with open(model_path, 'wb') as f:
                     pickle.dump(model, f)
-
                 logger.info(f"  ✅ ذخیره شد: {model_path}  (brain key: '{brain_sym}')")
 
                 results['symbols'][symbol] = {
-                    'status':           'SUCCESS',
-                    'model_path':       str(model_path),
-                    'brain_key':        brain_sym,
-                    'train_score':      train_score,
-                    'valid_score':      valid_score,
-                    'test_score':       test_score,
-                    'test_auc':         test_auc,
-                    'test_logloss':     test_logloss,
-                    'best_iteration':   int(best_iter),
-                    'samples':          len(X),
-                    'tp_percent':       round(tp_pct, 1),
-                    'top_features':     top,
-                    'ai_threshold':     round(suggested_threshold, 2),
-                    'score_stats':      score_stats,
-                    'target_tp_ratio':  sym_tp_ratio,
-                    'target_sl_ratio':  sym_sl_ratio,
+                    'status': 'SUCCESS', 'model_path': str(model_path), 'brain_key': brain_sym,
+                    'train_score': train_score, 'valid_score': valid_score, 'test_score': test_score,
+                    'test_auc': test_auc, 'test_logloss': test_logloss, 'best_iteration': int(best_iter),
+                    'samples': len(X), 'tp_percent': round(tp_pct, 1), 'top_features': top,
+                    'ai_threshold': round(suggested_threshold, 2), 'score_stats': score_stats,
+                    'target_tp_ratio': sym_tp_ratio, 'target_sl_ratio': sym_sl_ratio,
                 }
                 results['summary']['successful'] += 1
 
@@ -509,33 +419,24 @@ class ModelTrainer:
                 results['summary']['failed'] += 1
 
         logger.info("\n" + "=" * 65)
-        logger.info(
-            f"نتیجه نهایی: {results['summary']['successful']} موفق, "
-            f"{results['summary']['failed']} ناموفق"
-        )
+        logger.info(f"نتیجه نهایی: {results['summary']['successful']} موفق, {results['summary']['failed']} ناموفق")
 
-        aucs = [
-            v.get('test_auc') for v in results['symbols'].values()
-            if isinstance(v, dict) and v.get('status') == 'SUCCESS' and v.get('test_auc') is not None
-        ]
+        aucs = [v.get('test_auc') for v in results['symbols'].values()
+                if isinstance(v, dict) and v.get('status') == 'SUCCESS' and v.get('test_auc') is not None]
         if aucs:
-            logger.info(
-                f"📐 AUC میانگین روی همه‌ی نمادها: {np.mean(aucs):.3f} "
-                f"(min={min(aucs):.3f}, max={max(aucs):.3f}) — "
-                f"هرچه به 0.5 نزدیک‌تر، سیگنال قابل‌یادگیری کمتر"
-            )
+            logger.info(f"📐 AUC میانگین همه‌ی نمادها: {np.mean(aucs):.3f} "
+                        f"(min={min(aucs):.3f}, max={max(aucs):.3f})")
 
         return results
 
-    def save_results(self, results: Dict, path: str = "training_results.json"):
+    def save_results(self, results, path: str = "training_results.json"):
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(results, f, ensure_ascii=False, indent=2, default=str)
         logger.info(f"نتایج ذخیره شد: {path}")
 
-    def save_ai_thresholds(self, path: str = None):
+    def save_ai_thresholds(self, path=None):
         if path is None:
             path = AI_THRESHOLDS_FILE
-
         existing = {}
         if os.path.exists(path):
             try:
@@ -543,23 +444,17 @@ class ModelTrainer:
                     existing = json.load(f)
             except Exception:
                 existing = {}
-
         existing.update(self.ai_thresholds)
         existing['_updated_at'] = datetime.now().isoformat()
         existing['_percentile'] = AI_THRESHOLD_PERCENTILE
-
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(existing, f, ensure_ascii=False, indent=2, default=str)
-
         logger.info(f"✅ ai_thresholds.json ذخیره شد: {path}")
         for sym, info in self.ai_thresholds.items():
             logger.info(f"   {sym}: threshold={info['threshold']} | AUC={info.get('test_auc')}")
 
 
-# ─── MAIN ─────────────────────────────────────────────────────────────────────
-
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser()
     parser.add_argument('--monthly', action='store_true')
     args = parser.parse_args()
@@ -572,26 +467,17 @@ if __name__ == "__main__":
 
     for symbol in config.WATCHLIST:
         safe_name = symbol.replace("/", "_")
-        filepath  = os.path.join(data_dir, f"{safe_name}_history.csv")
-
+        filepath = os.path.join(data_dir, f"{safe_name}_history.csv")
         if not os.path.exists(filepath):
             logger.warning(f"فایل یافت نشد: {filepath}")
             continue
-
         try:
             df = pd.read_csv(filepath)
-
-            col_map = {
-                'Timestamp': 'timestamp', 'Open':  'open',
-                'High':      'high',      'Low':   'low',
-                'Close':     'close',     'Volume':'volume',
-            }
-            df.rename(columns={k: v for k, v in col_map.items() if k in df.columns},
-                      inplace=True)
-
+            col_map = {'Timestamp': 'timestamp', 'Open': 'open', 'High': 'high',
+                       'Low': 'low', 'Close': 'close', 'Volume': 'volume'}
+            df.rename(columns={k: v for k, v in col_map.items() if k in df.columns}, inplace=True)
             data_dict[symbol] = df
             logger.info(f"لود شد: {symbol} — {len(df)} ردیف")
-
         except Exception as e:
             logger.error(f"خطا در لود {symbol}: {e}")
 
@@ -602,8 +488,8 @@ if __name__ == "__main__":
     logger.info(f"\n{len(data_dict)} ارز آماده: {list(data_dict.keys())}")
 
     model_dir = os.path.join(BASE_DIR, "src", "models")
-    trainer   = ModelTrainer(model_dir=model_dir)
-    results   = trainer.train_multiple_symbols(data_dict)
+    trainer = ModelTrainer(model_dir=model_dir)
+    results = trainer.train_multiple_symbols(data_dict)
 
     trainer.save_results(results, os.path.join(BASE_DIR, "training_results.json"))
     trainer.save_ai_thresholds()
