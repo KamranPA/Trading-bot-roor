@@ -26,6 +26,10 @@ from src import strategy_utils
 from src.indicators import TechnicalIndicators
 from src.volume_filter import passes_volume_filter, VOLUME_MULTIPLIER
 from src.ai_threshold import get_ai_threshold
+
+# ✅ همان فلگ strategy.py — باید هماهنگ باشد تا بک‌تست دقیقاً همان رفتار
+# لایو را شبیه‌سازی کند.
+AI_GATE_ENABLED = bool(getattr(config, 'AI_GATE_ENABLED', True))
 from src.csv_store import (
     save_backtest_trade, close_backtest_trade,
     flush_closed_trades, export_to_sqlite,
@@ -264,7 +268,7 @@ def run_backtest(
             ema_score * WEIGHT_EMA
         ) / w_sum_eff
 
-        if total_score < min_score or not ai_approved:
+        if total_score < min_score or (AI_GATE_ENABLED and not ai_approved):
             cnt_score += 1
             continue
 
