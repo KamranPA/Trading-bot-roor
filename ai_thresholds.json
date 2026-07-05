@@ -1,174 +1,184 @@
 {
   "BTC/USDT": {
-    "threshold": 43.38,
+    "threshold": 33.79,
     "percentile": 60.0,
     "score_stats": {
-      "min": 29.18,
-      "p25": 38.76,
-      "median": 42.68,
-      "p75": 45.03,
-      "max": 49.2
-    },
-    "test_samples": 383,
-    "calibration": "per-symbol (n=383)",
-    "test_auc": 0.5571,
-    "test_logloss": 0.6348,
-    "best_iteration": 13,
-    "updated_at": "2026-07-05T08:51:23.492796"
-  },
-  "ETH/USDT": {
-    "threshold": 21.05,
-    "percentile": 60.0,
-    "score_stats": {
-      "min": 19.29,
-      "p25": 20.44,
-      "median": 20.89,
-      "p75": 21.56,
-      "max": 22.08
-    },
-    "test_samples": 408,
-    "calibration": "per-symbol (n=408)",
-    "test_auc": 0.5002,
-    "test_logloss": 0.4764,
-    "best_iteration": 1,
-    "updated_at": "2026-07-05T08:51:23.587145"
-  },
-  "SOL/USDT": {
-    "threshold": 30.62,
-    "percentile": 60.0,
-    "score_stats": {
-      "min": 29.06,
-      "p25": 29.89,
-      "median": 30.24,
-      "p75": 31.09,
-      "max": 31.58
-    },
-    "test_samples": 364,
-    "calibration": "per-symbol (n=364)",
-    "test_auc": 0.5347,
-    "test_logloss": 0.5829,
-    "best_iteration": 1,
-    "updated_at": "2026-07-05T08:51:23.673999"
-  },
-  "DOT/USDT": {
-    "threshold": 37.73,
-    "percentile": 60.0,
-    "score_stats": {
-      "min": 36.04,
-      "p25": 37.35,
-      "median": 37.35,
-      "p75": 38.15,
-      "max": 38.8
-    },
-    "test_samples": 368,
-    "calibration": "per-symbol (n=368)",
-    "test_auc": 0.4861,
-    "test_logloss": 0.629,
-    "best_iteration": 1,
-    "updated_at": "2026-07-05T08:51:23.751656"
-  },
-  "LINK/USDT": {
-    "threshold": 37.75,
-    "percentile": 60.0,
-    "score_stats": {
-      "min": 36.11,
-      "p25": 37.42,
-      "median": 37.75,
-      "p75": 38.09,
-      "max": 38.94
-    },
-    "test_samples": 370,
-    "calibration": "per-symbol (n=370)",
-    "test_auc": 0.4474,
-    "test_logloss": 0.6384,
-    "best_iteration": 1,
-    "updated_at": "2026-07-05T08:51:23.830610"
-  },
-  "AVAX/USDT": {
-    "threshold": 38.54,
-    "percentile": 60.0,
-    "score_stats": {
-      "min": 36.74,
-      "p25": 37.83,
-      "median": 38.18,
-      "p75": 38.54,
-      "max": 39.62
-    },
-    "test_samples": 367,
-    "calibration": "per-symbol (n=367)",
-    "test_auc": 0.4742,
-    "test_logloss": 0.6103,
-    "best_iteration": 1,
-    "updated_at": "2026-07-05T08:51:23.906915"
-  },
-  "XRP/USDT": {
-    "threshold": 37.21,
-    "percentile": 60.0,
-    "score_stats": {
-      "min": 34.44,
-      "p25": 37.01,
-      "median": 37.21,
-      "p75": 37.26,
-      "max": 38.65
-    },
-    "test_samples": 350,
-    "calibration": "per-symbol (n=350)",
-    "test_auc": 0.488,
-    "test_logloss": 0.6331,
-    "best_iteration": 2,
-    "updated_at": "2026-07-05T08:51:23.985590"
-  },
-  "LTC/USDT": {
-    "threshold": 26.72,
-    "percentile": 60.0,
-    "score_stats": {
-      "min": 25.08,
-      "p25": 26.48,
-      "median": 26.57,
-      "p75": 27.04,
-      "max": 28.02
+      "min": 32.92,
+      "p25": 33.52,
+      "median": 33.75,
+      "p75": 33.79,
+      "max": 33.84
     },
     "test_samples": 378,
-    "calibration": "per-symbol (n=378)",
-    "test_auc": 0.4978,
-    "test_logloss": 0.5804,
-    "best_iteration": 1,
-    "updated_at": "2026-07-05T08:51:24.070408"
+    "calibration": "per-symbol از pooled model (n=378)",
+    "test_auc": 0.5733,
+    "test_logloss": 0.6161,
+    "model_type": "pooled",
+    "pooled_best_iteration": 1,
+    "updated_at": "2026-07-05T19:24:20.722210"
   },
-  "BCH/USDT": {
-    "threshold": 27.54,
+  "ETH/USDT": {
+    "threshold": 33.26,
     "percentile": 60.0,
     "score_stats": {
-      "min": 25.81,
-      "p25": 26.78,
-      "median": 26.78,
-      "p75": 27.71,
-      "max": 28.86
+      "min": 32.57,
+      "p25": 33.17,
+      "median": 33.26,
+      "p75": 33.52,
+      "max": 34.18
     },
-    "test_samples": 355,
-    "calibration": "per-symbol (n=355)",
-    "test_auc": 0.4735,
-    "test_logloss": 0.6402,
-    "best_iteration": 1,
-    "updated_at": "2026-07-05T08:51:24.157143"
+    "test_samples": 403,
+    "calibration": "per-symbol از pooled model (n=403)",
+    "test_auc": 0.5507,
+    "test_logloss": 0.6011,
+    "model_type": "pooled",
+    "pooled_best_iteration": 1,
+    "updated_at": "2026-07-05T19:24:20.723932"
   },
-  "ATOM/USDT": {
-    "threshold": 37.81,
+  "SOL/USDT": {
+    "threshold": 33.69,
     "percentile": 60.0,
     "score_stats": {
-      "min": 33.24,
-      "p25": 36.69,
-      "median": 37.57,
-      "p75": 38.12,
-      "max": 43.28
+      "min": 32.57,
+      "p25": 33.46,
+      "median": 33.68,
+      "p75": 33.79,
+      "max": 34.27
+    },
+    "test_samples": 358,
+    "calibration": "per-symbol از pooled model (n=358)",
+    "test_auc": 0.5118,
+    "test_logloss": 0.5767,
+    "model_type": "pooled",
+    "pooled_best_iteration": 1,
+    "updated_at": "2026-07-05T19:24:20.725362"
+  },
+  "DOT/USDT": {
+    "threshold": 33.69,
+    "percentile": 60.0,
+    "score_stats": {
+      "min": 32.93,
+      "p25": 33.5,
+      "median": 33.69,
+      "p75": 33.69,
+      "max": 34.27
+    },
+    "test_samples": 362,
+    "calibration": "per-symbol از pooled model (n=362)",
+    "test_auc": 0.4006,
+    "test_logloss": 0.6321,
+    "model_type": "pooled",
+    "pooled_best_iteration": 1,
+    "updated_at": "2026-07-05T19:24:20.726762"
+  },
+  "LINK/USDT": {
+    "threshold": 33.69,
+    "percentile": 60.0,
+    "score_stats": {
+      "min": 32.93,
+      "p25": 33.5,
+      "median": 33.69,
+      "p75": 33.8,
+      "max": 34.27
+    },
+    "test_samples": 364,
+    "calibration": "per-symbol از pooled model (n=364)",
+    "test_auc": 0.4916,
+    "test_logloss": 0.6341,
+    "model_type": "pooled",
+    "pooled_best_iteration": 1,
+    "updated_at": "2026-07-05T19:24:20.728200"
+  },
+  "AVAX/USDT": {
+    "threshold": 33.69,
+    "percentile": 60.0,
+    "score_stats": {
+      "min": 32.93,
+      "p25": 33.5,
+      "median": 33.69,
+      "p75": 33.8,
+      "max": 34.27
+    },
+    "test_samples": 360,
+    "calibration": "per-symbol از pooled model (n=360)",
+    "test_auc": 0.4432,
+    "test_logloss": 0.6067,
+    "model_type": "pooled",
+    "pooled_best_iteration": 1,
+    "updated_at": "2026-07-05T19:24:20.729567"
+  },
+  "XRP/USDT": {
+    "threshold": 33.8,
+    "percentile": 60.0,
+    "score_stats": {
+      "min": 32.93,
+      "p25": 33.69,
+      "median": 33.79,
+      "p75": 33.8,
+      "max": 34.27
+    },
+    "test_samples": 345,
+    "calibration": "per-symbol از pooled model (n=345)",
+    "test_auc": 0.4856,
+    "test_logloss": 0.6328,
+    "model_type": "pooled",
+    "pooled_best_iteration": 1,
+    "updated_at": "2026-07-05T19:24:20.730989"
+  },
+  "LTC/USDT": {
+    "threshold": 33.79,
+    "percentile": 60.0,
+    "score_stats": {
+      "min": 32.57,
+      "p25": 33.52,
+      "median": 33.79,
+      "p75": 33.8,
+      "max": 34.27
     },
     "test_samples": 375,
-    "calibration": "per-symbol (n=375)",
-    "test_auc": 0.464,
-    "test_logloss": 0.6605,
-    "best_iteration": 6,
-    "updated_at": "2026-07-05T08:51:24.231571"
+    "calibration": "per-symbol از pooled model (n=375)",
+    "test_auc": 0.4894,
+    "test_logloss": 0.5915,
+    "model_type": "pooled",
+    "pooled_best_iteration": 1,
+    "updated_at": "2026-07-05T19:24:20.732349"
   },
-  "_updated_at": "2026-07-05T08:51:24.234044",
+  "BCH/USDT": {
+    "threshold": 33.69,
+    "percentile": 60.0,
+    "score_stats": {
+      "min": 32.57,
+      "p25": 33.24,
+      "median": 33.52,
+      "p75": 33.79,
+      "max": 34.27
+    },
+    "test_samples": 350,
+    "calibration": "per-symbol از pooled model (n=350)",
+    "test_auc": 0.5066,
+    "test_logloss": 0.6335,
+    "model_type": "pooled",
+    "pooled_best_iteration": 1,
+    "updated_at": "2026-07-05T19:24:20.733716"
+  },
+  "ATOM/USDT": {
+    "threshold": 33.79,
+    "percentile": 60.0,
+    "score_stats": {
+      "min": 32.93,
+      "p25": 33.5,
+      "median": 33.69,
+      "p75": 33.8,
+      "max": 34.27
+    },
+    "test_samples": 369,
+    "calibration": "per-symbol از pooled model (n=369)",
+    "test_auc": 0.4477,
+    "test_logloss": 0.6721,
+    "model_type": "pooled",
+    "pooled_best_iteration": 1,
+    "updated_at": "2026-07-05T19:24:20.735070"
+  },
+  "_updated_at": "2026-07-05T19:24:20.737067",
   "_percentile": 60.0
 }
