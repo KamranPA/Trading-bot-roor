@@ -23,6 +23,13 @@ from src.ai_threshold import get_ai_threshold
 
 logger = logging.getLogger(__name__)
 
+# ✅ FIX: دروازه‌ی سخت‌گیر AI (ai_approved) جدا از وزن AI در امتیاز کلی است.
+# اگر مدل فعلی سیگنال قابل‌اعتمادی ندارد (AUC نزدیک 0.5 — تشخیص داده‌شده در
+# جلسه‌ی دیباگ train_model.py)، این را در config.py برابر False بگذار تا
+# دروازه‌ی AI دیگر سیگنال را رد نکند (زیرساخت مدل/آموزش دست‌نخورده می‌ماند
+# تا اگر بعداً فیچرهای بهتری اضافه شد، دوباره True کنی).
+AI_GATE_ENABLED = bool(getattr(config, 'AI_GATE_ENABLED', True))
+
 
 # فیلتر حجم پویا — از ماژول مشترک src/volume_filter.py
 # volume >= Volume_SMA_20 * VOLUME_MULTIPLIER (0.5)
@@ -182,8 +189,9 @@ def generate_signal(
         return result
 
     # حداقل score
-    if total_score < min_score or not ai_approved:
-        logger.debug(f"{symbol}: score={total_score:.1f} ai_approved={ai_approved} — بدون سیگنال")
+    if total_score < min_score or (AI_GATE_ENABLED and not ai_approved):
+        logger.debug(f"{symbol}: score={total_score:.1f} ai_approved={ai_approved} "
+                     f"(gate_enabled={AI_GATE_ENABLED}) — بدون سیگنال")
         return result
 
     # ── ۴. پیدا کردن swing ───────────────────────────────────────────────────
