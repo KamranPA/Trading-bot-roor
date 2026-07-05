@@ -34,6 +34,10 @@ from src.brain import TradingBrain
 from src.volume_filter import passes_volume_filter, VOLUME_MULTIPLIER
 from src.ai_threshold import get_ai_threshold
 
+# ✅ همان فلگ strategy.py/backtester.py — هماهنگ نگه می‌دارد که optimizer هم
+# دقیقاً همان معیار پذیرش سیگنال لایو را برای ارزیابی پارامترها استفاده کند.
+AI_GATE_ENABLED = bool(getattr(config, 'AI_GATE_ENABLED', True))
+
 # ✅ FIX: هماهنگ با backtester.py — قبل از این تعداد ردیف، ema_200/Trend_line
 # هنوز converge نشده و ارزیابی روی آن گمراه‌کننده است.
 MIN_ROWS_FOR_EVALUATION = 210
@@ -220,7 +224,7 @@ def evaluate_parameters(symbol, df, adx_th, swing_w, tp_r, sl_r, brain=None):
             ema_score * w_ema
         ) / w_sum_eff
 
-        if total_score < min_score or not ai_approved:
+        if total_score < min_score or (AI_GATE_ENABLED and not ai_approved):
             continue
 
         if len(open_trades) >= max_open:
