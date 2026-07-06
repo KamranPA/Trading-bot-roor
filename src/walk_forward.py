@@ -62,6 +62,16 @@ SL_OPTIONS    = [0.8, 1.0, 1.2]
 # هم مثل بقیه‌ی پارامترها grid search می‌شود.
 MIN_SCORE_OPTIONS = [45, 55, 65]
 
+# ── حالت دوم: Mean-Reversion (به‌جای Breakout) ──────────────────────────────
+# منطق: به‌جای «قیمت سقف را شکست، دنبالش برو»، برعکسش — «RSI به‌شدت
+# اشباع شد و قیمت خیلی از EMA200 فاصله گرفت، منتظر برگشت به میانگین باش».
+# انتخاب حالت با متغیر محیطی STRATEGY_MODE کنترل می‌شود (پیش‌فرض: mean_reversion)
+STRATEGY_MODE = os.environ.get('STRATEGY_MODE', 'mean_reversion').strip().lower()
+
+RSI_OVERSOLD_OPTIONS   = [20, 25, 30]
+RSI_OVERBOUGHT_OPTIONS = [70, 75, 80]
+MIN_DEV_PCT_OPTIONS    = [2.0, 4.0, 6.0]   # حداقل فاصله‌ی قیمت از EMA200 به درصد
+
 
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     col_map = {}
@@ -232,7 +242,183 @@ def _select_best_params(df: pd.DataFrame, start_idx: int, end_idx: int, symbol: 
     return best_cfg, found, best_trades
 
 
-def run_walk_forward_for_symbol(symbol: str, df_raw: pd.DataFrame) -> list:
+def _get_ema200_deviation_pct(row: pd.Series, close_price: float) -> float:
+    """درصد فاصله‌ی قیمت از EMA200 — معیار «چقدر از میانگین دور شده‌ایم»
+    برای mean-reversion. مثبت=بالای میانگین، منفی=پایین میانگین."""
+    ema200 = row.get('ema_200', None)
+    if ema200 is None or float(ema200) == 0:
+        return 0.0
+    return (close_price - float(ema200)) / float(ema200) * 100.0
+
+
+def simulate_window_mr(df: pd.DataFrame, start_idx: int, end_idx: int,
+                        rsi_oversold: float, rsi_overbought: float, min_dev_pct: float,
+                        tp_r: float, sl_r: float, symbol: str) -> list:
+    """
+    شبیه‌سازی معاملات Mean-Reversion بین [start_idx, end_idx).
+    ورود LONG: RSI به‌شدت اشباع فروش + قیمت به‌اندازه‌ی کافی زیر EMA200.
+    ورود SHORT: RSI به‌شدت اشباع خرید + قیمت به‌اندازه‌ی کافی بالای EMA200.
+    خروج (SL/TP) دقیقاً همان سایزینگ ATR-based قبلی — فقط جهت‌گیری ورود برعکس شده.
+
+    Returns: لیست pnl_percent هر معامله (net از هزینه‌ی معامله).
+    """
+    max_sl_pct = float(getattr(config, 'MAX_SL_PERCENT', 0.05))
+    max_open   = int(getattr(config, 'MAX_OPEN_POSITIONS', 999))
+
+    open_trades = []
+    closed_pnls = []
+
+    for i in range(start_idx, min(end_idx, len(df))):
+        row = df.iloc[i]
+        high_price  = float(row.get('high', 0))
+        low_price   = float(row.get('low', 0))
+        close_price = float(row.get('close', 0))
+        if high_price == 0 or low_price == 0 or close_price == 0:
+            continue
+
+        still_open = []
+        for trade in open_trades:
+            d, sl, tp2, ep = trade['direction'], trade['stop_loss'], trade['tp2'], trade['entry_price']
+            closed, pnl = False, 0.0
+            if d == 'LONG':
+                if low_price <= sl:
+                    pnl = ((sl - ep) / ep) * 100; closed = True
+                elif high_price >= tp2:
+                    pnl = ((tp2 - ep) / ep) * 100; closed = True
+            else:
+                if high_price >= sl:
+                    pnl = ((ep - sl) / ep) * 100; closed = True
+                elif low_price <= tp2:
+                    pnl = ((ep - tp2) / ep) * 100; closed = True
+            if closed:
+                closed_pnls.append(pnl - TRANSACTION_COST_PERCENT)
+            else:
+                still_open.append(trade)
+        open_trades = still_open
+
+        if not passes_volume_filter(row, symbol):
+            continue
+        if len(open_trades) >= max_open:
+            continue
+
+        current_rsi = float(row.get('feat_rsi', row.get('RSI', 50)))
+        dev_pct = _get_ema200_deviation_pct(row, close_price)
+
+        atr_val = _get_atr(row, close_price)
+        sl_dist = min(1.5 * atr_val * sl_r, close_price * max_sl_pct)
+        if sl_dist <= 0:
+            continue
+
+        # ✅ منطق mean-reversion: برعکسِ breakout — در نقاط افراطی وارد می‌شویم
+        if current_rsi < rsi_oversold and dev_pct <= -min_dev_pct:
+            open_trades.append({'direction': 'LONG', 'entry_price': close_price,
+                                 'stop_loss': close_price - sl_dist,
+                                 'tp2': close_price + sl_dist * tp_r})
+        elif current_rsi > rsi_overbought and dev_pct >= min_dev_pct:
+            open_trades.append({'direction': 'SHORT', 'entry_price': close_price,
+                                 'stop_loss': close_price + sl_dist,
+                                 'tp2': close_price - sl_dist * tp_r})
+
+    if len(df) > start_idx:
+        last_idx = min(end_idx, len(df)) - 1
+        if last_idx >= start_idx:
+            last_price = float(df.iloc[last_idx]['close'])
+            for trade in open_trades:
+                ep, d = trade['entry_price'], trade['direction']
+                pnl = ((last_price - ep) / ep * 100 if d == 'LONG' else (ep - last_price) / ep * 100)
+                closed_pnls.append(pnl - TRANSACTION_COST_PERCENT)
+
+    return closed_pnls
+
+
+def _select_best_params_mr(df: pd.DataFrame, start_idx: int, end_idx: int, symbol: str) -> tuple:
+    """Grid search پارامترهای mean-reversion فقط روی [start_idx, end_idx)."""
+    best_pnl, best_trades, found = -1e9, 0, False
+    best_cfg = {"RSI_OVERSOLD": 25, "RSI_OVERBOUGHT": 75, "MIN_DEV_PCT": 4.0,
+                "TP_RATIO": float(getattr(config, 'TP_RATIO', 1.5)),
+                "SL_RATIO": float(getattr(config, 'SL_RATIO', 1.0))}
+    for rsi_os in RSI_OVERSOLD_OPTIONS:
+        for rsi_ob in RSI_OVERBOUGHT_OPTIONS:
+            for min_dev in MIN_DEV_PCT_OPTIONS:
+                for tp in TP_OPTIONS:
+                    for sl in SL_OPTIONS:
+                        pnls = simulate_window_mr(df, start_idx, end_idx, rsi_os, rsi_ob,
+                                                   min_dev, tp, sl, symbol)
+                        if len(pnls) < MIN_TRADES_FOR_SELECTION:
+                            continue
+                        total = sum(pnls)
+                        if total > best_pnl:
+                            best_pnl, best_trades, found = total, len(pnls), True
+                            best_cfg = {"RSI_OVERSOLD": rsi_os, "RSI_OVERBOUGHT": rsi_ob,
+                                        "MIN_DEV_PCT": min_dev, "TP_RATIO": tp, "SL_RATIO": sl}
+    return best_cfg, found, best_trades
+
+
+def run_walk_forward_for_symbol_mr(symbol: str, df_raw: pd.DataFrame) -> list:
+    """نسخه‌ی mean-reversion از run_walk_forward_for_symbol."""
+    df_raw = _normalize_columns(df_raw)
+    df, meta = TechnicalIndicators.calculate_all_features(df_raw, symbol=symbol)
+    if not meta.get('success', False):
+        logger.warning(f"{symbol}: محاسبه اندیکاتورها ناموفق — رد شد")
+        return []
+    df = _normalize_columns(df)
+    df = _add_uppercase_aliases(df)
+    df = df.reset_index(drop=True)
+
+    if 'ema_200' not in df.columns:
+        logger.warning(f"{symbol}: ستون ema_200 موجود نیست — mean-reversion رد شد")
+        return []
+
+    if len(df) <= WARMUP_ROWS:
+        logger.warning(f"{symbol}: داده بعد از warm-up خالی — رد شد")
+        return []
+
+    usable = df.iloc[WARMUP_ROWS:].reset_index(drop=True)
+    n = len(usable)
+    if n < MIN_TRADES_FOR_SELECTION * 20:
+        logger.warning(f"{symbol}: داده‌ی usable ({n} ردیف) برای {N_FOLDS} بازه خیلی کم است — رد شد")
+        return []
+
+    fold_size = n // N_FOLDS
+    fold_bounds = [i * fold_size for i in range(N_FOLDS)] + [n]
+
+    results = []
+    for fold_idx in range(1, N_FOLDS):
+        train_start, train_end = 0, fold_bounds[fold_idx]
+        test_start, test_end = fold_bounds[fold_idx], fold_bounds[fold_idx + 1]
+
+        best_cfg, found, sel_trades = _select_best_params_mr(usable, train_start, train_end, symbol)
+        oos_pnls = simulate_window_mr(usable, test_start, test_end,
+                                       best_cfg["RSI_OVERSOLD"], best_cfg["RSI_OVERBOUGHT"],
+                                       best_cfg["MIN_DEV_PCT"], best_cfg["TP_RATIO"],
+                                       best_cfg["SL_RATIO"], symbol)
+
+        wins = sum(1 for p in oos_pnls if p > 0)
+        total = len(oos_pnls)
+        win_rate = round(wins / total * 100, 1) if total else 0.0
+        net_pnl = round(sum(oos_pnls), 2)
+
+        logger.info(
+            f"[MR] {symbol} | fold {fold_idx}/{N_FOLDS-1} | "
+            f"train=[0:{train_end}] test=[{test_start}:{test_end}] | "
+            f"params={'یافت‌شد' if found else 'fallback'} "
+            f"(RSI_OS={best_cfg['RSI_OVERSOLD']},RSI_OB={best_cfg['RSI_OVERBOUGHT']},"
+            f"MIN_DEV={best_cfg['MIN_DEV_PCT']}%,TP={best_cfg['TP_RATIO']},SL={best_cfg['SL_RATIO']}) | "
+            f"OOS trades={total} win_rate={win_rate}% net_pnl={net_pnl}%"
+        )
+
+        results.append({
+            'symbol': symbol, 'fold': fold_idx, 'train_rows': train_end,
+            'test_rows': test_end - test_start, 'params_found': found,
+            **{f'param_{k}': v for k, v in best_cfg.items()},
+            'oos_trades': total, 'oos_win_rate': win_rate, 'oos_net_pnl': net_pnl,
+            'oos_pnls': oos_pnls,
+        })
+
+    return results
+
+
+
     """
     برمی‌گرداند: لیست دیکشنری‌های نتیجه‌ی هر بازه‌ی out-of-sample برای این ارز.
     """
@@ -295,6 +481,10 @@ def run_walk_forward_for_symbol(symbol: str, df_raw: pd.DataFrame) -> list:
 
 
 def main():
+    if STRATEGY_MODE not in ('breakout', 'mean_reversion'):
+        logger.error(f"STRATEGY_MODE نامعتبر: '{STRATEGY_MODE}' — باید 'breakout' یا 'mean_reversion' باشد")
+        return
+
     if AI_GATE_ENABLED:
         logger.warning(
             "⚠️ AI_GATE_ENABLED=True در config.py — این اسکریپت استراتژی را "
@@ -303,12 +493,14 @@ def main():
             "روشن نگه‌داری متفاوت خواهد بود."
         )
 
-    logger.info(f"شروع Walk-Forward Analysis | {N_FOLDS} بازه | "
+    logger.info(f"شروع Walk-Forward Analysis | حالت={STRATEGY_MODE} | {N_FOLDS} بازه | "
                 f"هزینه‌ی معامله={TRANSACTION_COST_PERCENT}% رفت‌وبرگشت")
     logger.info("=" * 70)
 
     data_dir = os.path.join(BASE_DIR, "data", "4h")
     all_results = []
+
+    run_fn = run_walk_forward_for_symbol if STRATEGY_MODE == 'breakout' else run_walk_forward_for_symbol_mr
 
     for symbol in config.WATCHLIST:
         safe_name = symbol.replace('/', '_')
@@ -322,8 +514,8 @@ def main():
             logger.error(f"{symbol}: خطا در خواندن CSV: {e}")
             continue
 
-        logger.info(f"\n--- {symbol} ---")
-        sym_results = run_walk_forward_for_symbol(symbol, df_raw)
+        logger.info(f"\n--- {symbol} ({STRATEGY_MODE}) ---")
+        sym_results = run_fn(symbol, df_raw)
         all_results.extend(sym_results)
 
     if not all_results:
@@ -367,7 +559,7 @@ def main():
     # ذخیره‌ی جزئیات (بدون ستون oos_pnls خام برای خوانایی CSV)
     out_rows = [{k: v for k, v in r.items() if k != 'oos_pnls'} for r in all_results]
     out_df = pd.DataFrame(out_rows)
-    out_path = os.path.join(BASE_DIR, 'data', 'walk_forward_results.csv')
+    out_path = os.path.join(BASE_DIR, 'data', f'walk_forward_results_{STRATEGY_MODE}.csv')
     out_df.to_csv(out_path, index=False, encoding='utf-8')
     logger.info(f"جزئیات هر بازه/نماد ذخیره شد: {out_path}")
 
