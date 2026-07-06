@@ -72,6 +72,11 @@ RSI_OVERSOLD_OPTIONS   = [20, 25, 30]
 RSI_OVERBOUGHT_OPTIONS = [70, 75, 80]
 MIN_DEV_PCT_OPTIONS    = [2.0, 4.0, 6.0]   # حداقل فاصله‌ی قیمت از EMA200 به درصد
 
+# ✅ فیلتر رژیم بازار: mean-reversion منطقاً فقط در بازار رنج/بدون‌روند
+# باید کار کند، نه وقتی روند قوی است (چون در روند قوی RSI اشباع می‌شود
+# ولی قیمت برنمی‌گردد، ادامه می‌دهد). 999 یعنی «بدون فیلتر» (برای مقایسه).
+ADX_REGIME_OPTIONS = [25, 30, 999]
+
 
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     col_map = {}
@@ -253,11 +258,12 @@ def _get_ema200_deviation_pct(row: pd.Series, close_price: float) -> float:
 
 def simulate_window_mr(df: pd.DataFrame, start_idx: int, end_idx: int,
                         rsi_oversold: float, rsi_overbought: float, min_dev_pct: float,
-                        tp_r: float, sl_r: float, symbol: str) -> list:
+                        tp_r: float, sl_r: float, adx_regime_max: float, symbol: str) -> list:
     """
     شبیه‌سازی معاملات Mean-Reversion بین [start_idx, end_idx).
-    ورود LONG: RSI به‌شدت اشباع فروش + قیمت به‌اندازه‌ی کافی زیر EMA200.
-    ورود SHORT: RSI به‌شدت اشباع خرید + قیمت به‌اندازه‌ی کافی بالای EMA200.
+    ورود LONG: RSI به‌شدت اشباع فروش + قیمت به‌اندازه‌ی کافی زیر EMA200 +
+               ADX زیر adx_regime_max (بازار رنج/بدون‌روند — شرط جدید).
+    ورود SHORT: قرینه‌ی بالا.
     خروج (SL/TP) دقیقاً همان سایزینگ ATR-based قبلی — فقط جهت‌گیری ورود برعکس شده.
 
     Returns: لیست pnl_percent هر معامله (net از هزینه‌ی معامله).
@@ -302,11 +308,16 @@ def simulate_window_mr(df: pd.DataFrame, start_idx: int, end_idx: int,
             continue
 
         current_rsi = float(row.get('feat_rsi', row.get('RSI', 50)))
+        current_adx = float(row.get('feat_adx', row.get('ADX', 0)))
         dev_pct = _get_ema200_deviation_pct(row, close_price)
 
         atr_val = _get_atr(row, close_price)
         sl_dist = min(1.5 * atr_val * sl_r, close_price * max_sl_pct)
         if sl_dist <= 0:
+            continue
+
+        # ✅ فیلتر رژیم: فقط وقتی بازار به‌اندازه‌ی کافی بدون‌روند است
+        if current_adx >= adx_regime_max:
             continue
 
         # ✅ منطق mean-reversion: برعکسِ breakout — در نقاط افراطی وارد می‌شویم
@@ -332,25 +343,28 @@ def simulate_window_mr(df: pd.DataFrame, start_idx: int, end_idx: int,
 
 
 def _select_best_params_mr(df: pd.DataFrame, start_idx: int, end_idx: int, symbol: str) -> tuple:
-    """Grid search پارامترهای mean-reversion فقط روی [start_idx, end_idx)."""
+    """Grid search پارامترهای mean-reversion (شامل فیلتر رژیم ADX) فقط روی [start_idx, end_idx)."""
     best_pnl, best_trades, found = -1e9, 0, False
     best_cfg = {"RSI_OVERSOLD": 25, "RSI_OVERBOUGHT": 75, "MIN_DEV_PCT": 4.0,
                 "TP_RATIO": float(getattr(config, 'TP_RATIO', 1.5)),
-                "SL_RATIO": float(getattr(config, 'SL_RATIO', 1.0))}
+                "SL_RATIO": float(getattr(config, 'SL_RATIO', 1.0)),
+                "ADX_REGIME_MAX": 999}
     for rsi_os in RSI_OVERSOLD_OPTIONS:
         for rsi_ob in RSI_OVERBOUGHT_OPTIONS:
             for min_dev in MIN_DEV_PCT_OPTIONS:
                 for tp in TP_OPTIONS:
                     for sl in SL_OPTIONS:
-                        pnls = simulate_window_mr(df, start_idx, end_idx, rsi_os, rsi_ob,
-                                                   min_dev, tp, sl, symbol)
-                        if len(pnls) < MIN_TRADES_FOR_SELECTION:
-                            continue
-                        total = sum(pnls)
-                        if total > best_pnl:
-                            best_pnl, best_trades, found = total, len(pnls), True
-                            best_cfg = {"RSI_OVERSOLD": rsi_os, "RSI_OVERBOUGHT": rsi_ob,
-                                        "MIN_DEV_PCT": min_dev, "TP_RATIO": tp, "SL_RATIO": sl}
+                        for adx_regime in ADX_REGIME_OPTIONS:
+                            pnls = simulate_window_mr(df, start_idx, end_idx, rsi_os, rsi_ob,
+                                                       min_dev, tp, sl, adx_regime, symbol)
+                            if len(pnls) < MIN_TRADES_FOR_SELECTION:
+                                continue
+                            total = sum(pnls)
+                            if total > best_pnl:
+                                best_pnl, best_trades, found = total, len(pnls), True
+                                best_cfg = {"RSI_OVERSOLD": rsi_os, "RSI_OVERBOUGHT": rsi_ob,
+                                            "MIN_DEV_PCT": min_dev, "TP_RATIO": tp, "SL_RATIO": sl,
+                                            "ADX_REGIME_MAX": adx_regime}
     return best_cfg, found, best_trades
 
 
@@ -391,7 +405,7 @@ def run_walk_forward_for_symbol_mr(symbol: str, df_raw: pd.DataFrame) -> list:
         oos_pnls = simulate_window_mr(usable, test_start, test_end,
                                        best_cfg["RSI_OVERSOLD"], best_cfg["RSI_OVERBOUGHT"],
                                        best_cfg["MIN_DEV_PCT"], best_cfg["TP_RATIO"],
-                                       best_cfg["SL_RATIO"], symbol)
+                                       best_cfg["SL_RATIO"], best_cfg["ADX_REGIME_MAX"], symbol)
 
         wins = sum(1 for p in oos_pnls if p > 0)
         total = len(oos_pnls)
@@ -403,7 +417,8 @@ def run_walk_forward_for_symbol_mr(symbol: str, df_raw: pd.DataFrame) -> list:
             f"train=[0:{train_end}] test=[{test_start}:{test_end}] | "
             f"params={'یافت‌شد' if found else 'fallback'} "
             f"(RSI_OS={best_cfg['RSI_OVERSOLD']},RSI_OB={best_cfg['RSI_OVERBOUGHT']},"
-            f"MIN_DEV={best_cfg['MIN_DEV_PCT']}%,TP={best_cfg['TP_RATIO']},SL={best_cfg['SL_RATIO']}) | "
+            f"MIN_DEV={best_cfg['MIN_DEV_PCT']}%,TP={best_cfg['TP_RATIO']},SL={best_cfg['SL_RATIO']},"
+            f"ADX_MAX={best_cfg['ADX_REGIME_MAX']}) | "
             f"OOS trades={total} win_rate={win_rate}% net_pnl={net_pnl}%"
         )
 
