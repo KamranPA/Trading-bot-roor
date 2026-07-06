@@ -1,6 +1,15 @@
 name: Walk-Forward Analysis (Honest OOS Test)
 on:
   workflow_dispatch:
+    inputs:
+      strategy_mode:
+        description: 'حالت استراتژی برای تست'
+        required: true
+        default: 'mean_reversion'
+        type: choice
+        options:
+          - mean_reversion
+          - breakout
 jobs:
   walk_forward:
     runs-on: ubuntu-latest
@@ -28,11 +37,21 @@ jobs:
         run: python fetcher.py
 
       - name: Run Walk-Forward Analysis
-        run: python src/walk_forward.py
+        env:
+          STRATEGY_MODE: ${{ github.event.inputs.strategy_mode }}
+        run: |
+          echo "🔬 اجرا با STRATEGY_MODE=${STRATEGY_MODE}"
+          python src/walk_forward.py
+
+      - name: Show Results Summary
+        if: always()
+        run: |
+          echo "=== data/walk_forward_results_${STRATEGY_MODE}.csv ==="
+          cat "data/walk_forward_results_${{ github.event.inputs.strategy_mode }}.csv" || echo "فایل نتایج یافت نشد!"
 
       - name: Upload Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: walk-forward-results
-          path: data/walk_forward_results.csv
+          name: walk-forward-results-${{ github.event.inputs.strategy_mode }}
+          path: data/walk_forward_results_*.csv
