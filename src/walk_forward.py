@@ -495,6 +495,86 @@ def run_walk_forward_for_symbol_mr(symbol: str, df_raw: pd.DataFrame) -> list:
     return results
 
 
+def run_fixed_params_no_optimization_test() -> dict:
+    """
+    ✅ تست تعیین‌کننده: هیچ grid search/انتخاب پارامتری در کار نیست.
+    یک ترکیب پارامتر «متعارف» (RSI 30/70 — استاندارد صنعتی، نه انتخاب‌شده
+    از نتایج ما) از قبل ثابت می‌شود و یک‌بار روی کل تاریخچه‌ی هر ارز
+    (بعد از warm-up) اجرا می‌شود. این کاملاً از سوگیری overfitting در
+    انتخاب پارامتر (که در walk-forward با ۷۲۹ ترکیب ممکن است رخ داده باشد)
+    مبراست — اگر این تست هم نزدیک PF=1 بماند، شواهد نبود edge واقعی
+    قوی‌تر می‌شود؛ اگر معنادار مثبت شد، یعنی grid search ما edge واقعی را
+    زیر نویز پنهان کرده بود.
+    """
+    FIXED = {"RSI_OVERSOLD": 30, "RSI_OVERBOUGHT": 70, "MIN_DEV_PCT": 4.0,
+              "TP_RATIO": 2.0, "SL_RATIO": 1.0, "ADX_REGIME_MAX": 999}
+    logger.info("\n" + "=" * 70)
+    logger.info("🔒 تست بدون بهینه‌سازی (پارامتر ثابت، بدون grid search) — رفع ابهام overfitting")
+    logger.info(f"   پارامتر ثابت: {FIXED}")
+    logger.info("=" * 70)
+
+    data_dir = os.path.join(BASE_DIR, "data", "4h")
+    all_pnls = []
+    per_symbol = []
+
+    for symbol in config.WATCHLIST:
+        safe_name = symbol.replace('/', '_')
+        file_path = os.path.join(data_dir, f"{safe_name}_history.csv")
+        if not os.path.exists(file_path):
+            continue
+        try:
+            df_raw = pd.read_csv(file_path)
+        except Exception:
+            continue
+
+        df_raw = _normalize_columns(df_raw)
+        df, meta = TechnicalIndicators.calculate_all_features(df_raw, symbol=symbol)
+        if not meta.get('success', False) or 'ema_200' not in df.columns:
+            continue
+        df = _normalize_columns(df)
+        df = _add_uppercase_aliases(df)
+        df = df.reset_index(drop=True)
+        if len(df) <= WARMUP_ROWS:
+            continue
+        usable = df.iloc[WARMUP_ROWS:].reset_index(drop=True)
+
+        pnls = simulate_window_mr(usable, 0, len(usable),
+                                   FIXED["RSI_OVERSOLD"], FIXED["RSI_OVERBOUGHT"],
+                                   FIXED["MIN_DEV_PCT"], FIXED["TP_RATIO"],
+                                   FIXED["SL_RATIO"], FIXED["ADX_REGIME_MAX"], symbol)
+        all_pnls.extend(pnls)
+
+        n = len(pnls)
+        wr = round(sum(1 for p in pnls if p > 0) / n * 100, 1) if n else 0.0
+        logger.info(f"   {symbol}: trades={n} win_rate={wr}% net_pnl={round(sum(pnls), 2)}%")
+        per_symbol.append({'symbol': symbol, 'trades': n, 'win_rate': wr, 'net_pnl': round(sum(pnls), 2)})
+
+    n = len(all_pnls)
+    if n == 0:
+        logger.warning("هیچ معامله‌ای در تست ثابت رخ نداد")
+        return {}
+
+    wins_sum = sum(p for p in all_pnls if p > 0)
+    losses_sum = abs(sum(p for p in all_pnls if p <= 0))
+    pf = round(wins_sum / losses_sum, 2) if losses_sum > 0 else (float('inf') if wins_sum > 0 else 0.0)
+    win_rate = round(sum(1 for p in all_pnls if p > 0) / n * 100, 1)
+    net_pnl = round(sum(all_pnls), 2)
+
+    logger.info("\n" + "-" * 70)
+    logger.info(f"📌 نتیجه‌ی تست بدون بهینه‌سازی: trades={n} | win_rate={win_rate}% | "
+                f"net_pnl={net_pnl}% | Profit Factor={pf}")
+    if net_pnl > 0 and pf > 1.15:
+        logger.info("✅ حتی بدون هیچ بهینه‌سازی، edge مثبت و قابل‌توجه دیده می‌شود — "
+                     "احتمالاً grid search قبلی edge واقعی را زیر نویز گم کرده بود.")
+    else:
+        logger.info("❌ حتی با پارامتر متعارف و بدون هیچ بهینه‌سازی، edge معناداری دیده نمی‌شود — "
+                     "این شواهد را قوی‌تر می‌کند که واقعاً edge ای در کار نیست.")
+    logger.info("-" * 70)
+
+    return {'fixed_params': FIXED, 'total_trades': n, 'win_rate': win_rate,
+            'net_pnl': net_pnl, 'profit_factor': pf, 'per_symbol': per_symbol}
+
+
 def main():
     if STRATEGY_MODE not in ('breakout', 'mean_reversion'):
         logger.error(f"STRATEGY_MODE نامعتبر: '{STRATEGY_MODE}' — باید 'breakout' یا 'mean_reversion' باشد")
@@ -577,6 +657,10 @@ def main():
     out_path = os.path.join(BASE_DIR, 'data', f'walk_forward_results_{STRATEGY_MODE}.csv')
     out_df.to_csv(out_path, index=False, encoding='utf-8')
     logger.info(f"جزئیات هر بازه/نماد ذخیره شد: {out_path}")
+
+    # ✅ تست تکمیلی بدون بهینه‌سازی — فقط برای mean_reversion (رفع ابهام overfitting انتخاب پارامتر)
+    if STRATEGY_MODE == 'mean_reversion':
+        run_fixed_params_no_optimization_test()
 
 
 if __name__ == "__main__":
