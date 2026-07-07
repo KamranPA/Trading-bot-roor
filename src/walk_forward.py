@@ -77,6 +77,19 @@ MIN_DEV_PCT_OPTIONS    = [2.0, 4.0, 6.0]   # حداقل فاصله‌ی قیمت
 # ولی قیمت برنمی‌گردد، ادامه می‌دهد). 999 یعنی «بدون فیلتر» (برای مقایسه).
 ADX_REGIME_OPTIONS = [25, 30, 999]
 
+# ── حالت سوم: Relative-Value بین ارزها (نسبت هر آلت‌کوین به BTC) ────────────
+# منطق: به‌جای «BTC صعودی می‌شود؟»، می‌پرسیم «نسبت ALT/BTC از میانگین
+# غلتان خودش چقدر منحرف شده؟» — یک پوزیشن هم‌زمان روی هر دو پا (Long ALT +
+# Short BTC یا برعکس) که تا حد زیادی از حرکت کلی بازار (نویز مشترک) مستقل
+# است. این با استراتژی‌های تک‌ارزی TA کاملاً متفاوت است.
+RV_BASE_SYMBOL      = 'BTCUSDT'          # پای مرجع (market factor)
+RV_Z_WINDOW_OPTIONS  = [50, 100, 200]     # طول پنجره‌ی rolling برای zscore
+RV_Z_ENTRY_OPTIONS   = [1.5, 2.0, 2.5]    # آستانه‌ی ورود (انحراف از میانگین)
+RV_Z_EXIT_OPTIONS    = [0.3, 0.5]         # آستانه‌ی خروج (برگشت به میانگین)
+RV_MAX_HOLD_OPTIONS  = [40, 80]           # حداکثر تعداد کندل نگه‌داشتن (timeout)
+RV_Z_STOP_EXTRA      = 1.5                # اگر انحراف از z_entry این‌مقدار بیشتر شد، SL
+MIN_TRADES_FOR_SELECTION_RV = 5           # کمتر از single-asset چون این معاملات کمیاب‌ترند
+
 
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     col_map = {}
@@ -495,7 +508,168 @@ def run_walk_forward_for_symbol_mr(symbol: str, df_raw: pd.DataFrame) -> list:
     return results
 
 
-def run_fixed_params_no_optimization_test() -> dict:
+def _process_symbol_for_rv(symbol: str, df_raw: pd.DataFrame):
+    """اندیکاتورها + warm-up برای یک ارز — فقط برای استخراج ستون close/timestamp
+    مورد نیاز relative-value (بدون فیچرهای TA اضافه)."""
+    df_norm = _normalize_columns(df_raw.copy())
+    df_feat, meta = TechnicalIndicators.calculate_all_features(df_norm, symbol=symbol)
+    if not meta.get('success', False):
+        return None
+    df_feat = _normalize_columns(df_feat)
+    df_feat = df_feat.reset_index(drop=True)
+    if len(df_feat) <= WARMUP_ROWS:
+        return None
+    df_feat = df_feat.iloc[WARMUP_ROWS:].reset_index(drop=True)
+    if 'timestamp' not in df_feat.columns or 'close' not in df_feat.columns:
+        return None
+    return df_feat[['timestamp', 'close']].copy()
+
+
+def _build_pair_df(alt_df: pd.DataFrame, btc_df: pd.DataFrame) -> pd.DataFrame:
+    """ترکیب دو سری قیمت بر اساس timestamp مشترک + محاسبه‌ی zscore برای هر پنجره."""
+    alt_r = alt_df.rename(columns={'close': 'close_alt'})
+    btc_r = btc_df.rename(columns={'close': 'close_btc'})
+    pair = pd.merge(alt_r, btc_r, on='timestamp', how='inner').reset_index(drop=True)
+    if len(pair) < 300:
+        return pair
+
+    ratio = pair['close_alt'] / pair['close_btc']
+    for w in RV_Z_WINDOW_OPTIONS:
+        roll_mean = ratio.rolling(w).mean()
+        roll_std  = ratio.rolling(w).std().replace(0, np.nan)
+        pair[f'zscore_w{w}'] = (ratio - roll_mean) / roll_std
+    return pair
+
+
+def simulate_window_rv(pair_df: pd.DataFrame, zscore_col: str, start_idx: int, end_idx: int,
+                        z_entry: float, z_exit: float, max_hold: int, symbol_alt: str) -> list:
+    """
+    شبیه‌سازی معاملات Relative-Value (Long ALT/Short BTC یا برعکس) بین [start_idx, end_idx).
+    یک پوزیشن هم‌زمان (ساده‌سازی). PnL = اختلاف بازده دو پا (market-neutral تقریبی).
+    Returns: لیست pnl_percent هر معامله (net از هزینه‌ی دو پا).
+    """
+    open_trade = None
+    pnls = []
+
+    for i in range(start_idx, min(end_idx, len(pair_df))):
+        row = pair_df.iloc[i]
+        z = row.get(zscore_col, None)
+        close_alt = float(row.get('close_alt', 0))
+        close_btc = float(row.get('close_btc', 0))
+        if z is None or pd.isna(z) or close_alt == 0 or close_btc == 0:
+            continue
+
+        if open_trade is not None:
+            held = i - open_trade['entry_idx']
+            exit_now, reason = False, None
+            if open_trade['direction'] == 'LONG_ALT_SHORT_BTC':
+                if z >= -z_exit:
+                    exit_now, reason = True, 'TP'
+                elif z <= -(open_trade['z_entry'] + RV_Z_STOP_EXTRA):
+                    exit_now, reason = True, 'SL'
+            else:
+                if z <= z_exit:
+                    exit_now, reason = True, 'TP'
+                elif z >= (open_trade['z_entry'] + RV_Z_STOP_EXTRA):
+                    exit_now, reason = True, 'SL'
+            if not exit_now and held >= max_hold:
+                exit_now, reason = True, 'TIMEOUT'
+
+            if exit_now:
+                ret_alt = (close_alt - open_trade['entry_alt']) / open_trade['entry_alt'] * 100
+                ret_btc = (close_btc - open_trade['entry_btc']) / open_trade['entry_btc'] * 100
+                pnl = (ret_alt - ret_btc) if open_trade['direction'] == 'LONG_ALT_SHORT_BTC' else (ret_btc - ret_alt)
+                pnl -= TRANSACTION_COST_PERCENT * 2  # دو پا
+                pnls.append(pnl)
+                open_trade = None
+            continue
+
+        if z <= -z_entry:
+            open_trade = {'direction': 'LONG_ALT_SHORT_BTC', 'entry_idx': i,
+                          'entry_alt': close_alt, 'entry_btc': close_btc, 'z_entry': z_entry}
+        elif z >= z_entry:
+            open_trade = {'direction': 'SHORT_ALT_LONG_BTC', 'entry_idx': i,
+                          'entry_alt': close_alt, 'entry_btc': close_btc, 'z_entry': z_entry}
+
+    if open_trade is not None:
+        last_idx = min(end_idx, len(pair_df)) - 1
+        if last_idx >= 0:
+            last = pair_df.iloc[last_idx]
+            ret_alt = (float(last['close_alt']) - open_trade['entry_alt']) / open_trade['entry_alt'] * 100
+            ret_btc = (float(last['close_btc']) - open_trade['entry_btc']) / open_trade['entry_btc'] * 100
+            pnl = (ret_alt - ret_btc) if open_trade['direction'] == 'LONG_ALT_SHORT_BTC' else (ret_btc - ret_alt)
+            pnl -= TRANSACTION_COST_PERCENT * 2
+            pnls.append(pnl)
+
+    return pnls
+
+
+def _select_best_params_rv(pair_df: pd.DataFrame, start_idx: int, end_idx: int, symbol_alt: str) -> tuple:
+    best_pnl, best_trades, found = -1e9, 0, False
+    best_cfg = {"Z_WINDOW": 100, "Z_ENTRY": 2.0, "Z_EXIT": 0.5, "MAX_HOLD": 40}
+    for w in RV_Z_WINDOW_OPTIONS:
+        col = f'zscore_w{w}'
+        if col not in pair_df.columns:
+            continue
+        for z_entry in RV_Z_ENTRY_OPTIONS:
+            for z_exit in RV_Z_EXIT_OPTIONS:
+                for max_hold in RV_MAX_HOLD_OPTIONS:
+                    pnls = simulate_window_rv(pair_df, col, start_idx, end_idx, z_entry, z_exit, max_hold, symbol_alt)
+                    if len(pnls) < MIN_TRADES_FOR_SELECTION_RV:
+                        continue
+                    total = sum(pnls)
+                    if total > best_pnl:
+                        best_pnl, best_trades, found = total, len(pnls), True
+                        best_cfg = {"Z_WINDOW": w, "Z_ENTRY": z_entry, "Z_EXIT": z_exit, "MAX_HOLD": max_hold}
+    return best_cfg, found, best_trades
+
+
+def run_walk_forward_for_pair_rv(symbol_alt: str, alt_df: pd.DataFrame, btc_df: pd.DataFrame) -> list:
+    pair_df = _build_pair_df(alt_df, btc_df)
+    n = len(pair_df)
+    if n < MIN_TRADES_FOR_SELECTION_RV * 40:
+        logger.warning(f"{symbol_alt}/BTC: داده‌ی هم‌زمان کافی نیست ({n} ردیف) — رد شد")
+        return []
+
+    fold_size = n // N_FOLDS
+    fold_bounds = [i * fold_size for i in range(N_FOLDS)] + [n]
+    results = []
+
+    for fold_idx in range(1, N_FOLDS):
+        train_start, train_end = 0, fold_bounds[fold_idx]
+        test_start, test_end = fold_bounds[fold_idx], fold_bounds[fold_idx + 1]
+
+        best_cfg, found, sel_trades = _select_best_params_rv(pair_df, train_start, train_end, symbol_alt)
+        col = f'zscore_w{best_cfg["Z_WINDOW"]}'
+        oos_pnls = simulate_window_rv(pair_df, col, test_start, test_end,
+                                       best_cfg["Z_ENTRY"], best_cfg["Z_EXIT"], best_cfg["MAX_HOLD"], symbol_alt)
+
+        wins = sum(1 for p in oos_pnls if p > 0)
+        total = len(oos_pnls)
+        win_rate = round(wins / total * 100, 1) if total else 0.0
+        net_pnl = round(sum(oos_pnls), 2)
+
+        logger.info(
+            f"[RV] {symbol_alt}/BTC | fold {fold_idx}/{N_FOLDS-1} | "
+            f"train=[0:{train_end}] test=[{test_start}:{test_end}] | "
+            f"params={'یافت‌شد' if found else 'fallback'} "
+            f"(Z_WIN={best_cfg['Z_WINDOW']},Z_ENTRY={best_cfg['Z_ENTRY']},"
+            f"Z_EXIT={best_cfg['Z_EXIT']},MAX_HOLD={best_cfg['MAX_HOLD']}) | "
+            f"OOS trades={total} win_rate={win_rate}% net_pnl={net_pnl}%"
+        )
+
+        results.append({
+            'symbol': f"{symbol_alt}/BTC", 'fold': fold_idx, 'train_rows': train_end,
+            'test_rows': test_end - test_start, 'params_found': found,
+            **{f'param_{k}': v for k, v in best_cfg.items()},
+            'oos_trades': total, 'oos_win_rate': win_rate, 'oos_net_pnl': net_pnl,
+            'oos_pnls': oos_pnls,
+        })
+
+    return results
+
+
+
     """
     ✅ تست تعیین‌کننده: هیچ grid search/انتخاب پارامتری در کار نیست.
     یک ترکیب پارامتر «متعارف» (RSI 30/70 — استاندارد صنعتی، نه انتخاب‌شده
@@ -576,8 +750,9 @@ def run_fixed_params_no_optimization_test() -> dict:
 
 
 def main():
-    if STRATEGY_MODE not in ('breakout', 'mean_reversion'):
-        logger.error(f"STRATEGY_MODE نامعتبر: '{STRATEGY_MODE}' — باید 'breakout' یا 'mean_reversion' باشد")
+    if STRATEGY_MODE not in ('breakout', 'mean_reversion', 'relative_value'):
+        logger.error(f"STRATEGY_MODE نامعتبر: '{STRATEGY_MODE}' — باید 'breakout'، "
+                     f"'mean_reversion' یا 'relative_value' باشد")
         return
 
     if AI_GATE_ENABLED:
@@ -589,29 +764,66 @@ def main():
         )
 
     logger.info(f"شروع Walk-Forward Analysis | حالت={STRATEGY_MODE} | {N_FOLDS} بازه | "
-                f"هزینه‌ی معامله={TRANSACTION_COST_PERCENT}% رفت‌وبرگشت")
+                f"هزینه‌ی معامله={TRANSACTION_COST_PERCENT}% رفت‌وبرگشت (هر پا)")
     logger.info("=" * 70)
 
     data_dir = os.path.join(BASE_DIR, "data", "4h")
     all_results = []
 
-    run_fn = run_walk_forward_for_symbol if STRATEGY_MODE == 'breakout' else run_walk_forward_for_symbol_mr
+    # ✅ مسیر جداگانه برای relative_value چون هر آلت‌کوین باید با یک BTC
+    # مشترک جفت شود (پای مرجع یک‌بار پردازش می‌شود، نه هر بار).
+    if STRATEGY_MODE == 'relative_value':
+        btc_path = os.path.join(data_dir, f"{RV_BASE_SYMBOL}_history.csv")
+        if not os.path.exists(btc_path):
+            logger.error(f"فایل داده‌ی پای مرجع ({RV_BASE_SYMBOL}) یافت نشد — متوقف شد")
+            return
+        btc_raw = pd.read_csv(btc_path)
+        btc_processed = _process_symbol_for_rv(RV_BASE_SYMBOL, btc_raw)
+        if btc_processed is None:
+            logger.error(f"پردازش {RV_BASE_SYMBOL} ناموفق — متوقف شد")
+            return
 
-    for symbol in config.WATCHLIST:
-        safe_name = symbol.replace('/', '_')
-        file_path = os.path.join(data_dir, f"{safe_name}_history.csv")
-        if not os.path.exists(file_path):
-            logger.warning(f"{symbol}: فایل CSV یافت نشد — رد شد")
-            continue
-        try:
-            df_raw = pd.read_csv(file_path)
-        except Exception as e:
-            logger.error(f"{symbol}: خطا در خواندن CSV: {e}")
-            continue
+        for symbol in config.WATCHLIST:
+            if symbol == RV_BASE_SYMBOL:
+                continue  # BTC خودش نمی‌تواند پای alt در برابر خودش باشد
+            safe_name = symbol.replace('/', '_')
+            file_path = os.path.join(data_dir, f"{safe_name}_history.csv")
+            if not os.path.exists(file_path):
+                logger.warning(f"{symbol}: فایل CSV یافت نشد — رد شد")
+                continue
+            try:
+                alt_raw = pd.read_csv(file_path)
+            except Exception as e:
+                logger.error(f"{symbol}: خطا در خواندن CSV: {e}")
+                continue
 
-        logger.info(f"\n--- {symbol} ({STRATEGY_MODE}) ---")
-        sym_results = run_fn(symbol, df_raw)
-        all_results.extend(sym_results)
+            alt_processed = _process_symbol_for_rv(symbol, alt_raw)
+            if alt_processed is None:
+                logger.warning(f"{symbol}: پردازش ناموفق — رد شد")
+                continue
+
+            logger.info(f"\n--- {symbol}/{RV_BASE_SYMBOL} (relative_value) ---")
+            pair_results = run_walk_forward_for_pair_rv(symbol, alt_processed, btc_processed)
+            all_results.extend(pair_results)
+
+    else:
+        run_fn = run_walk_forward_for_symbol if STRATEGY_MODE == 'breakout' else run_walk_forward_for_symbol_mr
+
+        for symbol in config.WATCHLIST:
+            safe_name = symbol.replace('/', '_')
+            file_path = os.path.join(data_dir, f"{safe_name}_history.csv")
+            if not os.path.exists(file_path):
+                logger.warning(f"{symbol}: فایل CSV یافت نشد — رد شد")
+                continue
+            try:
+                df_raw = pd.read_csv(file_path)
+            except Exception as e:
+                logger.error(f"{symbol}: خطا در خواندن CSV: {e}")
+                continue
+
+            logger.info(f"\n--- {symbol} ({STRATEGY_MODE}) ---")
+            sym_results = run_fn(symbol, df_raw)
+            all_results.extend(sym_results)
 
     if not all_results:
         logger.error("❌ هیچ نتیجه‌ای تولید نشد — بررسی کن data/4h پر است یا نه")
