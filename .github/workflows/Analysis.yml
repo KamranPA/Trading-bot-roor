@@ -10,6 +10,7 @@ on:
         options:
           - mean_reversion
           - breakout
+          - relative_value
 jobs:
   walk_forward:
     runs-on: ubuntu-latest
