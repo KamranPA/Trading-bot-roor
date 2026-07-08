@@ -36,6 +36,7 @@ if BASE_DIR not in sys.path:
 
 import config
 from src import strategy_utils
+from src import coinex_client
 from src.indicators import TechnicalIndicators
 from src.volume_filter import passes_volume_filter
 
@@ -52,6 +53,11 @@ MIN_TRADES_FOR_SELECTION = 10  # هماهنگ با optimizer.py
 TRANSACTION_COST_PERCENT = float(getattr(config, 'TRANSACTION_COST_PERCENT', 0.2))
 
 AI_GATE_ENABLED = bool(getattr(config, 'AI_GATE_ENABLED', True))  # باید False باشد
+
+# ✅ در فاز تست، فقط روی ۵ ارز اصلی (بدون آلت‌کوین‌های کوچک) کار می‌کنیم —
+# این لیست مستقل از config.WATCHLIST است، یعنی روی سیستم لایو اثر ندارد.
+# اگر خواستی تغییرش بده:
+TEST_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'LTCUSDT']
 
 ADX_OPTIONS   = [15, 20, 25]
 SWING_OPTIONS = [3, 5, 7]
@@ -89,6 +95,17 @@ RV_Z_EXIT_OPTIONS    = [0.3, 0.5]         # آستانه‌ی خروج (برگش
 RV_MAX_HOLD_OPTIONS  = [40, 80]           # حداکثر تعداد کندل نگه‌داشتن (timeout)
 RV_Z_STOP_EXTRA      = 1.5                # اگر انحراف از z_entry این‌مقدار بیشتر شد، SL
 MIN_TRADES_FOR_SELECTION_RV = 5           # کمتر از single-asset چون این معاملات کمیاب‌ترند
+
+# ── حالت چهارم: Time-Series Momentum روزانه (نگه‌داری کوتاه‌مدت) ────────────
+# منطق: بر پایه‌ی ادبیات آکادمیک مستند (Liu & Tsyvinski/NBER، Liu et al. 2022،
+# "A Decade of Evidence of Trend Following in Crypto") — momentum در تایم‌فریم
+# روزانه (نه ۴ساعته!) بارها با Sharpe مثبت تکرار شده، به‌شرط نگه‌داری چندروزه
+# (نه intraday که رد شد، نه چندهفته‌ای که با محدودیت کاربر جور نیست).
+# بهترین ترکیب گزارش‌شده در Liu et al. 2022: lookback≈28 روز, holding≈5 روز.
+MOM_LOOKBACK_OPTIONS = [14, 21, 28, 35]     # روز
+MOM_HOLD_OPTIONS     = [3, 5, 7]            # روز — حداکثر «چند روز» طبق خواسته‌ی کاربر
+MOM_MIN_THRESHOLD_OPTIONS = [0.0, 3.0, 5.0] # % حداقل بازده lookback برای ورود (فیلتر نویز)
+MIN_TRADES_FOR_SELECTION_MOM = 8
 
 
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -669,7 +686,128 @@ def run_walk_forward_for_pair_rv(symbol_alt: str, alt_df: pd.DataFrame, btc_df: 
     return results
 
 
+def _fetch_daily_data(symbol: str, limit: int = 1000) -> pd.DataFrame:
+    """دریافت داده‌ی روزانه (نه ۴ساعته) مستقیم از CoinEx — برای momentum
+    که طبق ادبیات باید روی تایم‌فریم روزانه ساخته شود، نه ۴ساعته."""
+    df = coinex_client.get_coinex_candles(symbol, timeframe="1d", limit=limit)
+    if df is None or df.empty:
+        return None
+    df = _normalize_columns(df)
+    df = df.sort_values('timestamp' if 'timestamp' in df.columns else df.columns[0]).reset_index(drop=True)
+    return df
 
+
+def simulate_window_momentum(df: pd.DataFrame, start_idx: int, end_idx: int,
+                              lookback: int, hold: int, min_threshold_pct: float,
+                              symbol: str) -> list:
+    """
+    Time-Series Momentum روزانه — یک پوزیشن هم‌زمان:
+    اگر بازده lookback روز اخیر مثبت (و بزرگ‌تر از آستانه) بود → LONG.
+    اگر منفی (و قدرمطلق بزرگ‌تر از آستانه) بود → SHORT.
+    دقیقاً hold روز نگه می‌داریم، بعد می‌بندیم (بدون SL/TP — پیاده‌سازی
+    وفادار به ادبیات آکادمیک؛ می‌توان بعداً SL اضافه کرد).
+
+    Returns: لیست pnl_percent هر معامله (net از هزینه‌ی معامله).
+    """
+    pnls = []
+    i = max(start_idx, lookback)
+
+    while i < min(end_idx, len(df)):
+        close_now = float(df.iloc[i]['close'])
+        close_lookback = float(df.iloc[i - lookback]['close'])
+        if close_lookback == 0:
+            i += 1
+            continue
+
+        mom_return_pct = (close_now - close_lookback) / close_lookback * 100
+
+        direction = None
+        if mom_return_pct >= min_threshold_pct:
+            direction = 'LONG'
+        elif mom_return_pct <= -min_threshold_pct:
+            direction = 'SHORT'
+
+        if direction is None:
+            i += 1
+            continue
+
+        exit_i = i + hold
+        if exit_i >= min(end_idx, len(df)):
+            break  # داده‌ی کافی برای بستن در بازه‌ی مجاز نیست
+
+        entry_price = close_now
+        exit_price = float(df.iloc[exit_i]['close'])
+        ret = (exit_price - entry_price) / entry_price * 100
+        pnl = ret if direction == 'LONG' else -ret
+        pnl -= TRANSACTION_COST_PERCENT
+        pnls.append(pnl)
+
+        i = exit_i + 1  # غیرهم‌پوشان — بعد از بستن، دوباره دنبال سیگنال بگرد
+
+    return pnls
+
+
+def _select_best_params_momentum(df: pd.DataFrame, start_idx: int, end_idx: int, symbol: str) -> tuple:
+    best_pnl, best_trades, found = -1e9, 0, False
+    best_cfg = {"LOOKBACK": 28, "HOLD": 5, "MIN_THRESHOLD": 0.0}
+    for lb in MOM_LOOKBACK_OPTIONS:
+        for hold in MOM_HOLD_OPTIONS:
+            for th in MOM_MIN_THRESHOLD_OPTIONS:
+                pnls = simulate_window_momentum(df, start_idx, end_idx, lb, hold, th, symbol)
+                if len(pnls) < MIN_TRADES_FOR_SELECTION_MOM:
+                    continue
+                total = sum(pnls)
+                if total > best_pnl:
+                    best_pnl, best_trades, found = total, len(pnls), True
+                    best_cfg = {"LOOKBACK": lb, "HOLD": hold, "MIN_THRESHOLD": th}
+    return best_cfg, found, best_trades
+
+
+def run_walk_forward_for_symbol_momentum(symbol: str, df: pd.DataFrame) -> list:
+    n = len(df)
+    if n < 300:
+        logger.warning(f"{symbol}: داده‌ی روزانه کافی نیست ({n} ردیف) — رد شد")
+        return []
+
+    fold_size = n // N_FOLDS
+    fold_bounds = [i * fold_size for i in range(N_FOLDS)] + [n]
+    results = []
+
+    for fold_idx in range(1, N_FOLDS):
+        train_start, train_end = 0, fold_bounds[fold_idx]
+        test_start, test_end = fold_bounds[fold_idx], fold_bounds[fold_idx + 1]
+
+        best_cfg, found, sel_trades = _select_best_params_momentum(df, train_start, train_end, symbol)
+        oos_pnls = simulate_window_momentum(df, test_start, test_end,
+                                             best_cfg["LOOKBACK"], best_cfg["HOLD"],
+                                             best_cfg["MIN_THRESHOLD"], symbol)
+
+        wins = sum(1 for p in oos_pnls if p > 0)
+        total = len(oos_pnls)
+        win_rate = round(wins / total * 100, 1) if total else 0.0
+        net_pnl = round(sum(oos_pnls), 2)
+
+        logger.info(
+            f"[MOM] {symbol} | fold {fold_idx}/{N_FOLDS-1} | "
+            f"train=[0:{train_end}] test=[{test_start}:{test_end}] (روز) | "
+            f"params={'یافت‌شد' if found else 'fallback'} "
+            f"(LOOKBACK={best_cfg['LOOKBACK']}d,HOLD={best_cfg['HOLD']}d,"
+            f"MIN_TH={best_cfg['MIN_THRESHOLD']}%) | "
+            f"OOS trades={total} win_rate={win_rate}% net_pnl={net_pnl}%"
+        )
+
+        results.append({
+            'symbol': symbol, 'fold': fold_idx, 'train_rows': train_end,
+            'test_rows': test_end - test_start, 'params_found': found,
+            **{f'param_{k}': v for k, v in best_cfg.items()},
+            'oos_trades': total, 'oos_win_rate': win_rate, 'oos_net_pnl': net_pnl,
+            'oos_pnls': oos_pnls,
+        })
+
+    return results
+
+
+def run_fixed_params_no_optimization_test() -> dict:
     """
     ✅ تست تعیین‌کننده: هیچ grid search/انتخاب پارامتری در کار نیست.
     یک ترکیب پارامتر «متعارف» (RSI 30/70 — استاندارد صنعتی، نه انتخاب‌شده
@@ -691,7 +829,7 @@ def run_walk_forward_for_pair_rv(symbol_alt: str, alt_df: pd.DataFrame, btc_df: 
     all_pnls = []
     per_symbol = []
 
-    for symbol in config.WATCHLIST:
+    for symbol in TEST_SYMBOLS:
         safe_name = symbol.replace('/', '_')
         file_path = os.path.join(data_dir, f"{safe_name}_history.csv")
         if not os.path.exists(file_path):
@@ -750,9 +888,9 @@ def run_walk_forward_for_pair_rv(symbol_alt: str, alt_df: pd.DataFrame, btc_df: 
 
 
 def main():
-    if STRATEGY_MODE not in ('breakout', 'mean_reversion', 'relative_value'):
+    if STRATEGY_MODE not in ('breakout', 'mean_reversion', 'relative_value', 'momentum_daily'):
         logger.error(f"STRATEGY_MODE نامعتبر: '{STRATEGY_MODE}' — باید 'breakout'، "
-                     f"'mean_reversion' یا 'relative_value' باشد")
+                     f"'mean_reversion'، 'relative_value' یا 'momentum_daily' باشد")
         return
 
     if AI_GATE_ENABLED:
@@ -783,7 +921,7 @@ def main():
             logger.error(f"پردازش {RV_BASE_SYMBOL} ناموفق — متوقف شد")
             return
 
-        for symbol in config.WATCHLIST:
+        for symbol in TEST_SYMBOLS:
             if symbol == RV_BASE_SYMBOL:
                 continue  # BTC خودش نمی‌تواند پای alt در برابر خودش باشد
             safe_name = symbol.replace('/', '_')
@@ -806,10 +944,23 @@ def main():
             pair_results = run_walk_forward_for_pair_rv(symbol, alt_processed, btc_processed)
             all_results.extend(pair_results)
 
+    elif STRATEGY_MODE == 'momentum_daily':
+        # ✅ داده‌ی روزانه مستقیم از API گرفته می‌شود (نه از data/4h/*.csv که
+        # فقط ۴ساعته است) — چون طبق ادبیات، momentum باید روی تایم‌فریم
+        # روزانه ساخته شود.
+        for symbol in TEST_SYMBOLS:
+            logger.info(f"\n--- {symbol} (momentum_daily) ---")
+            daily_df = _fetch_daily_data(symbol)
+            if daily_df is None or len(daily_df) < 300:
+                logger.warning(f"{symbol}: داده‌ی روزانه کافی دریافت نشد — رد شد")
+                continue
+            sym_results = run_walk_forward_for_symbol_momentum(symbol, daily_df)
+            all_results.extend(sym_results)
+
     else:
         run_fn = run_walk_forward_for_symbol if STRATEGY_MODE == 'breakout' else run_walk_forward_for_symbol_mr
 
-        for symbol in config.WATCHLIST:
+        for symbol in TEST_SYMBOLS:
             safe_name = symbol.replace('/', '_')
             file_path = os.path.join(data_dir, f"{safe_name}_history.csv")
             if not os.path.exists(file_path):
