@@ -5,9 +5,10 @@ on:
       strategy_mode:
         description: 'حالت استراتژی برای تست'
         required: true
-        default: 'mean_reversion'
+        default: 'momentum_daily'
         type: choice
         options:
+          - momentum_daily
           - mean_reversion
           - breakout
           - relative_value
