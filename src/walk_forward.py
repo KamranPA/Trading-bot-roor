@@ -45,7 +45,9 @@ logger = logging.getLogger(__name__)
 
 # ── تنظیمات Walk-Forward ─────────────────────────────────────────────────────
 WARMUP_ROWS   = 200   # هماهنگ با backtester.py/train_model.py
-N_FOLDS       = 5     # تعداد بازه‌های متوالی (۱ بازه برای شروع + ۴ بازه‌ی تست)
+N_FOLDS       = 7     # ✅ افزایش از 5 به 7 — چون با فقط ۲ ارز، نمونه کوچک‌تر
+                        # می‌شود؛ بازه‌ی بیشتر یعنی شواهد آماری قوی‌تر برای
+                        # تأیید/رد فرضیه‌ی «BTC/ETH edge واقعی دارند».
 MIN_TRADES_FOR_SELECTION = 10  # هماهنگ با optimizer.py
 
 # هزینه‌ی رفت‌وبرگشت هر معامله (٪) — پیش‌فرض محافظه‌کارانه برای کارمزد+اسلیپیج.
@@ -54,10 +56,10 @@ TRANSACTION_COST_PERCENT = float(getattr(config, 'TRANSACTION_COST_PERCENT', 0.2
 
 AI_GATE_ENABLED = bool(getattr(config, 'AI_GATE_ENABLED', True))  # باید False باشد
 
-# ✅ در فاز تست، فقط روی ۵ ارز اصلی (بدون آلت‌کوین‌های کوچک) کار می‌کنیم —
 # این لیست مستقل از config.WATCHLIST است، یعنی روی سیستم لایو اثر ندارد.
-# اگر خواستی تغییرش بده:
-TEST_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'LTCUSDT']
+# ✅ محدود شد به فقط BTC/ETH — چون در تست قبلی (۵ ارز) این دو تنها
+# نمادهایی بودند که momentum_daily رویشان مثبت بود (SOL/XRP/LTC منفی).
+TEST_SYMBOLS = ['BTCUSDT', 'ETHUSDT']
 
 ADX_OPTIONS   = [15, 20, 25]
 SWING_OPTIONS = [3, 5, 7]
