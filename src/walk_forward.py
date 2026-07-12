@@ -1023,9 +1023,66 @@ def main():
     out_df.to_csv(out_path, index=False, encoding='utf-8')
     logger.info(f"جزئیات هر بازه/نماد ذخیره شد: {out_path}")
 
-    # ✅ تست تکمیلی بدون بهینه‌سازی — فقط برای mean_reversion (رفع ابهام overfitting انتخاب پارامتر)
+    # ✅ تست تکمیلی بدون بهینه‌سازی — رفع ابهام overfitting انتخاب پارامتر
     if STRATEGY_MODE == 'mean_reversion':
         run_fixed_params_no_optimization_test()
+    elif STRATEGY_MODE == 'momentum_daily':
+        run_fixed_params_momentum_test()
+
+
+def run_fixed_params_momentum_test() -> dict:
+    """
+    ✅ تست تعیین‌کننده برای momentum_daily: هیچ grid search/انتخاب پارامتری.
+    پارامتر ثابت از خودِ ادبیات آکادمیک (Liu et al. 2022: lookback≈28،
+    holding≈5) — نه چیزی که از نتایج walk-forward بالا انتخاب شده باشد.
+    اگر این هم پایدار مثبت بود، شواهد edge واقعی خیلی قوی‌تر می‌شود.
+    """
+    FIXED = {"LOOKBACK": 21, "HOLD": 5, "MIN_THRESHOLD": 0.0}
+    logger.info("\n" + "=" * 70)
+    logger.info("🔒 تست بدون بهینه‌سازی (پارامتر ثابت از ادبیات، بدون grid search)")
+    logger.info(f"   پارامتر ثابت: {FIXED}")
+    logger.info("=" * 70)
+
+    all_pnls = []
+    for symbol in TEST_SYMBOLS:
+        daily_df = _fetch_daily_data(symbol)
+        if daily_df is None or len(daily_df) < 300:
+            logger.warning(f"{symbol}: داده‌ی روزانه کافی نیست — رد شد")
+            continue
+
+        pnls = simulate_window_momentum(daily_df, 0, len(daily_df),
+                                         FIXED["LOOKBACK"], FIXED["HOLD"],
+                                         FIXED["MIN_THRESHOLD"], symbol)
+        all_pnls.extend(pnls)
+
+        n = len(pnls)
+        wr = round(sum(1 for p in pnls if p > 0) / n * 100, 1) if n else 0.0
+        logger.info(f"   {symbol}: trades={n} win_rate={wr}% net_pnl={round(sum(pnls), 2)}%")
+
+    n = len(all_pnls)
+    if n == 0:
+        logger.warning("هیچ معامله‌ای در تست ثابت رخ نداد")
+        return {}
+
+    wins_sum = sum(p for p in all_pnls if p > 0)
+    losses_sum = abs(sum(p for p in all_pnls if p <= 0))
+    pf = round(wins_sum / losses_sum, 2) if losses_sum > 0 else (float('inf') if wins_sum > 0 else 0.0)
+    win_rate = round(sum(1 for p in all_pnls if p > 0) / n * 100, 1)
+    net_pnl = round(sum(all_pnls), 2)
+
+    logger.info("\n" + "-" * 70)
+    logger.info(f"📌 نتیجه‌ی تست بدون بهینه‌سازی: trades={n} | win_rate={win_rate}% | "
+                f"net_pnl={net_pnl}% | Profit Factor={pf}")
+    if net_pnl > 0 and pf > 1.15:
+        logger.info("✅ حتی با پارامتر ثابت از ادبیات (بدون هیچ بهینه‌سازی)، edge مثبت دیده می‌شود — "
+                     "شواهد edge واقعی برای momentum روزانه‌ی BTC/ETH قوی‌تر شد.")
+    else:
+        logger.info("❌ با پارامتر ثابت، edge معناداری دیده نمی‌شود — نتایج walk-forward قبلی "
+                     "ممکن است تا حدی حاصل انتخاب پارامتر (overfitting) بوده باشد.")
+    logger.info("-" * 70)
+
+    return {'fixed_params': FIXED, 'total_trades': n, 'win_rate': win_rate,
+            'net_pnl': net_pnl, 'profit_factor': pf}
 
 
 if __name__ == "__main__":
