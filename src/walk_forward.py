@@ -1028,6 +1028,7 @@ def main():
         run_fixed_params_no_optimization_test()
     elif STRATEGY_MODE == 'momentum_daily':
         run_fixed_params_momentum_test()
+        run_subperiod_consistency_test()
 
 
 def run_fixed_params_momentum_test() -> dict:
@@ -1103,6 +1104,89 @@ def run_fixed_params_momentum_test() -> dict:
     logger.info("-" * 70)
 
     return {'param_sets_tested': all_summaries, 'positive_count': positive_count}
+
+
+def run_subperiod_consistency_test() -> dict:
+    """
+    ✅ آخرین تست تعیین‌کننده: بدون هیچ بازانتخاب پارامتری در هیچ نقطه‌ای.
+    یک پارامتر ثابت (LOOKBACK=21, HOLD=5 — از ادبیات) روی ۳ بخش زمانی
+    بزرگ و غیرهم‌پوشان (نه fold کوچک قابل‌بازانتخاب) جدا گزارش می‌شود.
+
+    هدف: آیا edge در همه‌ی دوره‌های تاریخی حاضر است (نشانه‌ی edge واقعی)،
+    یا فقط در یک دوره‌ی خاص (مثلاً یک بازار صعودی) متمرکز شده (نشانه‌ی
+    شانس/رژیم خاص، نه یک الگوی تکرارشونده)؟ برخلاف walk-forward، اینجا
+    پارامتر هرگز روی هیچ بخشی «آموزش» یا «بازانتخاب» نمی‌شود — کاملاً از
+    سوگیری انتخاب پارامتر مبراست.
+    """
+    FIXED = {"LOOKBACK": 21, "HOLD": 5, "MIN_THRESHOLD": 0.0}
+    N_CHUNKS = 3
+    logger.info("\n" + "=" * 70)
+    logger.info("🔒 تست ثبات زیردوره‌ای — همان پارامتر ثابت، بدون بازانتخاب، در ۳ بخش تاریخی جدا")
+    logger.info(f"   پارامتر ثابت (بدون تغییر در هیچ بخشی): {FIXED}")
+    logger.info("=" * 70)
+
+    chunk_results = {i: [] for i in range(N_CHUNKS)}
+    chunk_dates = {i: None for i in range(N_CHUNKS)}
+
+    for symbol in TEST_SYMBOLS:
+        daily_df = _fetch_daily_data(symbol)
+        if daily_df is None or len(daily_df) < 300:
+            logger.warning(f"{symbol}: داده‌ی روزانه کافی نیست — رد شد")
+            continue
+
+        n = len(daily_df)
+        chunk_size = n // N_CHUNKS
+        bounds = [i * chunk_size for i in range(N_CHUNKS)] + [n]
+
+        logger.info(f"\n   --- {symbol} ({n} روز کل) ---")
+        for c in range(N_CHUNKS):
+            c_start, c_end = bounds[c], bounds[c + 1]
+            pnls = simulate_window_momentum(daily_df, c_start, c_end,
+                                             FIXED["LOOKBACK"], FIXED["HOLD"],
+                                             FIXED["MIN_THRESHOLD"], symbol)
+            chunk_results[c].extend(pnls)
+
+            start_date = daily_df.iloc[c_start].get('timestamp', '?')
+            end_date = daily_df.iloc[min(c_end, n) - 1].get('timestamp', '?')
+            chunk_dates[c] = (start_date, end_date)
+
+            n_tr = len(pnls)
+            wr = round(sum(1 for p in pnls if p > 0) / n_tr * 100, 1) if n_tr else 0.0
+            logger.info(f"      بخش {c+1}/{N_CHUNKS} [{start_date} → {end_date}]: "
+                        f"trades={n_tr} win_rate={wr}% net_pnl={round(sum(pnls), 2)}%")
+
+    logger.info("\n" + "-" * 70)
+    logger.info("📌 خلاصه‌ی هر بخش زمانی (روی BTC+ETH ترکیبی):")
+    positive_chunks = 0
+    for c in range(N_CHUNKS):
+        pnls = chunk_results[c]
+        n_tr = len(pnls)
+        if n_tr == 0:
+            logger.info(f"   بخش {c+1}: بدون معامله")
+            continue
+        wins_sum = sum(p for p in pnls if p > 0)
+        losses_sum = abs(sum(p for p in pnls if p <= 0))
+        pf = round(wins_sum / losses_sum, 2) if losses_sum > 0 else (float('inf') if wins_sum > 0 else 0.0)
+        net_pnl = round(sum(pnls), 2)
+        is_positive = net_pnl > 0 and pf > 1.0
+        positive_chunks += int(is_positive)
+        mark = "✅" if is_positive else "❌"
+        logger.info(f"   {mark} بخش {c+1} [{chunk_dates[c][0]} → {chunk_dates[c][1]}]: "
+                    f"trades={n_tr} net_pnl={net_pnl}% PF={pf}")
+
+    logger.info("-" * 70)
+    if positive_chunks == N_CHUNKS:
+        logger.info(f"✅✅ edge در هر {N_CHUNKS} بخش تاریخی مستقل مثبت بود — "
+                     f"قوی‌ترین شاهد ممکن برای واقعی و تکرارشونده بودن این momentum.")
+    elif positive_chunks >= 2:
+        logger.info(f"⚠️ edge در {positive_chunks}/{N_CHUNKS} بخش مثبت بود — احتمالاً واقعی "
+                     f"ولی وابسته به رژیم بازار؛ با احتیاط و ریسک کمتر عمل شود.")
+    else:
+        logger.info(f"❌ edge فقط در {positive_chunks}/{N_CHUNKS} بخش مثبت بود — به‌احتمال زیاد "
+                     f"نتیجه‌ی کلی حاصل یک دوره‌ی خاص (مثلاً بازار صعودی) بوده، نه یک الگوی پایدار.")
+    logger.info("-" * 70)
+
+    return {'fixed_params': FIXED, 'n_chunks': N_CHUNKS, 'positive_chunks': positive_chunks}
 
 
 if __name__ == "__main__":
