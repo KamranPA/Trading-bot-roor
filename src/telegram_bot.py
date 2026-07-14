@@ -86,6 +86,51 @@ def format_and_send_signal(signal_data):
     send_telegram_message(message)
 
 
+def format_and_send_momentum_signal(signal: dict):
+    """
+    سیگنال استراتژی Daily Momentum (BTC/ETH، نگه‌داری ثابت ~۵ روزه، بدون SL).
+    فرمت متفاوت از سیگنال TA چهارساعته چون این پوزیشن روزهای متوالی نگه
+    داشته می‌شود، نه با SL/TP لحظه‌ای.
+    """
+    icon = "🟢 #LONG" if signal.get('direction') == "LONG" else "🔴 #SHORT"
+    pair = str(signal.get('pair', 'UNKNOWN')).replace('_', '/')
+    mom_ret = signal.get('momentum_return_pct', 0)
+
+    message = (
+        f"<b>{icon} سیگنال Momentum روزانه</b>\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"🪙 <b>جفت ارز:</b> <code>{pair}</code>\n"
+        f"💵 <b>قیمت ورود:</b> <code>{signal.get('entry_price')}</code>\n"
+        f"📈 <b>بازده {signal.get('lookback_days')} روز اخیر:</b> <code>{mom_ret:+.2f}%</code>\n"
+        f"📅 <b>تاریخ ورود:</b> <code>{signal.get('entry_date')}</code>\n"
+        f"⏳ <b>تاریخ خروج برنامه‌ریزی‌شده:</b> <code>{signal.get('planned_exit_date')}</code> "
+        f"(~{signal.get('hold_days')} روز)\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"⚠️ <i>این استراتژی بدون Stop-Loss طراحی شده — نگه‌داری ثابت "
+        f"{signal.get('hold_days')} روزه، دقیقاً طبق نسخه‌ی تست‌شده. "
+        f"ریسک این دوره را خودت مدیریت کن (مثلاً سایز پوزیشن کوچک‌تر).</i>\n"
+        f"🔬 <i>مبتنی بر شواهد walk-forward؛ edge وابسته به رژیم بازار است "
+        f"(در بازار رنج ممکن است ضرر بدهد).</i>"
+    )
+    send_telegram_message(message)
+
+
+def send_momentum_exit_notice(pair: str, direction: str, entry_price: float,
+                               close_price: float, pnl_percent: float,
+                               entry_date, close_date):
+    icon = "✅" if pnl_percent > 0 else "🔻"
+    message = (
+        f"<b>{icon} بسته شدن پوزیشن Momentum</b>\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"🪙 <b>جفت ارز:</b> <code>{str(pair).replace('_', '/')}</code>\n"
+        f"↕️ <b>جهت:</b> <code>{direction}</code>\n"
+        f"📅 <b>ورود:</b> <code>{entry_date}</code> @ <code>{entry_price}</code>\n"
+        f"📅 <b>خروج:</b> <code>{close_date}</code> @ <code>{close_price}</code>\n"
+        f"📊 <b>PnL:</b> <code>{pnl_percent:+.2f}%</code>\n"
+    )
+    send_telegram_message(message)
+
+
 def send_heartbeat_report(watchlist_count, model_count):
     message = (
         f"🤖 <b>Status: System Online (Signal-Only Mode)</b>\n"
