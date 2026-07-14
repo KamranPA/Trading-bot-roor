@@ -439,3 +439,155 @@ def get_signals_for_pair(pair: str, status: str = None, limit: int = 100) -> lis
     except Exception as e:
         logger.error("get_signals_for_pair خطا %s: %s", pair, e)
         return []
+
+
+# ---------------------------------------------------------------------------
+# ✅ NEW: جدول مستقل momentum_positions — برای استراتژی Daily Momentum
+# (BTC/ETH، نگه‌داری ~۵ روزه). کاملاً جدا از جدول signals (سیستم TA
+# چهارساعته‌ی قدیمی) — تغییری در آن جدول/منطق ایجاد نمی‌کند.
+# ---------------------------------------------------------------------------
+
+_MOMENTUM_CREATE_SQL = """
+CREATE TABLE IF NOT EXISTS momentum_positions (
+    id              SERIAL PRIMARY KEY,
+    pair            VARCHAR(20)  NOT NULL,
+    direction       VARCHAR(10)  CHECK (direction IN ('LONG', 'SHORT')),
+    entry_price     NUMERIC(20, 8) NOT NULL,
+    entry_date      DATE         NOT NULL,
+    planned_exit_date DATE       NOT NULL,
+    lookback_days   INTEGER      NOT NULL,
+    hold_days       INTEGER      NOT NULL,
+    momentum_return_pct NUMERIC(10, 4),
+    status          VARCHAR(20)  DEFAULT 'OPEN',
+    close_price     NUMERIC(20, 8),
+    close_date      DATE,
+    pnl_percent     NUMERIC(10, 4),
+    created_at      TIMESTAMPTZ  DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_momentum_pair   ON momentum_positions (pair);
+CREATE INDEX IF NOT EXISTS idx_momentum_status ON momentum_positions (status);
+"""
+
+
+def init_momentum_table() -> None:
+    try:
+        with _db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(_MOMENTUM_CREATE_SQL)
+        logger.info("✅ init_momentum_table: جدول momentum_positions آماده است.")
+    except Exception as e:
+        logger.critical("init_momentum_table ناموفق: %s", e)
+        raise
+
+
+def get_open_momentum_position(pair: str) -> dict | None:
+    """آیا همین الان پوزیشن باز momentum برای این ارز داریم؟"""
+    sql = """
+        SELECT id, pair, direction, entry_price, entry_date, planned_exit_date,
+               lookback_days, hold_days, momentum_return_pct
+        FROM momentum_positions
+        WHERE pair = %s AND status = 'OPEN'
+        ORDER BY entry_date DESC LIMIT 1
+    """
+    try:
+        with _db() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(sql, (pair,))
+                row = cur.fetchone()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error("get_open_momentum_position خطا %s: %s", pair, e)
+        return None
+
+
+def get_all_open_momentum_positions() -> list[dict]:
+    sql = """
+        SELECT id, pair, direction, entry_price, entry_date, planned_exit_date,
+               lookback_days, hold_days, momentum_return_pct
+        FROM momentum_positions WHERE status = 'OPEN' ORDER BY entry_date ASC
+    """
+    try:
+        with _db() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(sql)
+                rows = cur.fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error("get_all_open_momentum_positions خطا: %s", e)
+        return []
+
+
+def save_momentum_position(pair: str, direction: str, entry_price: float,
+                            entry_date, planned_exit_date, lookback_days: int,
+                            hold_days: int, momentum_return_pct: float) -> int | None:
+    if direction not in ('LONG', 'SHORT'):
+        logger.warning("direction نامعتبر '%s' برای %s — ذخیره لغو شد", direction, pair)
+        return None
+    sql = """
+        INSERT INTO momentum_positions
+            (pair, direction, entry_price, entry_date, planned_exit_date,
+             lookback_days, hold_days, momentum_return_pct)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+    """
+    try:
+        with _db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (pair, direction, entry_price, entry_date, planned_exit_date,
+                                  lookback_days, hold_days, momentum_return_pct))
+                row = cur.fetchone()
+                new_id = row[0] if row else None
+        logger.info("✅ پوزیشن momentum ذخیره شد | pair=%s direction=%s id=%s", pair, direction, new_id)
+        return new_id
+    except Exception as e:
+        logger.error("save_momentum_position خطا برای %s: %s", pair, e)
+        return None
+
+
+def close_momentum_position(position_id: int, close_price: float, close_date,
+                             pnl_percent: float) -> bool:
+    sql = """
+        UPDATE momentum_positions
+        SET status = 'CLOSED', close_price = %s, close_date = %s, pnl_percent = %s
+        WHERE id = %s AND status = 'OPEN'
+    """
+    try:
+        with _db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (close_price, close_date, round(pnl_percent, 4), position_id))
+                updated = cur.rowcount
+        if updated == 0:
+            logger.warning("close_momentum_position: id=%s یافت نشد یا قبلاً بسته شده", position_id)
+            return False
+        return True
+    except Exception as e:
+        logger.error("close_momentum_position خطا id=%s: %s", position_id, e)
+        return False
+
+
+def get_momentum_performance_summary() -> dict:
+    sql = """
+        SELECT
+            COUNT(*) FILTER (WHERE status = 'OPEN')                     AS open_count,
+            COUNT(*) FILTER (WHERE status = 'CLOSED')                   AS closed_count,
+            COUNT(*) FILTER (WHERE status='CLOSED' AND pnl_percent > 0) AS win_count,
+            ROUND(AVG(pnl_percent) FILTER (WHERE status='CLOSED'), 2)   AS avg_pnl,
+            ROUND(SUM(pnl_percent) FILTER (WHERE status='CLOSED'), 2)   AS total_pnl
+        FROM momentum_positions
+    """
+    try:
+        with _db() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(sql)
+                row = cur.fetchone()
+        if not row:
+            return {}
+        data = dict(row)
+        closed = data.get('closed_count') or 0
+        wins = data.get('win_count') or 0
+        data['win_rate'] = round(wins / closed * 100, 1) if closed > 0 else 0.0
+        return data
+    except Exception as e:
+        logger.error("get_momentum_performance_summary خطا: %s", e)
+        return {}
