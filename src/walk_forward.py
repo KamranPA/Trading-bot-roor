@@ -27,6 +27,7 @@ import os
 import sys
 import json
 import logging
+from datetime import datetime, date
 import pandas as pd
 import numpy as np
 
@@ -59,7 +60,7 @@ AI_GATE_ENABLED = bool(getattr(config, 'AI_GATE_ENABLED', True))  # باید Fal
 # این لیست مستقل از config.WATCHLIST است، یعنی روی سیستم لایو اثر ندارد.
 # ✅ محدود شد به فقط BTC/ETH — چون در تست قبلی (۵ ارز) این دو تنها
 # نمادهایی بودند که momentum_daily رویشان مثبت بود (SOL/XRP/LTC منفی).
-TEST_SYMBOLS = ['BTCUSDT', 'ETHUSDT']
+TEST_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BCHUSDT', 'LTCUSDT']
 
 ADX_OPTIONS   = [15, 20, 25]
 SWING_OPTIONS = [3, 5, 7]
@@ -141,9 +142,21 @@ def _get_atr(row: pd.Series, close_price: float) -> float:
     return close_price * 0.01
 
 
+def _ts_to_date(ts):
+    """تبدیل timestamp (میلی‌ثانیه یا ثانیه) به تاریخ — برای تطبیق کندل
+    ۴ساعته با سیگنال momentum روزانه‌ی همان روز."""
+    try:
+        ts_num = float(ts)
+        if ts_num > 1e12:   # میلی‌ثانیه
+            ts_num = ts_num / 1000.0
+        return datetime.utcfromtimestamp(ts_num).date()
+    except Exception:
+        return None
+
+
 def simulate_window(df: pd.DataFrame, start_idx: int, end_idx: int,
                      adx_th: float, swing_w: int, tp_r: float, sl_r: float,
-                     min_score: float, symbol: str) -> list:
+                     min_score: float, symbol: str, momentum_lookup: dict = None) -> list:
     """
     شبیه‌سازی معاملات قانون‌محور (بدون AI) بین [start_idx, end_idx) از یک
     دیتافریم که از قبل اندیکاتورهایش محاسبه شده. دقیقاً همان منطق ورود/خروج
@@ -151,6 +164,10 @@ def simulate_window(df: pd.DataFrame, start_idx: int, end_idx: int,
 
     ✅ min_score حالا پارامتر است (نه ثابت از config) — چون بدون AI باید
     دوباره grid search شود.
+
+    ✅ momentum_lookup (اختیاری): dict از {تاریخ: 'LONG'/'SHORT'/None} —
+    اگر داده شود، سیگنال breakout فقط وقتی باز می‌شود که هم‌جهت با
+    momentum روزانه‌ی همان روز باشد (فیلتر رژیم، نه معکوس‌سازی).
 
     Returns: لیست pnl_percent هر معامله‌ی بسته‌شده (net از هزینه‌ی معامله).
     """
@@ -230,11 +247,29 @@ def simulate_window(df: pd.DataFrame, start_idx: int, end_idx: int,
         if sl_dist <= 0:
             continue
 
+        candidate_direction = None
         if high_price > swing_high and current_rsi > 50:
+            candidate_direction = 'LONG'
+        elif low_price < swing_low and current_rsi < 50:
+            candidate_direction = 'SHORT'
+
+        if candidate_direction is None:
+            continue
+
+        # ✅ فیلتر momentum (اگر lookup داده شده باشد): فقط سیگنال هم‌جهت
+        # با momentum روزانه‌ی همان روز باز می‌شود؛ ناهم‌جهت یا نامشخص
+        # (None) نادیده گرفته می‌شود (نه معکوس).
+        if momentum_lookup is not None:
+            row_date = _ts_to_date(row.get('timestamp'))
+            mom_dir = momentum_lookup.get(row_date) if row_date is not None else None
+            if mom_dir is None or mom_dir != candidate_direction:
+                continue
+
+        if candidate_direction == 'LONG':
             open_trades.append({'direction': 'LONG', 'entry_price': close_price,
                                  'stop_loss': close_price - sl_dist,
                                  'tp2': close_price + sl_dist * tp_r})
-        elif low_price < swing_low and current_rsi < 50:
+        else:
             open_trades.append({'direction': 'SHORT', 'entry_price': close_price,
                                  'stop_loss': close_price + sl_dist,
                                  'tp2': close_price - sl_dist * tp_r})
@@ -255,7 +290,8 @@ def simulate_window(df: pd.DataFrame, start_idx: int, end_idx: int,
     return closed_pnls
 
 
-def _select_best_params(df: pd.DataFrame, start_idx: int, end_idx: int, symbol: str) -> dict:
+def _select_best_params(df: pd.DataFrame, start_idx: int, end_idx: int, symbol: str,
+                         momentum_lookup: dict = None) -> dict:
     """Grid search پارامترها (شامل MIN_SCORE) فقط روی [start_idx, end_idx) — بدون دیدن آینده."""
     best_pnl, best_trades, found = -1e9, 0, False
     best_cfg = {
@@ -268,7 +304,8 @@ def _select_best_params(df: pd.DataFrame, start_idx: int, end_idx: int, symbol: 
             for tp in TP_OPTIONS:
                 for sl in SL_OPTIONS:
                     for ms in MIN_SCORE_OPTIONS:
-                        pnls = simulate_window(df, start_idx, end_idx, adx, sw, tp, sl, ms, symbol)
+                        pnls = simulate_window(df, start_idx, end_idx, adx, sw, tp, sl, ms,
+                                                symbol, momentum_lookup=momentum_lookup)
                         if len(pnls) < MIN_TRADES_FOR_SELECTION:
                             continue
                         total = sum(pnls)
@@ -277,6 +314,112 @@ def _select_best_params(df: pd.DataFrame, start_idx: int, end_idx: int, symbol: 
                             best_cfg = {"ADX_THRESHOLD": adx, "SWING_WINDOW": sw,
                                         "TP_RATIO": tp, "SL_RATIO": sl, "MIN_SCORE": ms}
     return best_cfg, found, best_trades
+
+
+def _build_momentum_lookup(symbol: str, lookback: int = 21, threshold: float = 0.0) -> dict:
+    """
+    برای هر روز D، جهت momentum را با داده‌ی موجود تا پایان روز D-1 محاسبه
+    می‌کند (بدون نگاه به آینده) — این جهت برای فیلترکردن سیگنال‌های
+    ۴ساعته‌ای که در طول روز D اتفاق می‌افتند استفاده می‌شود.
+    Returns: dict {date: 'LONG'/'SHORT'/None}
+    """
+    daily_df = _fetch_daily_data(symbol, limit=1000)
+    if daily_df is None or len(daily_df) < lookback + 5:
+        return {}
+
+    close_col = 'Close' if 'Close' in daily_df.columns else 'close'
+    ts_col = 'Timestamp' if 'Timestamp' in daily_df.columns else 'timestamp'
+
+    lookup = {}
+    for i in range(lookback + 1, len(daily_df)):
+        c_yesterday = float(daily_df.iloc[i - 1][close_col])
+        c_prior = float(daily_df.iloc[i - 1 - lookback][close_col])
+        if c_prior == 0:
+            continue
+        ret = (c_yesterday - c_prior) / c_prior * 100
+        direction = 'LONG' if ret >= threshold else ('SHORT' if ret <= -threshold else None)
+        day_date = _ts_to_date(daily_df.iloc[i][ts_col])
+        if day_date is not None:
+            lookup[day_date] = direction
+
+    return lookup
+
+
+def run_walk_forward_for_symbol(symbol: str, df_raw: pd.DataFrame,
+                                 momentum_lookup: dict = None) -> list:
+    """
+    Walk-forward برای استراتژی breakout (قانون‌محور، بدون AI).
+    ✅ اگر momentum_lookup داده شود، هم نسخه‌ی فیلترشده و هم نسخه‌ی
+    فیلترنشده (برای مقایسه‌ی مستقیم) روی همان بازه‌ی OOS گزارش می‌شود.
+    """
+    df_raw = _normalize_columns(df_raw)
+    df, meta = TechnicalIndicators.calculate_all_features(df_raw, symbol=symbol)
+    if not meta.get('success', False):
+        logger.warning(f"{symbol}: محاسبه اندیکاتورها ناموفق — رد شد")
+        return []
+    df = _normalize_columns(df)
+    df = _add_uppercase_aliases(df)
+    df = df.reset_index(drop=True)
+
+    if len(df) <= WARMUP_ROWS:
+        logger.warning(f"{symbol}: داده بعد از warm-up خالی — رد شد")
+        return []
+
+    usable = df.iloc[WARMUP_ROWS:].reset_index(drop=True)
+    n = len(usable)
+    if n < MIN_TRADES_FOR_SELECTION * 20:
+        logger.warning(f"{symbol}: داده‌ی usable ({n} ردیف) برای {N_FOLDS} بازه خیلی کم است — رد شد")
+        return []
+
+    fold_size = n // N_FOLDS
+    fold_bounds = [i * fold_size for i in range(N_FOLDS)] + [n]
+
+    results = []
+    for fold_idx in range(1, N_FOLDS):
+        train_start, train_end = 0, fold_bounds[fold_idx]
+        test_start, test_end = fold_bounds[fold_idx], fold_bounds[fold_idx + 1]
+
+        best_cfg, found, sel_trades = _select_best_params(
+            usable, train_start, train_end, symbol, momentum_lookup=momentum_lookup
+        )
+        oos_pnls = simulate_window(usable, test_start, test_end,
+                                    best_cfg["ADX_THRESHOLD"], best_cfg["SWING_WINDOW"],
+                                    best_cfg["TP_RATIO"], best_cfg["SL_RATIO"], best_cfg["MIN_SCORE"],
+                                    symbol, momentum_lookup=momentum_lookup)
+
+        wins = sum(1 for p in oos_pnls if p > 0)
+        total = len(oos_pnls)
+        win_rate = round(wins / total * 100, 1) if total else 0.0
+        net_pnl = round(sum(oos_pnls), 2)
+
+        compare_str = ""
+        if momentum_lookup is not None:
+            unfiltered_pnls = simulate_window(usable, test_start, test_end,
+                                               best_cfg["ADX_THRESHOLD"], best_cfg["SWING_WINDOW"],
+                                               best_cfg["TP_RATIO"], best_cfg["SL_RATIO"],
+                                               best_cfg["MIN_SCORE"], symbol, momentum_lookup=None)
+            uf_total = len(unfiltered_pnls)
+            uf_net = round(sum(unfiltered_pnls), 2)
+            compare_str = f" | بدون فیلتر: trades={uf_total} net_pnl={uf_net}%"
+
+        logger.info(
+            f"{symbol} | fold {fold_idx}/{N_FOLDS-1} | "
+            f"train=[0:{train_end}] test=[{test_start}:{test_end}] | "
+            f"params={'یافت‌شد' if found else 'fallback config'} "
+            f"(ADX={best_cfg['ADX_THRESHOLD']},SW={best_cfg['SWING_WINDOW']},"
+            f"TP={best_cfg['TP_RATIO']},SL={best_cfg['SL_RATIO']},MS={best_cfg['MIN_SCORE']}) | "
+            f"OOS trades={total} win_rate={win_rate}% net_pnl={net_pnl}%{compare_str}"
+        )
+
+        results.append({
+            'symbol': symbol, 'fold': fold_idx, 'train_rows': train_end,
+            'test_rows': test_end - test_start, 'params_found': found,
+            **{f'param_{k}': v for k, v in best_cfg.items()},
+            'oos_trades': total, 'oos_win_rate': win_rate, 'oos_net_pnl': net_pnl,
+            'oos_pnls': oos_pnls,
+        })
+
+    return results
 
 
 def _get_ema200_deviation_pct(row: pd.Series, close_price: float) -> float:
@@ -890,9 +1033,11 @@ def run_fixed_params_no_optimization_test() -> dict:
 
 
 def main():
-    if STRATEGY_MODE not in ('breakout', 'mean_reversion', 'relative_value', 'momentum_daily'):
+    if STRATEGY_MODE not in ('breakout', 'mean_reversion', 'relative_value',
+                              'momentum_daily', 'momentum_filtered_breakout'):
         logger.error(f"STRATEGY_MODE نامعتبر: '{STRATEGY_MODE}' — باید 'breakout'، "
-                     f"'mean_reversion'، 'relative_value' یا 'momentum_daily' باشد")
+                     f"'mean_reversion'، 'relative_value'، 'momentum_daily' یا "
+                     f"'momentum_filtered_breakout' باشد")
         return
 
     if AI_GATE_ENABLED:
@@ -957,6 +1102,32 @@ def main():
                 logger.warning(f"{symbol}: داده‌ی روزانه کافی دریافت نشد — رد شد")
                 continue
             sym_results = run_walk_forward_for_symbol_momentum(symbol, daily_df)
+            all_results.extend(sym_results)
+
+    elif STRATEGY_MODE == 'momentum_filtered_breakout':
+        # ✅ برای هر ارز: اول momentum_lookup روزانه ساخته می‌شود (بدون
+        # نگاه به آینده)، سپس breakout چهارساعته با همان فیلتر اجرا می‌شود
+        # و در همان لاگ با نسخه‌ی بدون فیلتر مقایسه می‌شود.
+        for symbol in TEST_SYMBOLS:
+            safe_name = symbol.replace('/', '_')
+            file_path = os.path.join(data_dir, f"{safe_name}_history.csv")
+            if not os.path.exists(file_path):
+                logger.warning(f"{symbol}: فایل CSV چهارساعته یافت نشد — رد شد")
+                continue
+            try:
+                df_raw = pd.read_csv(file_path)
+            except Exception as e:
+                logger.error(f"{symbol}: خطا در خواندن CSV: {e}")
+                continue
+
+            logger.info(f"\n--- {symbol} (momentum_filtered_breakout) ---")
+            momentum_lookup = _build_momentum_lookup(symbol, lookback=21, threshold=0.0)
+            if not momentum_lookup:
+                logger.warning(f"{symbol}: ساخت momentum_lookup ناموفق (داده‌ی روزانه کافی نبود) — رد شد")
+                continue
+            logger.info(f"   momentum_lookup ساخته شد: {len(momentum_lookup)} روز")
+
+            sym_results = run_walk_forward_for_symbol(symbol, df_raw, momentum_lookup=momentum_lookup)
             all_results.extend(sym_results)
 
     else:
