@@ -1034,10 +1034,12 @@ def run_fixed_params_no_optimization_test() -> dict:
 
 def main():
     if STRATEGY_MODE not in ('breakout', 'mean_reversion', 'relative_value',
-                              'momentum_daily', 'momentum_filtered_breakout', 'trend_pullback'):
+                              'momentum_daily', 'momentum_filtered_breakout',
+                              'trend_pullback', 'pullback_no_trend'):
         logger.error(f"STRATEGY_MODE نامعتبر: '{STRATEGY_MODE}' — باید 'breakout'، "
                      f"'mean_reversion'، 'relative_value'، 'momentum_daily'، "
-                     f"'momentum_filtered_breakout' یا 'trend_pullback' باشد")
+                     f"'momentum_filtered_breakout'، 'trend_pullback' یا "
+                     f"'pullback_no_trend' باشد")
         return
 
     if AI_GATE_ENABLED:
@@ -1112,6 +1114,16 @@ def main():
                 logger.warning(f"{symbol}: داده‌ی روزانه کافی دریافت نشد — رد شد")
                 continue
             sym_results = run_walk_forward_trend_pullback(symbol, daily_df)
+            all_results.extend(sym_results)
+
+    elif STRATEGY_MODE == 'pullback_no_trend':
+        for symbol in TEST_SYMBOLS:
+            logger.info(f"\n--- {symbol} (pullback_no_trend) ---")
+            daily_df = _fetch_daily_data(symbol)
+            if daily_df is None or len(daily_df) < 300:
+                logger.warning(f"{symbol}: داده‌ی روزانه کافی دریافت نشد — رد شد")
+                continue
+            sym_results = run_walk_forward_pullback_no_trend(symbol, daily_df)
             all_results.extend(sym_results)
 
     elif STRATEGY_MODE == 'momentum_filtered_breakout':
@@ -1213,6 +1225,8 @@ def main():
     elif STRATEGY_MODE == 'trend_pullback':
         run_fixed_params_trend_pullback_test()
         run_subperiod_consistency_test_trend_pullback()
+    elif STRATEGY_MODE == 'pullback_no_trend':
+        run_fixed_params_pullback_no_trend_test()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1467,7 +1481,187 @@ def run_walk_forward_trend_pullback(symbol: str, daily_df: pd.DataFrame) -> list
     return results
 
 
-def run_fixed_params_trend_pullback_test() -> dict:
+# ✅ نسخه‌ی «Pullback بدون Momentum» — دقیقاً همان سبک mean-reversion که
+# قبلاً تست شد، فقط با تفاوت: ورود بعد از تأیید cross (نه فوری در آستانه).
+# هدف: ایزوله‌کردن این‌که آیا «صبر برای تأیید» خودش ارزش دارد یا نه.
+PB_RSI_OVERSOLD_OPTIONS   = [25, 30, 35]
+PB_RSI_OVERBOUGHT_OPTIONS = [65, 70, 75]
+PB_ATR_STOP_MULT_OPTIONS  = [1.5, 2.0, 2.5]
+PB_HOLD_DAYS_MAX_OPTIONS  = [5, 10, 15]
+MIN_TRADES_FOR_SELECTION_PB = 8
+
+
+def simulate_pullback_no_trend(arrays: dict, start_idx: int, end_idx: int,
+                                rsi_oversold: float, rsi_overbought: float,
+                                atr_stop_mult: float, hold_days_max: int) -> list:
+    """
+    Mean-reversion با تأیید cross، بدون فیلتر جهت momentum — می‌تواند هم
+    LONG (از اشباع فروش) هم SHORT (از اشباع خرید) بدهد، صرف‌نظر از روند کلی.
+    خروج: ATR stop یا سقف نگه‌داری (بدون trend_reversal، چون اینجا اصلاً
+    مفهوم «روند» وجود ندارد).
+    """
+    close, high, low, rsi = arrays['close'], arrays['high'], arrays['low'], arrays['rsi']
+    atr = arrays['atr']
+
+    trades = []
+    position = None
+    was_below_os = False
+    was_above_ob = False
+
+    for i in range(max(start_idx, 1), min(end_idx, len(close))):
+        if np.isnan(rsi[i]) or np.isnan(atr[i]):
+            continue
+        price = close[i]
+
+        if position is not None:
+            held = i - position['entry_idx']
+            d = position['direction']
+            exit_now, exit_price = False, None
+            if d == 'LONG' and low[i] <= position['stop_price']:
+                exit_now, exit_price = True, position['stop_price']
+            elif d == 'SHORT' and high[i] >= position['stop_price']:
+                exit_now, exit_price = True, position['stop_price']
+            elif held >= hold_days_max:
+                exit_now, exit_price = True, price
+
+            if exit_now:
+                ret = (exit_price - position['entry_price']) / position['entry_price'] * 100.0
+                pnl = (ret if d == 'LONG' else -ret) - TRANSACTION_COST_PERCENT
+                trades.append(pnl)
+                position = None
+            continue
+
+        if rsi[i] <= rsi_oversold:
+            was_below_os = True
+        elif was_below_os and rsi[i] > rsi_oversold:
+            stop = price - atr_stop_mult * atr[i]
+            position = {'direction': 'LONG', 'entry_price': price, 'entry_idx': i, 'stop_price': stop}
+            was_below_os = False
+
+        if rsi[i] >= rsi_overbought:
+            was_above_ob = True
+        elif was_above_ob and rsi[i] < rsi_overbought:
+            if position is None:  # اگر همین الان LONG باز نشد
+                stop = price + atr_stop_mult * atr[i]
+                position = {'direction': 'SHORT', 'entry_price': price, 'entry_idx': i, 'stop_price': stop}
+            was_above_ob = False
+
+    if position is not None:
+        last_idx = min(end_idx, len(close)) - 1
+        if last_idx >= 0:
+            last_price = close[last_idx]
+            ret = (last_price - position['entry_price']) / position['entry_price'] * 100.0
+            pnl = (ret if position['direction'] == 'LONG' else -ret) - TRANSACTION_COST_PERCENT
+            trades.append(pnl)
+
+    return trades
+
+
+def _select_best_params_pullback_no_trend(arrays: dict, start_idx: int, end_idx: int) -> tuple:
+    best_pnl, best_trades, found = -1e9, 0, False
+    best_cfg = {"RSI_OVERSOLD": 30, "RSI_OVERBOUGHT": 70, "ATR_STOP_MULT": 2.0, "HOLD_DAYS_MAX": 10}
+    for os_ in PB_RSI_OVERSOLD_OPTIONS:
+        for ob in PB_RSI_OVERBOUGHT_OPTIONS:
+            for asm in PB_ATR_STOP_MULT_OPTIONS:
+                for hd in PB_HOLD_DAYS_MAX_OPTIONS:
+                    trades = simulate_pullback_no_trend(arrays, start_idx, end_idx, os_, ob, asm, hd)
+                    if len(trades) < MIN_TRADES_FOR_SELECTION_PB:
+                        continue
+                    total = sum(trades)
+                    if total > best_pnl:
+                        best_pnl, best_trades, found = total, len(trades), True
+                        best_cfg = {"RSI_OVERSOLD": os_, "RSI_OVERBOUGHT": ob,
+                                    "ATR_STOP_MULT": asm, "HOLD_DAYS_MAX": hd}
+    return best_cfg, found, best_trades
+
+
+def run_walk_forward_pullback_no_trend(symbol: str, daily_df: pd.DataFrame) -> list:
+    arrays = _prepare_trend_pullback_arrays(daily_df)
+    n = len(arrays['close'])
+    if n < 300:
+        logger.warning(f"{symbol}: داده‌ی روزانه کافی نیست ({n} ردیف) — رد شد")
+        return []
+
+    fold_size = n // N_FOLDS
+    fold_bounds = [i * fold_size for i in range(N_FOLDS)] + [n]
+    results = []
+
+    for fold_idx in range(1, N_FOLDS):
+        train_start, train_end = 0, fold_bounds[fold_idx]
+        test_start, test_end = fold_bounds[fold_idx], fold_bounds[fold_idx + 1]
+
+        best_cfg, found, sel_trades = _select_best_params_pullback_no_trend(arrays, train_start, train_end)
+        oos_trades = simulate_pullback_no_trend(arrays, test_start, test_end,
+                                                 best_cfg["RSI_OVERSOLD"], best_cfg["RSI_OVERBOUGHT"],
+                                                 best_cfg["ATR_STOP_MULT"], best_cfg["HOLD_DAYS_MAX"])
+
+        wins = sum(1 for p in oos_trades if p > 0)
+        total = len(oos_trades)
+        win_rate = round(wins / total * 100, 1) if total else 0.0
+        net_pnl = round(sum(oos_trades), 2)
+
+        logger.info(
+            f"[PB] {symbol} | fold {fold_idx}/{N_FOLDS-1} | "
+            f"train=[0:{train_end}] test=[{test_start}:{test_end}] (روز) | "
+            f"params={'یافت‌شد' if found else 'fallback'} "
+            f"(RSI_OS={best_cfg['RSI_OVERSOLD']},RSI_OB={best_cfg['RSI_OVERBOUGHT']},"
+            f"ATR_MULT={best_cfg['ATR_STOP_MULT']},MAX_HOLD={best_cfg['HOLD_DAYS_MAX']}d) | "
+            f"OOS trades={total} win_rate={win_rate}% net_pnl={net_pnl}%"
+        )
+
+        results.append({
+            'symbol': symbol, 'fold': fold_idx, 'train_rows': train_end,
+            'test_rows': test_end - test_start, 'params_found': found,
+            **{f'param_{k}': v for k, v in best_cfg.items()},
+            'oos_trades': total, 'oos_win_rate': win_rate, 'oos_net_pnl': net_pnl,
+            'oos_pnls': oos_trades,
+        })
+
+    return results
+
+
+def run_fixed_params_pullback_no_trend_test() -> dict:
+    """تست بدون بهینه‌سازی — RSI 30/70 استاندارد، ATR_STOP=2.0، HOLD_MAX=10 روز."""
+    FIXED = {"RSI_OVERSOLD": 30, "RSI_OVERBOUGHT": 70, "ATR_STOP_MULT": 2.0, "HOLD_DAYS_MAX": 10}
+    logger.info("\n" + "=" * 70)
+    logger.info("🔒 [Pullback-No-Trend] تست بدون بهینه‌سازی (پارامتر متعارف)")
+    logger.info(f"   پارامتر ثابت: {FIXED}")
+    logger.info("=" * 70)
+
+    all_pnls = []
+    for symbol in TEST_SYMBOLS:
+        daily_df = _fetch_daily_data(symbol)
+        if daily_df is None or len(daily_df) < 300:
+            continue
+        arrays = _prepare_trend_pullback_arrays(daily_df)
+        trades = simulate_pullback_no_trend(arrays, 0, len(arrays['close']),
+                                             FIXED["RSI_OVERSOLD"], FIXED["RSI_OVERBOUGHT"],
+                                             FIXED["ATR_STOP_MULT"], FIXED["HOLD_DAYS_MAX"])
+        all_pnls.extend(trades)
+        n_tr = len(trades)
+        wr = round(sum(1 for p in trades if p > 0) / n_tr * 100, 1) if n_tr else 0.0
+        logger.info(f"   {symbol}: trades={n_tr} win_rate={wr}% net_pnl={round(sum(trades), 2)}%")
+
+    n = len(all_pnls)
+    if n == 0:
+        logger.warning("هیچ معامله‌ای رخ نداد")
+        return {}
+    wins_sum = sum(p for p in all_pnls if p > 0)
+    losses_sum = abs(sum(p for p in all_pnls if p <= 0))
+    pf = round(wins_sum / losses_sum, 2) if losses_sum > 0 else (float('inf') if wins_sum > 0 else 0.0)
+    win_rate = round(sum(1 for p in all_pnls if p > 0) / n * 100, 1)
+    net_pnl = round(sum(all_pnls), 2)
+
+    logger.info("\n" + "-" * 70)
+    logger.info(f"📌 [Pullback-No-Trend] نتیجه: trades={n} | win_rate={win_rate}% | "
+                f"net_pnl={net_pnl}% | Profit Factor={pf}")
+    logger.info("✅ edge مثبت دیده شد." if (net_pnl > 0 and pf > 1.15) else "❌ edge معناداری دیده نشد.")
+    logger.info("-" * 70)
+    return {'fixed_params': FIXED, 'total_trades': n, 'win_rate': win_rate,
+            'net_pnl': net_pnl, 'profit_factor': pf}
+
+
+
     """
     ✅ تست بدون بهینه‌سازی برای Trend+Pullback — پارامتر «متعارف» انتخاب‌شده
     از قبل (نه از grid search بالا): RSI_PULLBACK=45 (نقطه‌ی میانی محدوده‌ی
