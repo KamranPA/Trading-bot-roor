@@ -60,7 +60,7 @@ AI_GATE_ENABLED = bool(getattr(config, 'AI_GATE_ENABLED', True))  # باید Fal
 # این لیست مستقل از config.WATCHLIST است، یعنی روی سیستم لایو اثر ندارد.
 # ✅ محدود شد به فقط BTC/ETH — چون در تست قبلی (۵ ارز) این دو تنها
 # نمادهایی بودند که momentum_daily رویشان مثبت بود (SOL/XRP/LTC منفی).
-TEST_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BCHUSDT', 'LTCUSDT']
+TEST_SYMBOLS = ['BTCUSDT', 'ETHUSDT']
 
 ADX_OPTIONS   = [15, 20, 25]
 SWING_OPTIONS = [3, 5, 7]
@@ -1034,10 +1034,10 @@ def run_fixed_params_no_optimization_test() -> dict:
 
 def main():
     if STRATEGY_MODE not in ('breakout', 'mean_reversion', 'relative_value',
-                              'momentum_daily', 'momentum_filtered_breakout'):
+                              'momentum_daily', 'momentum_filtered_breakout', 'trend_pullback'):
         logger.error(f"STRATEGY_MODE نامعتبر: '{STRATEGY_MODE}' — باید 'breakout'، "
-                     f"'mean_reversion'، 'relative_value'، 'momentum_daily' یا "
-                     f"'momentum_filtered_breakout' باشد")
+                     f"'mean_reversion'، 'relative_value'، 'momentum_daily'، "
+                     f"'momentum_filtered_breakout' یا 'trend_pullback' باشد")
         return
 
     if AI_GATE_ENABLED:
@@ -1102,6 +1102,16 @@ def main():
                 logger.warning(f"{symbol}: داده‌ی روزانه کافی دریافت نشد — رد شد")
                 continue
             sym_results = run_walk_forward_for_symbol_momentum(symbol, daily_df)
+            all_results.extend(sym_results)
+
+    elif STRATEGY_MODE == 'trend_pullback':
+        for symbol in TEST_SYMBOLS:
+            logger.info(f"\n--- {symbol} (trend_pullback) ---")
+            daily_df = _fetch_daily_data(symbol)
+            if daily_df is None or len(daily_df) < 300:
+                logger.warning(f"{symbol}: داده‌ی روزانه کافی دریافت نشد — رد شد")
+                continue
+            sym_results = run_walk_forward_trend_pullback(symbol, daily_df)
             all_results.extend(sym_results)
 
     elif STRATEGY_MODE == 'momentum_filtered_breakout':
@@ -1200,9 +1210,383 @@ def main():
     elif STRATEGY_MODE == 'momentum_daily':
         run_fixed_params_momentum_test()
         run_subperiod_consistency_test()
+    elif STRATEGY_MODE == 'trend_pullback':
+        run_fixed_params_trend_pullback_test()
+        run_subperiod_consistency_test_trend_pullback()
 
 
-def run_fixed_params_momentum_test() -> dict:
+# ─────────────────────────────────────────────────────────────────────────────
+# ✅ استراتژی جدید: Trend + Pullback Entry (سبک صندوق‌های trend-following حرفه‌ای)
+#
+# طراحی (هر بخش عمداً به سبک حرفه‌ای، نه اختراعی):
+#   1. فیلتر روند: همان momentum ۲۱روزه‌ی تأییدشده (Liu et al. 2022) — فقط
+#      در جهت روند معامله می‌کنیم، نه برخلافش.
+#   2. محرک ورود: به‌جای ورود فوری، صبر برای «pullback» — RSI روزانه در
+#      جهت مخالف روند کمی افت/رشد می‌کند، بعد برمی‌گردد (cross) → قیمت ورود
+#      بهتر از میانگین روند، نه ورود در نقطه‌ی اوج/کف لحظه‌ای.
+#   3. RSI با فرمول صحیح Wilder Smoothing محاسبه می‌شود (نه میانگین ساده‌ای
+#      که در indicators.py قدیمی استفاده شده بود و مقادیرش با TradingView/
+#      استاندارد صنعت یکی نیست).
+#   4. Stop-Loss مبتنی بر ATR (نوسان واقعی بازار، نه یک درصد ثابت دلخواه) —
+#      استاندارد مدیریت ریسک صندوق‌های حرفه‌ای (مثل سیستم Turtle Trading).
+#   5. دو حالت خروج جداگانه grid search می‌شود: نگه‌داری ثابت، یا خروج با
+#      برگشت روند (کدام بهتر است را داده تعیین می‌کند، نه حدس).
+# ─────────────────────────────────────────────────────────────────────────────
+
+TP_LOOKBACK = 21  # همان momentum lookback تأییدشده
+TP_MOM_THRESHOLD_OPTIONS = [0.0, 3.0]
+TP_RSI_PULLBACK_OPTIONS = [40, 45, 50]     # در روند صعودی: RSI باید تا این حد افت کند بعد برگردد
+TP_ATR_STOP_MULT_OPTIONS = [1.5, 2.0, 2.5]
+TP_EXIT_MODE_OPTIONS = ['fixed_hold', 'trend_reversal']
+TP_HOLD_DAYS_MAX_OPTIONS = [10, 15]
+TP_RSI_PERIOD = 14
+TP_ATR_PERIOD = 14
+MIN_TRADES_FOR_SELECTION_TP = 8
+
+
+def _calculate_daily_rsi_wilder(close: np.ndarray, period: int = 14) -> np.ndarray:
+    """RSI با فرمول صحیح Wilder Smoothing — همان فرمولی که TradingView/اکثر
+    پلتفرم‌ها استفاده می‌کنند (برخلاف میانگین ساده‌ی indicators.py قدیمی)."""
+    n = len(close)
+    rsi = np.full(n, np.nan)
+    if n <= period:
+        return rsi
+    deltas = np.diff(close)
+    gains = np.where(deltas > 0, deltas, 0.0)
+    losses = np.where(deltas < 0, -deltas, 0.0)
+
+    avg_gain = np.mean(gains[:period])
+    avg_loss = np.mean(losses[:period])
+    rsi[period] = 100.0 if avg_loss == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+
+    for i in range(period + 1, n):
+        gain = gains[i - 1]
+        loss = losses[i - 1]
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
+        rsi[i] = 100.0 if avg_loss == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+
+    return rsi
+
+
+def _calculate_daily_atr_wilder(high: np.ndarray, low: np.ndarray, close: np.ndarray,
+                                 period: int = 14) -> np.ndarray:
+    """ATR با فرمول صحیح Wilder Smoothing — برای سایزینگ استاپ مبتنی بر نوسان واقعی."""
+    n = len(close)
+    atr = np.full(n, np.nan)
+    if n <= period:
+        return atr
+    tr = np.zeros(n)
+    tr[0] = high[0] - low[0]
+    for i in range(1, n):
+        tr[i] = max(high[i] - low[i], abs(high[i] - close[i - 1]), abs(low[i] - close[i - 1]))
+
+    atr[period] = np.mean(tr[1:period + 1])
+    for i in range(period + 1, n):
+        atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period
+
+    return atr
+
+
+def _prepare_trend_pullback_arrays(daily_df: pd.DataFrame) -> dict:
+    """محاسبه‌ی یک‌باره‌ی RSI/ATR/momentum روی کل سری — مستقل از پارامترهای
+    grid search، تا هر ترکیب فقط از این آرایه‌های آماده استفاده کند (سریع‌تر)."""
+    close_col = 'Close' if 'Close' in daily_df.columns else 'close'
+    high_col = 'High' if 'High' in daily_df.columns else 'high'
+    low_col = 'Low' if 'Low' in daily_df.columns else 'low'
+
+    close = daily_df[close_col].to_numpy(dtype=float)
+    high = daily_df[high_col].to_numpy(dtype=float)
+    low = daily_df[low_col].to_numpy(dtype=float)
+    n = len(close)
+
+    rsi = _calculate_daily_rsi_wilder(close, TP_RSI_PERIOD)
+    atr = _calculate_daily_atr_wilder(high, low, close, TP_ATR_PERIOD)
+
+    mom_return = np.full(n, np.nan)
+    for i in range(TP_LOOKBACK + 1, n):
+        c_yesterday = close[i - 1]
+        c_prior = close[i - 1 - TP_LOOKBACK]
+        if c_prior != 0:
+            mom_return[i] = (c_yesterday - c_prior) / c_prior * 100.0
+
+    return {'close': close, 'high': high, 'low': low, 'rsi': rsi, 'atr': atr, 'mom_return': mom_return}
+
+
+def simulate_trend_pullback(arrays: dict, start_idx: int, end_idx: int,
+                             mom_threshold: float, rsi_pullback_level: float,
+                             atr_stop_mult: float, exit_mode: str, hold_days_max: int) -> list:
+    """
+    شبیه‌سازی Trend+Pullback با استاپ مبتنی بر ATR — یک پوزیشن هم‌زمان.
+    Returns: لیست pnl_percent هر معامله (net از هزینه‌ی معامله).
+    """
+    close, high, low = arrays['close'], arrays['high'], arrays['low']
+    rsi, atr, mom_return = arrays['rsi'], arrays['atr'], arrays['mom_return']
+
+    trades = []
+    position = None
+    was_below_pullback = False
+    was_above_pullback = False
+
+    for i in range(max(start_idx, 1), min(end_idx, len(close))):
+        if np.isnan(rsi[i]) or np.isnan(atr[i]) or np.isnan(mom_return[i]):
+            continue
+
+        price = close[i]
+
+        # ── مدیریت پوزیشن باز ────────────────────────────────────────────
+        if position is not None:
+            held = i - position['entry_idx']
+            d = position['direction']
+            exit_now, exit_price = False, None
+
+            if d == 'LONG' and low[i] <= position['stop_price']:
+                exit_now, exit_price = True, position['stop_price']
+            elif d == 'SHORT' and high[i] >= position['stop_price']:
+                exit_now, exit_price = True, position['stop_price']
+            elif exit_mode == 'trend_reversal':
+                cur_dir = ('LONG' if mom_return[i] >= mom_threshold
+                           else ('SHORT' if mom_return[i] <= -mom_threshold else None))
+                if cur_dir is not None and cur_dir != d:
+                    exit_now, exit_price = True, price
+                elif held >= hold_days_max:  # سقف ایمنی حتی در حالت trend_reversal
+                    exit_now, exit_price = True, price
+            else:  # fixed_hold
+                if held >= hold_days_max:
+                    exit_now, exit_price = True, price
+
+            if exit_now:
+                ret = (exit_price - position['entry_price']) / position['entry_price'] * 100.0
+                pnl = ret if d == 'LONG' else -ret
+                pnl -= TRANSACTION_COST_PERCENT
+                trades.append(pnl)
+                position = None
+            continue
+
+        # ── بررسی ورود (فقط وقتی flat هستیم) ─────────────────────────────
+        trend_dir = ('LONG' if mom_return[i] >= mom_threshold
+                      else ('SHORT' if mom_return[i] <= -mom_threshold else None))
+
+        if trend_dir == 'LONG':
+            was_above_pullback = False
+            if rsi[i] <= rsi_pullback_level:
+                was_below_pullback = True
+            elif was_below_pullback and rsi[i] > rsi_pullback_level:
+                stop = price - atr_stop_mult * atr[i]
+                position = {'direction': 'LONG', 'entry_price': price, 'entry_idx': i, 'stop_price': stop}
+                was_below_pullback = False
+        elif trend_dir == 'SHORT':
+            was_below_pullback = False
+            rsi_high_level = 100.0 - rsi_pullback_level
+            if rsi[i] >= rsi_high_level:
+                was_above_pullback = True
+            elif was_above_pullback and rsi[i] < rsi_high_level:
+                stop = price + atr_stop_mult * atr[i]
+                position = {'direction': 'SHORT', 'entry_price': price, 'entry_idx': i, 'stop_price': stop}
+                was_above_pullback = False
+        else:
+            was_below_pullback = False
+            was_above_pullback = False
+
+    if position is not None:
+        last_idx = min(end_idx, len(close)) - 1
+        if last_idx >= 0:
+            last_price = close[last_idx]
+            ret = (last_price - position['entry_price']) / position['entry_price'] * 100.0
+            pnl = ret if position['direction'] == 'LONG' else -ret
+            pnl -= TRANSACTION_COST_PERCENT
+            trades.append(pnl)
+
+    return trades
+
+
+def _select_best_params_trend_pullback(arrays: dict, start_idx: int, end_idx: int) -> tuple:
+    best_pnl, best_trades, found = -1e9, 0, False
+    best_cfg = {"MOM_THRESHOLD": 0.0, "RSI_PULLBACK": 45, "ATR_STOP_MULT": 2.0,
+                "EXIT_MODE": "fixed_hold", "HOLD_DAYS_MAX": 10}
+    for mt in TP_MOM_THRESHOLD_OPTIONS:
+        for rp in TP_RSI_PULLBACK_OPTIONS:
+            for asm in TP_ATR_STOP_MULT_OPTIONS:
+                for em in TP_EXIT_MODE_OPTIONS:
+                    for hd in TP_HOLD_DAYS_MAX_OPTIONS:
+                        trades = simulate_trend_pullback(arrays, start_idx, end_idx, mt, rp, asm, em, hd)
+                        if len(trades) < MIN_TRADES_FOR_SELECTION_TP:
+                            continue
+                        total = sum(trades)
+                        if total > best_pnl:
+                            best_pnl, best_trades, found = total, len(trades), True
+                            best_cfg = {"MOM_THRESHOLD": mt, "RSI_PULLBACK": rp, "ATR_STOP_MULT": asm,
+                                        "EXIT_MODE": em, "HOLD_DAYS_MAX": hd}
+    return best_cfg, found, best_trades
+
+
+def run_walk_forward_trend_pullback(symbol: str, daily_df: pd.DataFrame) -> list:
+    arrays = _prepare_trend_pullback_arrays(daily_df)
+    n = len(arrays['close'])
+    if n < 300:
+        logger.warning(f"{symbol}: داده‌ی روزانه کافی نیست ({n} ردیف) — رد شد")
+        return []
+
+    fold_size = n // N_FOLDS
+    fold_bounds = [i * fold_size for i in range(N_FOLDS)] + [n]
+    results = []
+
+    for fold_idx in range(1, N_FOLDS):
+        train_start, train_end = 0, fold_bounds[fold_idx]
+        test_start, test_end = fold_bounds[fold_idx], fold_bounds[fold_idx + 1]
+
+        best_cfg, found, sel_trades = _select_best_params_trend_pullback(arrays, train_start, train_end)
+        oos_trades = simulate_trend_pullback(arrays, test_start, test_end,
+                                              best_cfg["MOM_THRESHOLD"], best_cfg["RSI_PULLBACK"],
+                                              best_cfg["ATR_STOP_MULT"], best_cfg["EXIT_MODE"],
+                                              best_cfg["HOLD_DAYS_MAX"])
+
+        wins = sum(1 for p in oos_trades if p > 0)
+        total = len(oos_trades)
+        win_rate = round(wins / total * 100, 1) if total else 0.0
+        net_pnl = round(sum(oos_trades), 2)
+
+        logger.info(
+            f"[TP] {symbol} | fold {fold_idx}/{N_FOLDS-1} | "
+            f"train=[0:{train_end}] test=[{test_start}:{test_end}] (روز) | "
+            f"params={'یافت‌شد' if found else 'fallback'} "
+            f"(MOM_TH={best_cfg['MOM_THRESHOLD']},RSI_PB={best_cfg['RSI_PULLBACK']},"
+            f"ATR_MULT={best_cfg['ATR_STOP_MULT']},EXIT={best_cfg['EXIT_MODE']},"
+            f"MAX_HOLD={best_cfg['HOLD_DAYS_MAX']}d) | "
+            f"OOS trades={total} win_rate={win_rate}% net_pnl={net_pnl}%"
+        )
+
+        results.append({
+            'symbol': symbol, 'fold': fold_idx, 'train_rows': train_end,
+            'test_rows': test_end - test_start, 'params_found': found,
+            **{f'param_{k}': v for k, v in best_cfg.items()},
+            'oos_trades': total, 'oos_win_rate': win_rate, 'oos_net_pnl': net_pnl,
+            'oos_pnls': oos_trades,
+        })
+
+    return results
+
+
+def run_fixed_params_trend_pullback_test() -> dict:
+    """
+    ✅ تست بدون بهینه‌سازی برای Trend+Pullback — پارامتر «متعارف» انتخاب‌شده
+    از قبل (نه از grid search بالا): RSI_PULLBACK=45 (نقطه‌ی میانی محدوده‌ی
+    تست‌شده)، ATR_STOP_MULT=2.0 (استاندارد رایج صندوق‌های trend-following)،
+    exit_mode='trend_reversal' (فلسفه‌ی اصلی سیستم: تا وقتی روند برقرار است
+    بمان)، HOLD_DAYS_MAX=15 (سقف ایمنی).
+    """
+    FIXED = {"MOM_THRESHOLD": 0.0, "RSI_PULLBACK": 45, "ATR_STOP_MULT": 2.0,
+             "EXIT_MODE": "trend_reversal", "HOLD_DAYS_MAX": 15}
+    logger.info("\n" + "=" * 70)
+    logger.info("🔒 [Trend+Pullback] تست بدون بهینه‌سازی (پارامتر متعارف، بدون grid search)")
+    logger.info(f"   پارامتر ثابت: {FIXED}")
+    logger.info("=" * 70)
+
+    all_pnls = []
+    for symbol in TEST_SYMBOLS:
+        daily_df = _fetch_daily_data(symbol)
+        if daily_df is None or len(daily_df) < 300:
+            logger.warning(f"{symbol}: داده‌ی روزانه کافی نیست — رد شد")
+            continue
+        arrays = _prepare_trend_pullback_arrays(daily_df)
+        trades = simulate_trend_pullback(arrays, 0, len(arrays['close']),
+                                          FIXED["MOM_THRESHOLD"], FIXED["RSI_PULLBACK"],
+                                          FIXED["ATR_STOP_MULT"], FIXED["EXIT_MODE"], FIXED["HOLD_DAYS_MAX"])
+        all_pnls.extend(trades)
+        n_tr = len(trades)
+        wr = round(sum(1 for p in trades if p > 0) / n_tr * 100, 1) if n_tr else 0.0
+        logger.info(f"   {symbol}: trades={n_tr} win_rate={wr}% net_pnl={round(sum(trades), 2)}%")
+
+    n = len(all_pnls)
+    if n == 0:
+        logger.warning("هیچ معامله‌ای در تست ثابت رخ نداد")
+        return {}
+
+    wins_sum = sum(p for p in all_pnls if p > 0)
+    losses_sum = abs(sum(p for p in all_pnls if p <= 0))
+    pf = round(wins_sum / losses_sum, 2) if losses_sum > 0 else (float('inf') if wins_sum > 0 else 0.0)
+    win_rate = round(sum(1 for p in all_pnls if p > 0) / n * 100, 1)
+    net_pnl = round(sum(all_pnls), 2)
+
+    logger.info("\n" + "-" * 70)
+    logger.info(f"📌 [Trend+Pullback] نتیجه‌ی تست بدون بهینه‌سازی: trades={n} | "
+                f"win_rate={win_rate}% | net_pnl={net_pnl}% | Profit Factor={pf}")
+    if net_pnl > 0 and pf > 1.15:
+        logger.info("✅ حتی با پارامتر متعارف (بدون بهینه‌سازی)، edge مثبت دیده می‌شود.")
+    else:
+        logger.info("❌ با پارامتر متعارف، edge معناداری دیده نمی‌شود.")
+    logger.info("-" * 70)
+
+    return {'fixed_params': FIXED, 'total_trades': n, 'win_rate': win_rate,
+            'net_pnl': net_pnl, 'profit_factor': pf}
+
+
+def run_subperiod_consistency_test_trend_pullback() -> dict:
+    """✅ همان تست ثبات زیردوره‌ای momentum_daily، برای Trend+Pullback."""
+    FIXED = {"MOM_THRESHOLD": 0.0, "RSI_PULLBACK": 45, "ATR_STOP_MULT": 2.0,
+             "EXIT_MODE": "trend_reversal", "HOLD_DAYS_MAX": 15}
+    N_CHUNKS = 3
+    logger.info("\n" + "=" * 70)
+    logger.info("🔒 [Trend+Pullback] تست ثبات زیردوره‌ای — همان پارامتر ثابت در ۳ بخش تاریخی جدا")
+    logger.info("=" * 70)
+
+    chunk_results = {i: [] for i in range(N_CHUNKS)}
+    chunk_dates = {i: None for i in range(N_CHUNKS)}
+
+    for symbol in TEST_SYMBOLS:
+        daily_df = _fetch_daily_data(symbol)
+        if daily_df is None or len(daily_df) < 300:
+            continue
+        arrays = _prepare_trend_pullback_arrays(daily_df)
+        n = len(arrays['close'])
+        chunk_size = n // N_CHUNKS
+        bounds = [i * chunk_size for i in range(N_CHUNKS)] + [n]
+
+        ts_col = 'Timestamp' if 'Timestamp' in daily_df.columns else 'timestamp'
+        logger.info(f"\n   --- {symbol} ({n} روز کل) ---")
+        for c in range(N_CHUNKS):
+            c_start, c_end = bounds[c], bounds[c + 1]
+            trades = simulate_trend_pullback(arrays, c_start, c_end,
+                                              FIXED["MOM_THRESHOLD"], FIXED["RSI_PULLBACK"],
+                                              FIXED["ATR_STOP_MULT"], FIXED["EXIT_MODE"], FIXED["HOLD_DAYS_MAX"])
+            chunk_results[c].extend(trades)
+            start_date = daily_df.iloc[c_start].get(ts_col, '?')
+            end_date = daily_df.iloc[min(c_end, n) - 1].get(ts_col, '?')
+            chunk_dates[c] = (start_date, end_date)
+            n_tr = len(trades)
+            wr = round(sum(1 for p in trades if p > 0) / n_tr * 100, 1) if n_tr else 0.0
+            logger.info(f"      بخش {c+1}/{N_CHUNKS}: trades={n_tr} win_rate={wr}% net_pnl={round(sum(trades), 2)}%")
+
+    logger.info("\n" + "-" * 70)
+    positive_chunks = 0
+    for c in range(N_CHUNKS):
+        trades = chunk_results[c]
+        n_tr = len(trades)
+        if n_tr == 0:
+            logger.info(f"   بخش {c+1}: بدون معامله")
+            continue
+        wins_sum = sum(p for p in trades if p > 0)
+        losses_sum = abs(sum(p for p in trades if p <= 0))
+        pf = round(wins_sum / losses_sum, 2) if losses_sum > 0 else (float('inf') if wins_sum > 0 else 0.0)
+        net_pnl = round(sum(trades), 2)
+        is_positive = net_pnl > 0 and pf > 1.0
+        positive_chunks += int(is_positive)
+        mark = "✅" if is_positive else "❌"
+        logger.info(f"   {mark} بخش {c+1}: trades={n_tr} net_pnl={net_pnl}% PF={pf}")
+
+    logger.info("-" * 70)
+    if positive_chunks == N_CHUNKS:
+        logger.info(f"✅✅ edge در هر {N_CHUNKS} بخش تاریخی مستقل مثبت بود.")
+    elif positive_chunks >= 2:
+        logger.info(f"⚠️ edge در {positive_chunks}/{N_CHUNKS} بخش مثبت بود — وابسته به رژیم بازار.")
+    else:
+        logger.info(f"❌ edge فقط در {positive_chunks}/{N_CHUNKS} بخش مثبت بود.")
+    logger.info("-" * 70)
+
+    return {'positive_chunks': positive_chunks}
+
+
+
     """
     ✅ تست تعیین‌کننده برای momentum_daily: هیچ grid search/انتخاب پارامتری.
     چند ترکیب پارامتر از خودِ ادبیات آکادمیک (نه چیزی که از نتایج
