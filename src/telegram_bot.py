@@ -24,8 +24,13 @@ def send_telegram_message(text, max_retries: int = 3):
     token   = os.environ.get("TELEGRAM_BOT_TOKEN") or getattr(config, 'TELEGRAM_BOT_TOKEN', None)
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")   or getattr(config, 'TELEGRAM_CHAT_ID',   None)
     if not token or not chat_id:
-        logging.warning("توکن یا Chat ID تلگرام تنظیم نشده است.")
+        logging.error(
+            "❌ توکن یا Chat ID تلگرام تنظیم نشده است. "
+            f"TOKEN موجود={bool(token)} | CHAT_ID موجود={bool(chat_id)}"
+        )
         return False
+
+    logging.info(f"📤 در حال ارسال پیام تلگرام (chat_id={chat_id[:4]}***، طول متن={len(text)})...")
 
     url     = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
@@ -38,9 +43,18 @@ def send_telegram_message(text, max_retries: int = 3):
                 proxies={"https": proxy} if proxy else None,
             )
             response.raise_for_status()
+            logging.info(f"✅ پیام تلگرام با موفقیت ارسال شد (status={response.status_code}).")
             return True
         except Exception as e:
-            logging.warning(f"تلاش {attempt}/{max_retries} ارسال تلگرام ناموفق: {e}")
+            # ✅ جزئیات دقیق‌تر خطا — مخصوصاً بدنه‌ی پاسخ تلگرام (اگر خطای HTTP باشد)
+            resp_detail = ""
+            resp = getattr(e, 'response', None)
+            if resp is not None:
+                try:
+                    resp_detail = f" | پاسخ سرور: {resp.text[:300]}"
+                except Exception:
+                    pass
+            logging.warning(f"⚠️ تلاش {attempt}/{max_retries} ارسال تلگرام ناموفق: {e}{resp_detail}")
             if attempt < max_retries:
                 time.sleep(2 * attempt)
 
