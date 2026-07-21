@@ -21,6 +21,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas requests psycopg2-binary
 
+      - name: 🧪 Test Telegram Directly (diagnostic)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python -c "
+          from src import telegram_bot
+          result = telegram_bot.send_telegram_message('🧪 تست مستقیم Daily Momentum Bot — اگر این پیام رسید، مسیر تلگرام از این ورک‌فلو کاملاً سالم است.')
+          print('RESULT:', result)
+          if not result:
+              exit(1)
+          "
+
       - name: Run Daily Momentum Bot
         env:
           PYTHONPATH: ${{ github.workspace }}
