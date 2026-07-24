@@ -29,6 +29,57 @@ LOOKBACK_DAYS = 21
 HOLD_DAYS = 5
 MIN_THRESHOLD_PCT = 0.0
 
+# ✅ NEW: شبیه‌سازی معامله‌ی فرضی برای محاسبه‌ی سود/ضرر واقعی‌تر
+POSITION_SIZE_USD = 100.0
+LEVERAGE = 5.0
+
+# ⚠️ نکته‌ی حیاتی: این استراتژی عمداً بدون Stop-Loss طراحی و تست شده
+# (نگه‌داری ثابت ۵ روزه). ولی با لوریج ۵، یک حرکت ۱/LEVERAGE=۲۰٪ خلاف
+# جهت پوزیشن، کل مارجین را از بین می‌برد (لیکویید شدن) — این می‌تواند
+# زودتر از تاریخ خروج برنامه‌ریزی‌شده اتفاق بیفتد. به همین دلیل
+# momentum_bot.py باید هر روز (نه فقط روز خروج) ریسک لیکویید شدن را
+# چک کند، وگرنه PnL محاسبه‌شده با واقعیت صرافی هم‌خوانی نخواهد داشت.
+# این مقدار یک تقریب ساده است (نادیده‌گرفتن کارمزد فاندینگ/margin
+# maintenance دقیق صرافی)، نه محاسبه‌ی دقیق صرافی‌محور.
+LIQUIDATION_MOVE_PCT = 100.0 / LEVERAGE  # = 20.0% برای لوریج ۵
+
+
+def compute_leveraged_pnl_usd(price_pnl_pct: float, position_size_usd: float = POSITION_SIZE_USD,
+                               leverage: float = LEVERAGE) -> float:
+    """
+    تبدیل بازده درصدی قیمت (price_pnl_pct، مثبت یا منفی) به سود/ضرر دلاری
+    روی یک پوزیشن فرضی با مارجین position_size_usd و لوریج leverage.
+    مثال: قیمت ۳٪ حرکت کرد، مارجین=۱۰۰$، لوریج=۵ → ۱۰۰*۵*۰.۰۳ = ۱۵$ سود.
+    """
+    return round(position_size_usd * leverage * (price_pnl_pct / 100.0), 2)
+
+
+def get_liquidation_price(entry_price: float, direction: str, leverage: float = LEVERAGE) -> float:
+    """قیمتی که در آن (تقریباً) کل مارجین از بین می‌رود — ساده‌سازی‌شده،
+    بدون احتساب کارمزد/margin maintenance دقیق صرافی."""
+    move_fraction = 1.0 / leverage
+    if direction == 'LONG':
+        return entry_price * (1.0 - move_fraction)
+    else:
+        return entry_price * (1.0 + move_fraction)
+
+
+def get_current_day_ohlc(symbol: str) -> dict | None:
+    """High/Low/Close آخرین کندل روزانه‌ی بسته‌شده — برای چک روزانه‌ی
+    ریسک لیکویید شدن (نه فقط قیمت لحظه‌ای بسته‌شدن)."""
+    df = _fetch_daily_closes(symbol, limit=3)
+    if df is None or df.empty:
+        return None
+    row = df.iloc[-1]
+    high_col = 'High' if 'High' in df.columns else 'high'
+    low_col = 'Low' if 'Low' in df.columns else 'low'
+    close_col = 'Close' if 'Close' in df.columns else 'close'
+    return {
+        'high': float(row[high_col]),
+        'low': float(row[low_col]),
+        'close': float(row[close_col]),
+    }
+
 
 def _fetch_daily_closes(symbol: str, limit: int = 60):
     """دریافت قیمت‌های بسته‌شدن روزانه (کافی برای LOOKBACK=21 + حاشیه‌ی اطمینان)."""
@@ -70,6 +121,7 @@ def generate_momentum_signal(symbol: str) -> dict | None:
         return None
 
     today = date.today()
+    liquidation_price = get_liquidation_price(close_now, direction, LEVERAGE)
     return {
         'pair': symbol,
         'direction': direction,
@@ -79,6 +131,9 @@ def generate_momentum_signal(symbol: str) -> dict | None:
         'lookback_days': LOOKBACK_DAYS,
         'hold_days': HOLD_DAYS,
         'momentum_return_pct': round(momentum_return_pct, 4),
+        'position_size_usd': POSITION_SIZE_USD,
+        'leverage': LEVERAGE,
+        'liquidation_price': round(liquidation_price, 6),
     }
 
 
