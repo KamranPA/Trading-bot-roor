@@ -469,13 +469,27 @@ CREATE INDEX IF NOT EXISTS idx_momentum_pair   ON momentum_positions (pair);
 CREATE INDEX IF NOT EXISTS idx_momentum_status ON momentum_positions (status);
 """
 
+# ✅ NEW: ستون‌های معامله‌ی فرضی ($100 مارجین، لوریج ۵) — به‌صورت migration
+# ایمن اضافه می‌شوند (جدول موجود را پاک نمی‌کنند، فقط ستون کم دارد اضافه می‌شود).
+_MOMENTUM_MIGRATION_SQL = """
+ALTER TABLE momentum_positions ADD COLUMN IF NOT EXISTS position_size_usd NUMERIC(10, 2) DEFAULT 100;
+ALTER TABLE momentum_positions ADD COLUMN IF NOT EXISTS leverage           NUMERIC(5, 2)  DEFAULT 5;
+ALTER TABLE momentum_positions ADD COLUMN IF NOT EXISTS liquidation_price  NUMERIC(20, 8);
+ALTER TABLE momentum_positions ADD COLUMN IF NOT EXISTS pnl_usd            NUMERIC(12, 2);
+ALTER TABLE momentum_positions ADD COLUMN IF NOT EXISTS liquidated         BOOLEAN DEFAULT FALSE;
+"""
+
 
 def init_momentum_table() -> None:
     try:
         with _db() as conn:
             with conn.cursor() as cur:
                 cur.execute(_MOMENTUM_CREATE_SQL)
-        logger.info("✅ init_momentum_table: جدول momentum_positions آماده است.")
+                for stmt in _MOMENTUM_MIGRATION_SQL.strip().split(';'):
+                    stmt = stmt.strip()
+                    if stmt:
+                        cur.execute(stmt)
+        logger.info("✅ init_momentum_table: جدول momentum_positions + ستون‌های لوریج/PnL آماده است.")
     except Exception as e:
         logger.critical("init_momentum_table ناموفق: %s", e)
         raise
@@ -485,7 +499,8 @@ def get_open_momentum_position(pair: str) -> dict | None:
     """آیا همین الان پوزیشن باز momentum برای این ارز داریم؟"""
     sql = """
         SELECT id, pair, direction, entry_price, entry_date, planned_exit_date,
-               lookback_days, hold_days, momentum_return_pct
+               lookback_days, hold_days, momentum_return_pct,
+               position_size_usd, leverage, liquidation_price
         FROM momentum_positions
         WHERE pair = %s AND status = 'OPEN'
         ORDER BY entry_date DESC LIMIT 1
@@ -504,7 +519,8 @@ def get_open_momentum_position(pair: str) -> dict | None:
 def get_all_open_momentum_positions() -> list[dict]:
     sql = """
         SELECT id, pair, direction, entry_price, entry_date, planned_exit_date,
-               lookback_days, hold_days, momentum_return_pct
+               lookback_days, hold_days, momentum_return_pct,
+               position_size_usd, leverage, liquidation_price
         FROM momentum_positions WHERE status = 'OPEN' ORDER BY entry_date ASC
     """
     try:
@@ -520,25 +536,30 @@ def get_all_open_momentum_positions() -> list[dict]:
 
 def save_momentum_position(pair: str, direction: str, entry_price: float,
                             entry_date, planned_exit_date, lookback_days: int,
-                            hold_days: int, momentum_return_pct: float) -> int | None:
+                            hold_days: int, momentum_return_pct: float,
+                            position_size_usd: float = 100.0, leverage: float = 5.0,
+                            liquidation_price: float | None = None) -> int | None:
     if direction not in ('LONG', 'SHORT'):
         logger.warning("direction نامعتبر '%s' برای %s — ذخیره لغو شد", direction, pair)
         return None
     sql = """
         INSERT INTO momentum_positions
             (pair, direction, entry_price, entry_date, planned_exit_date,
-             lookback_days, hold_days, momentum_return_pct)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+             lookback_days, hold_days, momentum_return_pct,
+             position_size_usd, leverage, liquidation_price)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
     """
     try:
         with _db() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, (pair, direction, entry_price, entry_date, planned_exit_date,
-                                  lookback_days, hold_days, momentum_return_pct))
+                                  lookback_days, hold_days, momentum_return_pct,
+                                  position_size_usd, leverage, liquidation_price))
                 row = cur.fetchone()
                 new_id = row[0] if row else None
-        logger.info("✅ پوزیشن momentum ذخیره شد | pair=%s direction=%s id=%s", pair, direction, new_id)
+        logger.info("✅ پوزیشن momentum ذخیره شد | pair=%s direction=%s id=%s | "
+                    "مارجین=$%s لوریج=%sx", pair, direction, new_id, position_size_usd, leverage)
         return new_id
     except Exception as e:
         logger.error("save_momentum_position خطا برای %s: %s", pair, e)
@@ -546,16 +567,19 @@ def save_momentum_position(pair: str, direction: str, entry_price: float,
 
 
 def close_momentum_position(position_id: int, close_price: float, close_date,
-                             pnl_percent: float) -> bool:
+                             pnl_percent: float, pnl_usd: float | None = None,
+                             liquidated: bool = False) -> bool:
     sql = """
         UPDATE momentum_positions
-        SET status = 'CLOSED', close_price = %s, close_date = %s, pnl_percent = %s
+        SET status = 'CLOSED', close_price = %s, close_date = %s, pnl_percent = %s,
+            pnl_usd = %s, liquidated = %s
         WHERE id = %s AND status = 'OPEN'
     """
     try:
         with _db() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (close_price, close_date, round(pnl_percent, 4), position_id))
+                cur.execute(sql, (close_price, close_date, round(pnl_percent, 4),
+                                  pnl_usd, liquidated, position_id))
                 updated = cur.rowcount
         if updated == 0:
             logger.warning("close_momentum_position: id=%s یافت نشد یا قبلاً بسته شده", position_id)
@@ -572,8 +596,10 @@ def get_momentum_performance_summary() -> dict:
             COUNT(*) FILTER (WHERE status = 'OPEN')                     AS open_count,
             COUNT(*) FILTER (WHERE status = 'CLOSED')                   AS closed_count,
             COUNT(*) FILTER (WHERE status='CLOSED' AND pnl_percent > 0) AS win_count,
+            COUNT(*) FILTER (WHERE liquidated IS TRUE)                  AS liquidated_count,
             ROUND(AVG(pnl_percent) FILTER (WHERE status='CLOSED'), 2)   AS avg_pnl,
-            ROUND(SUM(pnl_percent) FILTER (WHERE status='CLOSED'), 2)   AS total_pnl
+            ROUND(SUM(pnl_percent) FILTER (WHERE status='CLOSED'), 2)   AS total_pnl,
+            ROUND(SUM(pnl_usd) FILTER (WHERE status='CLOSED'), 2)       AS total_pnl_usd
         FROM momentum_positions
     """
     try:
