@@ -109,6 +109,10 @@ def format_and_send_momentum_signal(signal: dict):
     icon = "🟢 #LONG" if signal.get('direction') == "LONG" else "🔴 #SHORT"
     pair = str(signal.get('pair', 'UNKNOWN')).replace('_', '/')
     mom_ret = signal.get('momentum_return_pct', 0)
+    margin = signal.get('position_size_usd', 100)
+    leverage = signal.get('leverage', 5)
+    notional = margin * leverage
+    liq_price = signal.get('liquidation_price')
 
     message = (
         f"<b>{icon} سیگنال Momentum روزانه</b>\n"
@@ -120,9 +124,14 @@ def format_and_send_momentum_signal(signal: dict):
         f"⏳ <b>تاریخ خروج برنامه‌ریزی‌شده:</b> <code>{signal.get('planned_exit_date')}</code> "
         f"(~{signal.get('hold_days')} روز)\n"
         f"━━━━━━━━━━━━━━━\n"
+        f"💰 <b>معامله‌ی فرضی:</b> <code>${margin:.0f}</code> مارجین × <code>{leverage:.0f}x</code> "
+        f"لوریج = <code>${notional:.0f}</code> نوسانال\n"
+        f"🔥 <b>قیمت تقریبی لیکویید شدن:</b> <code>{liq_price}</code>\n"
+        f"━━━━━━━━━━━━━━━\n"
         f"⚠️ <i>این استراتژی بدون Stop-Loss طراحی شده — نگه‌داری ثابت "
         f"{signal.get('hold_days')} روزه، دقیقاً طبق نسخه‌ی تست‌شده. "
-        f"ریسک این دوره را خودت مدیریت کن (مثلاً سایز پوزیشن کوچک‌تر).</i>\n"
+        f"با لوریج {leverage:.0f}x، یک حرکت ~{100/leverage:.0f}٪ خلاف جهت یعنی از دست دادن "
+        f"کل مارجین (لیکویید شدن) — این ریسک واقعی است، خودت مدیریتش کن.</i>\n"
         f"🔬 <i>مبتنی بر شواهد walk-forward؛ edge وابسته به رژیم بازار است "
         f"(در بازار رنج ممکن است ضرر بدهد).</i>"
     )
@@ -131,16 +140,28 @@ def format_and_send_momentum_signal(signal: dict):
 
 def send_momentum_exit_notice(pair: str, direction: str, entry_price: float,
                                close_price: float, pnl_percent: float,
-                               entry_date, close_date):
-    icon = "✅" if pnl_percent > 0 else "🔻"
+                               entry_date, close_date, pnl_usd: float = None,
+                               liquidated: bool = False):
+    if liquidated:
+        icon = "🔴💥"
+        title = "پوزیشن Momentum لیکویید شد"
+    else:
+        icon = "✅" if pnl_percent > 0 else "🔻"
+        title = "بسته شدن پوزیشن Momentum"
+
+    pnl_usd_line = f"\n💵 <b>PnL دلاری (فرضی):</b> <code>${pnl_usd:+.2f}</code>" if pnl_usd is not None else ""
+    liq_line = "\n⚠️ <i>این پوزیشن قبل از تاریخ خروج برنامه‌ریزی‌شده، به‌خاطر لوریج لیکویید شد.</i>" if liquidated else ""
+
     message = (
-        f"<b>{icon} بسته شدن پوزیشن Momentum</b>\n"
+        f"<b>{icon} {title}</b>\n"
         f"━━━━━━━━━━━━━━━\n"
         f"🪙 <b>جفت ارز:</b> <code>{str(pair).replace('_', '/')}</code>\n"
         f"↕️ <b>جهت:</b> <code>{direction}</code>\n"
         f"📅 <b>ورود:</b> <code>{entry_date}</code> @ <code>{entry_price}</code>\n"
         f"📅 <b>خروج:</b> <code>{close_date}</code> @ <code>{close_price}</code>\n"
-        f"📊 <b>PnL:</b> <code>{pnl_percent:+.2f}%</code>\n"
+        f"📊 <b>PnL قیمت:</b> <code>{pnl_percent:+.2f}%</code>"
+        f"{pnl_usd_line}"
+        f"{liq_line}"
     )
     send_telegram_message(message)
 
