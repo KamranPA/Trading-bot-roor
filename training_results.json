@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-07-05T19:24:20.190588",
+  "timestamp": "2026-08-01T02:13:11.556417",
   "model_type": "LightGBM (pooled, shared across symbols)",
   "features": [
     "feat_adx",
@@ -20,17 +20,17 @@
       "brain_key": "BTC/USDT",
       "model_type": "pooled",
       "pooled_best_iteration": 1,
-      "test_auc": 0.5732517771532485,
-      "test_logloss": 0.6161324108512423,
-      "samples": 2519,
-      "tp_percent": 36.4,
-      "ai_threshold": 33.79,
+      "test_auc": 0.4606359649122807,
+      "test_logloss": 0.5759730311810688,
+      "samples": 2550,
+      "tp_percent": 35.4,
+      "ai_threshold": 33.17,
       "score_stats": {
-        "min": 32.92,
-        "p25": 33.52,
-        "median": 33.75,
-        "p75": 33.79,
-        "max": 33.84
+        "min": 31.59,
+        "p25": 32.88,
+        "median": 33.17,
+        "p75": 33.17,
+        "max": 33.61
       },
       "target_tp_ratio": 1.5,
       "target_sl_ratio": 1.2
@@ -41,17 +41,17 @@
       "brain_key": "ETH/USDT",
       "model_type": "pooled",
       "pooled_best_iteration": 1,
-      "test_auc": 0.5507193589510108,
-      "test_logloss": 0.601129245572875,
-      "samples": 2682,
-      "tp_percent": 26.5,
-      "ai_threshold": 33.26,
+      "test_auc": 0.5592758949230978,
+      "test_logloss": 0.55995302986638,
+      "samples": 2723,
+      "tp_percent": 25.5,
+      "ai_threshold": 32.93,
       "score_stats": {
-        "min": 32.57,
-        "p25": 33.17,
-        "median": 33.26,
-        "p75": 33.52,
-        "max": 34.18
+        "min": 31.59,
+        "p25": 32.62,
+        "median": 32.89,
+        "p75": 32.93,
+        "max": 33.24
       },
       "target_tp_ratio": 2.5,
       "target_sl_ratio": 0.8
@@ -62,17 +62,17 @@
       "brain_key": "SOL/USDT",
       "model_type": "pooled",
       "pooled_best_iteration": 1,
-      "test_auc": 0.5117845117845118,
-      "test_logloss": 0.5766667762992259,
-      "samples": 2384,
-      "tp_percent": 29.9,
-      "ai_threshold": 33.69,
+      "test_auc": 0.47520487897846386,
+      "test_logloss": 0.5929095807573557,
+      "samples": 2423,
+      "tp_percent": 29.2,
+      "ai_threshold": 32.93,
       "score_stats": {
-        "min": 32.57,
-        "p25": 33.46,
-        "median": 33.68,
-        "p75": 33.79,
-        "max": 34.27
+        "min": 32.0,
+        "p25": 32.82,
+        "median": 32.93,
+        "p75": 33.06,
+        "max": 33.37
       },
       "target_tp_ratio": 2.0,
       "target_sl_ratio": 1.0
@@ -83,17 +83,17 @@
       "brain_key": "DOT/USDT",
       "model_type": "pooled",
       "pooled_best_iteration": 1,
-      "test_auc": 0.4005973881633787,
-      "test_logloss": 0.632112480558188,
-      "samples": 2411,
-      "tp_percent": 35.9,
-      "ai_threshold": 33.69,
+      "test_auc": 0.4689004503804939,
+      "test_logloss": 0.5813252212553278,
+      "samples": 2451,
+      "tp_percent": 34.4,
+      "ai_threshold": 33.06,
       "score_stats": {
-        "min": 32.93,
-        "p25": 33.5,
-        "median": 33.69,
-        "p75": 33.69,
-        "max": 34.27
+        "min": 32.14,
+        "p25": 32.89,
+        "median": 32.93,
+        "p75": 33.06,
+        "max": 33.24
       },
       "target_tp_ratio": 2.0,
       "target_sl_ratio": 1.0
@@ -104,17 +104,17 @@
       "brain_key": "LINK/USDT",
       "model_type": "pooled",
       "pooled_best_iteration": 1,
-      "test_auc": 0.4915983606557377,
-      "test_logloss": 0.6341433787229053,
-      "samples": 2425,
-      "tp_percent": 36.5,
-      "ai_threshold": 33.69,
+      "test_auc": 0.4768560415619239,
+      "test_logloss": 0.6232446740020391,
+      "samples": 2477,
+      "tp_percent": 35.1,
+      "ai_threshold": 33.06,
       "score_stats": {
-        "min": 32.93,
-        "p25": 33.5,
-        "median": 33.69,
-        "p75": 33.8,
-        "max": 34.27
+        "min": 32.14,
+        "p25": 32.89,
+        "median": 32.93,
+        "p75": 33.17,
+        "max": 33.24
       },
       "target_tp_ratio": 2.0,
       "target_sl_ratio": 1.0
@@ -125,17 +125,17 @@
       "brain_key": "AVAX/USDT",
       "model_type": "pooled",
       "pooled_best_iteration": 1,
-      "test_auc": 0.4431715745192308,
-      "test_logloss": 0.6066868566744351,
-      "samples": 2400,
-      "tp_percent": 35.3,
-      "ai_threshold": 33.69,
+      "test_auc": 0.4600593968930856,
+      "test_logloss": 0.5901240254673151,
+      "samples": 2437,
+      "tp_percent": 34.8,
+      "ai_threshold": 32.93,
       "score_stats": {
-        "min": 32.93,
-        "p25": 33.5,
-        "median": 33.69,
-        "p75": 33.8,
-        "max": 34.27
+        "min": 32.14,
+        "p25": 32.89,
+        "median": 32.93,
+        "p75": 33.06,
+        "max": 33.24
       },
       "target_tp_ratio": 2.0,
       "target_sl_ratio": 1.0
@@ -146,17 +146,17 @@
       "brain_key": "XRP/USDT",
       "model_type": "pooled",
       "pooled_best_iteration": 1,
-      "test_auc": 0.4856194690265487,
-      "test_logloss": 0.6327987729844311,
-      "samples": 2296,
-      "tp_percent": 35.6,
-      "ai_threshold": 33.8,
+      "test_auc": 0.5274531024531025,
+      "test_logloss": 0.642228130157691,
+      "samples": 2338,
+      "tp_percent": 35.2,
+      "ai_threshold": 33.17,
       "score_stats": {
-        "min": 32.93,
-        "p25": 33.69,
-        "median": 33.79,
-        "p75": 33.8,
-        "max": 34.27
+        "min": 32.14,
+        "p25": 32.89,
+        "median": 33.06,
+        "p75": 33.17,
+        "max": 33.24
       },
       "target_tp_ratio": 2.0,
       "target_sl_ratio": 1.0
@@ -167,17 +167,17 @@
       "brain_key": "LTC/USDT",
       "model_type": "pooled",
       "pooled_best_iteration": 1,
-      "test_auc": 0.4894181818181818,
-      "test_logloss": 0.5915047952370956,
-      "samples": 2496,
-      "tp_percent": 26.0,
-      "ai_threshold": 33.79,
+      "test_auc": 0.4755755395683453,
+      "test_logloss": 0.5876941623442882,
+      "samples": 2517,
+      "tp_percent": 25.4,
+      "ai_threshold": 33.06,
       "score_stats": {
-        "min": 32.57,
-        "p25": 33.52,
-        "median": 33.79,
-        "p75": 33.8,
-        "max": 34.27
+        "min": 32.0,
+        "p25": 32.82,
+        "median": 32.93,
+        "p75": 33.17,
+        "max": 33.24
       },
       "target_tp_ratio": 2.0,
       "target_sl_ratio": 1.0
@@ -188,17 +188,17 @@
       "brain_key": "BCH/USDT",
       "model_type": "pooled",
       "pooled_best_iteration": 1,
-      "test_auc": 0.5066049953746531,
-      "test_logloss": 0.6334763828721276,
-      "samples": 2331,
-      "tp_percent": 27.8,
-      "ai_threshold": 33.69,
+      "test_auc": 0.5542521994134897,
+      "test_logloss": 0.6474031659392583,
+      "samples": 2364,
+      "tp_percent": 27.2,
+      "ai_threshold": 32.92,
       "score_stats": {
-        "min": 32.57,
-        "p25": 33.24,
-        "median": 33.52,
-        "p75": 33.79,
-        "max": 34.27
+        "min": 31.59,
+        "p25": 32.62,
+        "median": 32.89,
+        "p75": 33.11,
+        "max": 33.24
       },
       "target_tp_ratio": 2.0,
       "target_sl_ratio": 1.0
@@ -209,47 +209,47 @@
       "brain_key": "ATOM/USDT",
       "model_type": "pooled",
       "pooled_best_iteration": 1,
-      "test_auc": 0.44772600359868464,
-      "test_logloss": 0.6720695311088133,
-      "samples": 2459,
-      "tp_percent": 36.4,
-      "ai_threshold": 33.79,
+      "test_auc": 0.3752972651605232,
+      "test_logloss": 0.673778763552314,
+      "samples": 2509,
+      "tp_percent": 35.6,
+      "ai_threshold": 33.06,
       "score_stats": {
-        "min": 32.93,
-        "p25": 33.5,
-        "median": 33.69,
-        "p75": 33.8,
-        "max": 34.27
+        "min": 32.14,
+        "p25": 32.89,
+        "median": 32.93,
+        "p75": 33.06,
+        "max": 33.24
       },
       "target_tp_ratio": 2.0,
       "target_sl_ratio": 1.0
     }
   },
   "pooled": {
-    "train_size": 17078,
-    "valid_size": 3661,
-    "test_size": 3664,
+    "train_size": 17347,
+    "valid_size": 3719,
+    "test_size": 3723,
     "best_iteration": 1,
-    "train_score": 0.6701018854666823,
-    "valid_score": 0.6779568423927889,
-    "test_score": 0.6918668122270742,
-    "overall_test_auc": 0.4822839852341794,
-    "overall_test_logloss": 0.619405099694513,
+    "train_score": 0.6764858476970081,
+    "valid_score": 0.6864748588330196,
+    "test_score": 0.7085683588503895,
+    "overall_test_auc": 0.49610792983093605,
+    "overall_test_logloss": 0.6066642024830196,
     "top_features": [
       [
         "feat_ema_deviation",
-        "9"
+        "8"
       ],
       [
         "feat_atr_percent",
+        "6"
+      ],
+      [
+        "feat_rsi",
         "5"
       ],
       [
         "feat_adx",
-        "4"
-      ],
-      [
-        "feat_rsi",
         "4"
       ],
       [
